@@ -400,5 +400,5 @@ export function renderEvidenceMd(e) {
   for (const k of e.knownGaps.length ? e.knownGaps : ['None recorded.']) L.push(`- ${k}`);
   L.push('', '## Gate log tails', '');
   for (const g of [...e.gates, ...(e.informational ?? [])].filter((x) => x.tail)) L.push(`<details><summary>${cell(g.name)} (last 40 lines)</summary>`, '', fence(g.tail), '', '</details>', '');
-  return L.join('\n') + '\n';
+  return L.join('\n').replace(/\n+$/, '') + '\n'; // no blank line at EOF (git diff --check)
 }

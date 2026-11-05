@@ -3,80 +3,8 @@ Test edits after RED (reviewed, no assertion weakened): (1) the log-only row of 
 because a log-only rule does not act and the policy default is recorded; (2) table rows typed for tsc (no behavior change).
 
 Command: npx vitest run src/platform/policy --cache=false --reporter=verbose
-  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > allows a clean request and records the default
-  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched block rule yields block (hard control)
-  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched redact rule yields redact (hard control)
-  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched require_approval rule yields require_approval (hard control)
-  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched allow rule yields allow (log_only control)
-  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched log_only rule yields allow (log_only control)
-  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > the most severe matched rule wins over an allow exception; a default bl...
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"destination","providers":["provider-a"],"match":"in"} with {} holds: true
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"destination","providers":["provider-a"],"match":"not_in"} with {} holds: false
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"destination","providers":["provider-a"],"match":"not_in"} with {"destination":"provider-a-batch"} ho...
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"model","models":["model-x"],"match":"in"} with {} holds: true
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"model","models":["model-x"],"match":"not_in"} with {} holds: false
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"model","models":["model-x"],"match":"not_in"} with {"modelServed":"model-y"} holds: true
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["shell"],"match":"in"} with {"tools":["search","shell"]} holds: true
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["shell"],"match":"in"} with {} holds: false
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["search"],"match":"not_in"} with {"tools":["search","shell"]} holds: true
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["search"],"match":"not_in"} with {"tools":["search"]} holds: false
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"input_bytes_over","limit":512} with {} holds: false
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"input_bytes_over","limit":511} with {} holds: true
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"signal","signal":"prompt-injection","minConfidence":"medium"} with {"signals":[{"signal":"prompt-inj...
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"signal","signal":"prompt-injection","minConfidence":"medium"} with {"signals":[{"signal":"prompt-inj...
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"dlp_category","categories":["payment_card"],"minConfidence":"medium"} with {"findings":[{"category":...
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"dlp_category","categories":["payment_card"],"minConfidence":"high"} with {"findings":[{"category":"p...
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"dlp_category","categories":["us_ssn"],"minConfidence":"low"} with {"findings":[{"category":"payment_...
-  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"always"} with {} holds: true
-  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for another workload does not apply
-  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for no workload does not apply
-  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for another phase does not apply
-  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for another provider scope does not apply
-  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for not yet effective does not apply
-  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for no longer effective does not apply
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > no grant
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > allow and deny
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > deny before allow
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > another provider
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > an expired grant
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a wildcard grant
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a tenant grant
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a team grant
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a user grant
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a user grant for a service
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a service grant
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a served-model fallback
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a denied served model
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > an entitled fallback
-  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > re-checks the served model before release, and records a...
-  ✓ src/platform/policy/evaluate.test.ts > monitor vs enforce > a monitor decision records what enforcement would do and never changes the verdict
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > required DLP unavailable denies a policy with a DLP condition; entitlements unavailab...
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > timeout: enforcing policies deny; a monitor policy configured to continue does so wit...
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > engine_error: enforcing policies deny; a monitor policy configured to continue does s...
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a policy that overran its own timeout (measured with the injected clock) is a timeout...
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > an engine error inside evaluation (a throwing clock) fails closed
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a bundle that is expired denies every decision
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a bundle that is not yet valid denies every decision
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a bundle that is of another tenant denies every decision
-  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > an unreadable bundle is one enforced, denied decision under a placeholder id
-  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is used and recorded on every decision
-  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is refused when not approved
-  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is refused when itself expired
-  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is refused when of another tenant
-  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is never used for a valid bundle
-  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses a content key: block, no decision, no echoed value
-  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses a bad clock: block, no decision, no echoed value
-  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses an email as actor: block, no decision, no echoed value
-  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses a bad finding: block, no decision, no echoed value
-  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > the generator only produces contract-valid bundles (so t...
-  ✓ src/platform/policy/boundary.test.ts > policy library boundary > has exactly these modules, importing only each other and the contracts
-  ✓ src/platform/policy/boundary.test.ts > policy library boundary > reads no clock, randomness, environment, network or file, and runs no dynamic code
-  ✓ src/platform/policy/boundary.test.ts > policy library boundary > the worker typecheck covers the library, and the fixtures are labeled SYNTHETIC
-  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > is deterministic: the same input gives an identical resu...
-  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > every decision passes validatePolicyDecision; the verdic...
-  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > deny wins: a matching deny entitlement always blocks access
-  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > never allows on error in enforce mode: every failed hard...
-  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > random junk as input never throws and never allows
+  (round 0 listing condensed in round 1: 74 tests passed: evaluate.test.ts 65, properties.test.ts 6, boundary.test.ts 3;
+   the full list is reproducible with the command above at commit 54964d7)
  Test Files  3 passed (3)
       Tests  74 passed (74)
 
@@ -112,3 +40,85 @@ String.replace('$', ...), which CodeQL reads as incomplete escaping. The rewrite
 problem path), now written as a prefix slice. Added guard test (passes before and after; behavior unchanged):
   ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > names a refused context key under $.context (each problem path is re-rooted once)
   Tests  75 passed (75)
+
+REVIEW ROUND 1 (challenger review of #183 at 13009d6). Same tests as the round-1 RED section of red.txt; fixes added.
+Command: npx vitest run src/platform/policy --cache=false --reporter=verbose (review.test.ts lines below)
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x@20261001
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x-2026-10-01
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks MODEL-X
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks Model-X.v2
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x:ft
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > re-checks a dated served id against the family de...
+  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > does not deny another model that only shares a pr...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (duplicate tools) is recorded as a denied engine_...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (257 teams) is recorded as a denied engine_error ...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (1001 findings) is recorded as a denied engine_er...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a 129-character requestRef) is recorded as a den...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a symbol key) is recorded as a denied engine_err...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a throwing getter) is recorded as a denied engin...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a proxy) is recorded as a denied engine_error wi...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (null) is recorded as a denied engine_error with ...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a missing model is MODEL_UNKNOWN: blocked in enforce, recorded and ...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > an unreadable bundle and a failed evaluation follow the access mode...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a clock that throws is recorded under the epoch with CLOCK_INVALID,...
+  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > the access mode is bound to the D7 flags by one helper; a mismatch ...
+  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > only the highest version of an entitlement or policy id is evaluated
+  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > kept contract behavior: a log-only DLP policy with DLP unavailable denies in enforce mode (...
+  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > a team grant matches only the listed team (M12)
+  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > a dropped (contract-invalid) decision fails the evaluation closed (M20)
+  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > a compiled bundle gives the same result as the raw one; a look-alike object is not trusted ...
+  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > reads each input getter once (a strict copy is validated and evaluated)
+  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > hostile inputs never throw, never allow in enforce mode, and always record a decision
+  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > P9: at the contract maxima a compiled bundle evaluates within a bounded time (recorded in g...
+  Test Files  4 passed (4)
+  Tests  104 passed (104)
+P9 at the contract maxima (256 policies x 512 rules, 4096 entitlements x 256 models, 1000 findings, 256 teams), 3 runs, load ~5:
+  compileBundle 1072-1209 ms (once per bundle); evaluate 821-921 ms (257 decisions); raw (uncompiled) bundle 1.7-2.5 s.
+
+Mutation check, round 1 (one at a time, npx vitest run src/platform/policy): reviewer set R-M1..R-M25 adapted to the new code, N1..N18 new.
+  KILLED   R-M1 deny-wins reversed (allow beats deny)
+  KILLED   R-M2 wildcard deny ignored
+  KILLED   R-M3 served-model recheck dropped
+  KILLED   R-M4 LKG accepted without approval
+  KILLED   R-M5 LKG accepted when itself expired
+  KILLED   R-M6 verdict counts monitor decisions
+  SURVIVED R-M7 log_only controls act
+  KILLED   R-M8 per-policy timeout never fires
+  KILLED   R-M9 now == notAfter treated valid
+  KILLED   R-M10 not-yet-valid check dropped
+  KILLED   R-M11 bundle tenant check dropped
+  KILLED   R-M12 team subject matches any team
+  KILLED   R-M13 entitlement provider ignored
+  KILLED   R-M14 DLP unavailable ignored
+  KILLED   R-M15 entitlements unavailable ignored
+  KILLED   R-M16 unreadable bundle always enforce (round-1 decision reversed)
+  KILLED   R-M17 minConfidence off by one
+  KILLED   R-M18 effectiveTo inclusive
+  KILLED   R-M19 engine error fails open via the outer catch
+  KILLED   R-M20 dropped decisions do not change the verdict
+  KILLED   R-M21 failureEvaluation access continues in monitor
+  SURVIVED R-M22 user subject ignores actorType
+  KILLED   R-M24 model not_in only checks the requested model
+  KILLED   R-M25 unknown context keys accepted
+  KILLED   N1 deny matched exactly (no family)
+  KILLED   N2 deny not case-folded
+  KILLED   N3 deny family without a separator (prefix match)
+  KILLED   N4 grants use family matching (fail open)
+  KILLED   N5 refused input not recorded
+  KILLED   N6 refusal always enforced (monitor blocks)
+  KILLED   N7 flags mismatch ignored
+  KILLED   N8 flags 'off' accepted as enforce
+  KILLED   N9 supersession removed
+  KILLED   N10 MODEL_UNKNOWN granted by a wildcard
+  KILLED   N11 input not copied (getters re-read)
+  KILLED   N12 symbol keys accepted
+  KILLED   N13 look-alike object trusted as compiled
+  KILLED   N14 clock failure not marked
+  KILLED   N15 first matched rule wins
+  KILLED   N16 workload scope ignored
+  KILLED   N17 redact classed as log-only
+  KILLED   N18 content key accepted in the request context (shape)
+  40/42 killed. Survivors are equivalent mutants: R-M7 (a log-only class has only allow actions and default allow, so the
+  override is redundant by construction; removed in this round) and R-M22 (validated user/service refs are ps1:/svc: on both sides,
+  so actorRef equality implies the actor type; the explicit check is kept as defense in depth).

@@ -85,7 +85,7 @@ function deniedByOracle(i: EvaluationInput): boolean {
   const c = i.context as RequestContext;
   const subject = (e: Entitlement) => ({ tenant: e.subjectRef === c.tenantId, team: (c.teamIds ?? []).includes(e.subjectRef), user: c.actorType === 'human' && c.actorRef === e.subjectRef,
     workload: c.workloadId === e.subjectRef, service: c.actorType === 'service' && c.actorRef === e.subjectRef })[e.subjectKind];
-  return (i.bundle as { entitlements: Entitlement[] }).entitlements.some((e) => e.effect === 'deny' && e.provider === c.provider && (e.models.includes('*') || e.models.includes(c.modelRequested))
+  return (i.bundle as { entitlements: Entitlement[] }).entitlements.some((e) => e.effect === 'deny' && e.provider === c.provider && (e.models.includes('*') || (c.modelRequested !== undefined && e.models.includes(c.modelRequested)))
     && e.effectiveFrom <= NOW.slice(0, 10) && (e.effectiveTo === undefined || NOW.slice(0, 10) < e.effectiveTo) && subject(e));
 }
 const worst = (ds: PolicyDecision[]) => ds.filter((d) => d.enforced).reduce<keyof typeof SEVERITY>((a, d) => (SEVERITY[d.outcome] > SEVERITY[a] ? d.outcome : a), 'allow');
@@ -153,6 +153,7 @@ describe('policy evaluation properties over 400 seeded random scenarios', () => 
     for (let n = 0; n < 300; n++) {
       const e = evaluate({ bundle: chance(r, 0.5) ? junk() : bundle(), context: (chance(r, 0.5) ? junk() : ctx()) as never, clock: chance(r, 0.8) ? { now: NOW } : (junk() as never), accessMode: 'enforce' });
       if (e.problems.length || e.source === 'none') expect(e.verdict).toBe('block');
+      expect(e.decisions.length).toBeGreaterThan(0); // no verdict without a decision record
       for (const d of e.decisions) expect(validatePolicyDecision(d).ok).toBe(true);
     }
   });

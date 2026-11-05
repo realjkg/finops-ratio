@@ -207,6 +207,7 @@ describe('report rendering', () => {
   };
   it('shows NOT RUN and PENDING as such, the merge-base note, fixture errors and N/A totals', () => {
     const md = renderEvidenceMd(base);
+    expect(md.endsWith('\n') && !md.endsWith('\n\n')).toBe(true); // git diff --check: no blank line at EOF
     expect(md).toMatch(/\| integration \| `npm run test:db` \| \*\*NOT RUN\*\* \|/);
     expect(md).toMatch(/\| 2 \| Challenger re-review \| \*\*PENDING \(orchestrator\)\*\* \|/);
     expect(md).toContain('the requested base is not the merge-base');

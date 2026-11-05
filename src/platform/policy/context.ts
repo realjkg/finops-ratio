@@ -22,7 +22,8 @@ export interface RequestContext {
   provider: string;
   /** Where the request goes (provider endpoint or surface id); matched by `destination` conditions. */
   destination: string;
-  modelRequested: string;
+  /** Absent when the gateway could not read a valid model id: access is then denied with MODEL_UNKNOWN. */
+  modelRequested?: string;
   /** Known after dispatch (or from a cache hit): entitlements are re-checked against it. */
   modelServed?: string;
   /** Tools declared or called in the content under evaluation. */
@@ -37,7 +38,7 @@ export interface RequestContext {
 const CONTEXT = obj({
   tenantId: req(C.id), requestRef: req(rule('request-ref@1', 'identifier of at most 128 characters', (v) => isId(v) && v.length <= 128)), sequence: opt(C.count),
   phase: req(oneOf(POLICY_PHASES)), workloadId: opt(C.id), teamIds: opt(set(C.id, 0, 256)), actorType: req(oneOf(ACTOR_TYPES)), actorRef: opt(C.id),
-  provider: req(C.id), destination: req(C.id), modelRequested: req(C.model), modelServed: opt(C.model), tools: opt(set(C.id, 0, 256)), inputBytes: req(C.count),
+  provider: req(C.id), destination: req(C.id), modelRequested: opt(C.model), modelServed: opt(C.model), tools: opt(set(C.id, 0, 256)), inputBytes: req(C.count),
   findings: req(arr(rule('finding@1', 'DLP finding (offsets only)', (v) => validateDlpFinding(v).ok), 0, 1000)),
   signals: opt(arr(obj({ signal: req(C.id), confidence: req(oneOf(CONFIDENCE)) }), 0, 64)), unavailable: opt(set(oneOf(['entitlements', 'dlp']), 0, 2)),
 } satisfies { [K in keyof Required<RequestContext>]: unknown });

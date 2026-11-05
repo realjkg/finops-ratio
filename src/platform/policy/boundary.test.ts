@@ -11,10 +11,10 @@ const prod = fs.readdirSync(DIR).filter((f) => f.endsWith('.ts') && !f.endsWith(
 
 describe('policy library boundary', () => {
   it('has exactly these modules, importing only each other and the contracts', () => {
-    expect(prod).toEqual(['context.ts', 'evaluate.ts', 'index.ts']);
+    expect(prod).toEqual(['bundle.ts', 'context.ts', 'evaluate.ts', 'index.ts']);
     for (const f of prod) {
       for (const i of ts.preProcessFile(fs.readFileSync(path.join(DIR, f), 'utf8'), true, true).importedFiles) {
-        expect(`${f} -> ${i.fileName}`).toMatch(/ -> \.\/(context|evaluate)$| -> \.\.\/contracts$/);
+        expect(`${f} -> ${i.fileName}`).toMatch(/ -> \.\/(bundle|context|evaluate)$| -> \.\.\/contracts$/);
       }
     }
   });
