@@ -81,3 +81,15 @@ Command: npx vitest run src/platform/policy --cache=false
 ⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
  Test Files  2 failed | 3 passed (5)
       Tests  16 failed | 108 passed (124)
+
+REVIEW ROUND 3 (challenger review of #183 at 5ea2d49: M1, L3). Tests committed before the fix. The M32b/M43 tests pass before the fix (mutation killers).
+Command: npx vitest run src/platform/policy --cache=false
+     × junk flags {"enabled":true,"enforce":true} are refused and block (never POLICY_DISABLED)
+     × junk flags {"enabled":1,"enforcement":1} are refused and block (never POLICY_DISABLED)
+     × junk flags {"enabled":true,"enforcement":"true"} are refused and block (never POLICY_DISABLED)
+     × junk flags {"enabled":false,"enforcement":true} are refused and block (never POLICY_DISABLED)
+     × junk flags {} are refused and block (never POLICY_DISABLED)
+     × an asserted accessMode that disagrees with the flags (also with off flags) is refused; off flags with an invalid context are refused
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 4 passed (5)
+      Tests  6 failed | 130 passed (136)

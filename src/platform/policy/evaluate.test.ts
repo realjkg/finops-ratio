@@ -9,7 +9,6 @@ const view = (d: PolicyDecision) => ({ outcome: d.outcome, enforced: d.enforced,
 const valid = (e: Evaluation) => { for (const d of e.decisions) expect(validatePolicyDecision(d)).toEqual({ ok: true, value: d }); return e; };
 const access = (e: Evaluation) => view(e.decisions[0]);
 const policyView = (e: Evaluation) => e.decisions.slice(1).map(view);
-
 describe('decisions per rule action (pre_request, enforce)', () => {
   it('allows a clean request and records the default', () => {
     const e = valid(evaluate(input()));
@@ -36,7 +35,6 @@ describe('decisions per rule action (pre_request, enforce)', () => {
       .toEqual([{ outcome: 'block', enforced: true, ruleIds: [], reasonCodes: ['DEFAULT_BLOCK'] }]);
   });
 });
-
 describe('conditions', () => {
   const holds = (condition: PolicyCondition, over = {}) => evaluate(input({ bundle: bundle({ policies: [pol({ rules: [rule({ condition })] })] }), context: ctx(over) })).decisions[1].outcome === 'block';
   it.each([
@@ -54,7 +52,6 @@ describe('conditions', () => {
     [{ kind: 'dlp_category', categories: ['us_ssn'], minConfidence: 'low' }, { findings: [card()] }, false], [{ kind: 'always' }, {}, true],
   ] as [PolicyCondition, object, boolean][])('%j with %j holds: %s', (condition, over, expected) => expect(holds(condition, over)).toBe(expected));
 });
-
 describe('scope and effective dates', () => {
   it.each([
     ['another workload', {}, ctx({ workloadId: 'wl-other' })], ['no workload', {}, ctx({ workloadId: undefined })], ['another phase', { phase: 'pre_response', release: 'buffer_full' }, ctx()],
@@ -64,7 +61,6 @@ describe('scope and effective dates', () => {
     expect(e.decisions).toHaveLength(1);
   });
 });
-
 describe('entitlements (cap 8): deny wins, the served model is re-checked', () => {
   const deny = ent({ entitlementId: 'ent-deny', subjectKind: 'tenant', subjectRef: 'tenant-syn', models: ['*'], effect: 'deny' });
   it.each([
@@ -94,14 +90,12 @@ describe('entitlements (cap 8): deny wins, the served model is re-checked', () =
     expect({ verdict: e.verdict, access: access(e) }).toEqual({ verdict: 'allow', access: { outcome: 'block', enforced: false, ruleIds: [], reasonCodes: ['SERVED_MODEL_NOT_GRANTED'] } });
   });
 });
-
 describe('monitor vs enforce', () => {
   it('a monitor decision records what enforcement would do and never changes the verdict', () => {
     const e = valid(evaluate(input({ bundle: bundle({ policies: [pol({ mode: 'monitor' })] }), context: ctx({ findings: [card()] }) })));
     expect({ verdict: e.verdict, policy: policyView(e) }).toEqual({ verdict: 'allow', policy: [{ outcome: 'block', enforced: false, ruleIds: ['r-cards'], reasonCodes: ['DLP_PAYMENT_CARD'] }] });
   });
 });
-
 describe('the failure table (ADR-0001 §3.3)', () => {
   const lenient = pol({ policyId: 'pol-log', mode: 'monitor', onTimeout: 'continue_with_gap', onEngineError: 'continue_with_gap' });
   const two = bundle({ policies: [pol(), lenient] });
@@ -142,7 +136,6 @@ describe('the failure table (ADR-0001 §3.3)', () => {
     expect(e.verdict).toBe(verdict);
   });
 });
-
 describe('last-known-good (approved, within its own validity, same tenant)', () => {
   const expired = bundle({ version: 5, notAfter: '2026-10-02T00:00:00Z' });
   const lkg = (over = {}) => bundle({ version: 3, lastKnownGoodApproved: true, contentSha256: 'e5'.repeat(32), ...over });
@@ -159,7 +152,6 @@ describe('last-known-good (approved, within its own validity, same tenant)', () 
     });
   it('is never used for a valid bundle', () => expect(evaluate(input({ lastKnownGood: lkg() })).source).toBe('bundle'));
 });
-
 describe('input refusal, no content', () => {
   it.each([
     ['a content key', { context: { ...ctx(), prompt: 'SYNTHETIC-SECRET-TEXT' } }], ['a bad clock', { clock: { now: '2026-10-02 12:00' } }],
