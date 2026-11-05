@@ -16,9 +16,11 @@ import {
   EngagementConfigError,
   engagementMode,
   loadEngagementConfig,
+  platformFlagsOf,
   validateEngagementConfig,
   type EngagementConfig,
 } from './config';
+import { PLATFORM_CAPABILITIES, PLATFORM_OFF, capabilityOn } from '../platform/flags';
 import { register } from '../../instrumentation';
 
 const FIXTURE = path.resolve(__dirname, '../../fixtures/engagement/example/engagement.json');
@@ -639,6 +641,41 @@ describe('tenant UUID rule', () => {
       const c = raw();
       c.tenantId = t;
       expect(validateEngagementConfig(c).ok, t).toBe(isTenantId(t));
+    }
+  });
+});
+
+describe('platform opt-in block (ADR-0001 D7, slice A1)', () => {
+  const withPlatform = (v: unknown) => mutated((c) => (c.platform = v));
+  it('absent means all off, and the validated config is exactly what it was before the block existed', () => {
+    const r = validateEngagementConfig(raw());
+    if (!r.ok) throw new Error(r.problems.join('; '));
+    expect('platform' in r.config).toBe(false);
+    expect(platformFlagsOf(r.config)).toEqual(PLATFORM_OFF);
+    for (const cap of PLATFORM_CAPABILITIES) expect(capabilityOn(platformFlagsOf(r.config), cap)).toBe(false);
+  });
+  it('a valid block is normalized (omitted flags false); invalid blocks are refused by key, never by value', () => {
+    const r = validateEngagementConfig(withPlatform({ enabled: true }));
+    expect(r.ok && r.config.platform).toEqual({ ...PLATFORM_OFF, enabled: true });
+    expect(validateEngagementConfig(withPlatform({ economics: true }))).toEqual({ ok: false, problems: ['platform.economics: requires platform.enabled to be true'] });
+    expect(validateEngagementConfig(withPlatform({ enabled: SECRET }))).toEqual({ ok: false, problems: ['platform.enabled: must be true or false'] });
+    expect(validateEngagementConfig(withPlatform({ enabled: true, [SECRET]: true }))).toEqual({ ok: false, problems: ['platform: unknown key (not printed)'] });
+    expect(validateEngagementConfig(withPlatform('on'))).toEqual({ ok: false, problems: ['platform: must be an object of true/false flags (enabled, economics, adoption, policyMonitor, enforcement)'] });
+  });
+  it('startup refuses every capability flag this build cannot run (none yet); SUPPORTED_IN_THIS_BUILD never turns one on', () => {
+    expect(SUPPORTED_IN_THIS_BUILD.platformCapabilities).toEqual([]);
+    expect(checkEngagementConfig(withPlatform({ enabled: true })).ok).toBe(true);
+    expect(checkEngagementConfig(withPlatform({ ...PLATFORM_OFF })).ok).toBe(true);
+    for (const cap of PLATFORM_CAPABILITIES) {
+      const v = withPlatform({ enabled: true, [cap]: true });
+      expect(validateEngagementConfig(v).ok, cap).toBe(true);
+      expect(checkEngagementConfig(v), cap).toEqual({ ok: false, problems: [`platform.${cap}: not implemented in this build`] });
+    }
+    // Whatever startup accepts in this build, no platform capability is on.
+    for (const v of [raw(), withPlatform({ enabled: true }), withPlatform({})]) {
+      const r = checkEngagementConfig(v);
+      if (!r.ok) throw new Error(r.problems.join('; '));
+      expect(PLATFORM_CAPABILITIES.filter((cap) => capabilityOn(platformFlagsOf(r.config), cap))).toEqual([]);
     }
   });
 });

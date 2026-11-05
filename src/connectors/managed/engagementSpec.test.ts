@@ -85,6 +85,15 @@ const CASES: Array<{ name: string; ok: boolean; edit: (c: any) => void }> = [
   { name: 'AWS: lowercase akia names and @ without a colon pass', ok: true, edit: (c) => (c.sources[0].retrieval = AWS({ bucket: 'akia-prefix-name', exportName: 'akia_asia-export', prefix: 'akiaexports/a@b/user:name' })) },
   { name: 'AWS: long opaque value outside the three fields', ok: false, edit: (c) => (c.sources[0].retrieval = AWS({ other: OPAQUE })) },
   { name: 'AWS: long value at a nested bucket path', ok: false, edit: (c) => (c.sources[0].retrieval = AWS({ nested: { bucket: 'a'.repeat(41) } })) },
+  // ADR-0001 D7 (slice A1): the per-instance platform block. Both sides parse it with the same module.
+  { name: 'platform: all flags explicitly off', ok: true, edit: (c) => (c.platform = { enabled: false, economics: false, adoption: false, policyMonitor: false, enforcement: false }) },
+  { name: 'platform: enabled with no capability', ok: true, edit: (c) => (c.platform = { enabled: true }) },
+  { name: 'platform: economics on (schema-valid, not implemented in this build)', ok: false, edit: (c) => (c.platform = { enabled: true, economics: true }) },
+  { name: 'platform: enforcement on (schema-valid, not implemented in this build)', ok: false, edit: (c) => (c.platform = { enabled: true, enforcement: true }) },
+  { name: 'platform: a capability without enabled', ok: false, edit: (c) => (c.platform = { adoption: true }) },
+  { name: 'platform: unknown flag', ok: false, edit: (c) => (c.platform = { enabled: true, gateway: true }) },
+  { name: 'platform: a flag that is not a boolean', ok: false, edit: (c) => (c.platform = { enabled: 'true' }) },
+  { name: 'platform: not an object', ok: false, edit: (c) => (c.platform = true) },
 ];
 
 describe('worker engagement-config check (parity with R1)', () => {
