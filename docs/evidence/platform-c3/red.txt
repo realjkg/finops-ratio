@@ -10,3 +10,36 @@ Error: Cannot find module './mockProviders' imported from src/platform/conforman
 AssertionError: expected undefined to deeply equal [ 'ratio-conformance-test-only' ]
  Test Files  3 failed (3)
       Tests  1 failed | 32 passed (33)
+
+REVIEW ROUND 1 (challenger review of #184 at c42657c: H1, M1-M5, L1-L5). Tests committed before the fixes, on 2e11f0e (gateway on the C1 compiled-bundle API).
+Command: npx vitest run src/platform/conformance --cache=false
+     × malformed JSON is blocked before dispatch
+     × a marker split across windows is caught by the carried overlap; LIMITATION: the first half was already released
+     × an oversized request for a denied model: 403, zero provider calls
+     × a model string that is not a model id: 403, zero provider calls
+     × an oversized request under allow * and no DLP policy: 403, zero provider calls
+     × the bound is in bytes: 2100 two-byte characters exceed a 4096-byte bound (N7)
+     × chat tools[].function.description: blocked before dispatch
+     × chat legacy functions[]: blocked before dispatch
+     × chat assistant function_call.arguments: blocked before dispatch
+     × chat prediction.content: blocked before dispatch
+     × chat message name: blocked before dispatch
+     × chat metadata: blocked before dispatch
+     × responses tools[].description: blocked before dispatch
+     × messages tools[].description: blocked before dispatch
+     × messages tools[].input_schema: blocked before dispatch
+     × nested JSON escape in tool arguments: blocked before dispatch
+     × content nested past the depth bound fails closed (DLP unavailable)
+     × a CPU-bound engine over the deadline is a timeout (enforce: 403, 0 calls)
+     × a CPU-bound engine over the deadline is a timeout (monitor: 200, 1 calls)
+     × under a last-known-good, the release window and the deadline come from the bundle being evaluated
+     × a tool declared and called in one request is evaluated (enforce), never a 403 without decisions
+     × buffer_full, split inside the buffer: the marker is caught on the joined window
+     × buffer_window, split inside one window: the marker is caught on the joined window
+     × buffer_window, split across windows (overlap): the marker is caught on the joined window
+     × a stream with no content still gets an output-phase decision (and its served model is re-checked)
+     × prototype-named credentials and paths are refused cleanly (L3)
+     × no non-test module of the app, worker, scripts or client imports them
+⎯⎯⎯⎯⎯⎯ Failed Tests 27 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  3 failed (3)
+      Tests  27 failed | 47 passed (74)

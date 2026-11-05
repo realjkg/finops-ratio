@@ -12,6 +12,8 @@ const DIR = __dirname;
 const ROOT = path.resolve(DIR, '..', '..', '..');
 const isTest = (f: string) => /\.test\.(ts|tsx|mjs|js)$/.test(f);
 const prod = fs.readdirSync(DIR).filter((f) => f.endsWith('.ts') && !isTest(f)).sort();
+/** A text scan for any reference to the mocks (catches bare baseUrl, template-literal and dynamic imports); check:bundle rule 8 is the backstop on builds. */
+const mentionsMocks = (text: string) => /conformance\/(mock|\$\{)|\$\{["'`]conformance["'`]\}/.test(text);
 const imports = (file: string) => ts.preProcessFile(fs.readFileSync(file, 'utf8'), true, true).importedFiles.map((i) => i.fileName);
 
 describe('conformance mocks are test-only', () => {
@@ -19,8 +21,16 @@ describe('conformance mocks are test-only', () => {
     expect(prod).toEqual(['mockGateway.ts', 'mockProviders.ts']);
     for (const f of prod) for (const s of imports(path.join(DIR, f))) expect(`${f} -> ${s}`).toMatch(/ -> (node:(http|crypto|buffer|net)|\.\/mockProviders|\.\.\/contracts|\.\.\/policy)$/);
   });
+  it('the text scan catches every import form: relative, @/ alias, bare baseUrl, template-literal and dynamic imports, require', () => {
+    for (const planted of ["import { x } from '../platform/conformance/mockGateway';", "import x from '@/platform/conformance/mockProviders';", "import x from 'src/platform/conformance/mockGateway';",
+      'const m = await import(`./platform/${"conformance"}/mockGateway`);', "const m = await import(`../platform/conformance/${name}`);", "require('./platform/conformance/mockProviders')"]) {
+      expect(mentionsMocks(planted), planted).toBe(true);
+    }
+    expect(mentionsMocks("import { evaluate } from '../platform/policy';")).toBe(false);
+  });
   it('no non-test module of the app, worker, scripts or client imports them', () => {
     const files: string[] = [];
+    const inside = (f: string) => f.startsWith(DIR + path.sep);
     const walk = (d: string) => {
       for (const e of fs.readdirSync(d, { withFileTypes: true })) {
         const abs = path.join(d, e.name);
@@ -28,7 +38,9 @@ describe('conformance mocks are test-only', () => {
       }
     };
     for (const d of ['src', 'pages', 'scripts']) walk(path.join(ROOT, d));
-    const inside = (f: string) => f.startsWith(DIR + path.sep);
+    // Root modules Next or Node load directly (proxy.ts, instrumentation.ts, middleware.ts, configs).
+    for (const e of fs.readdirSync(ROOT, { withFileTypes: true })) if (e.isFile() && /\.(ts|tsx|mjs|js|cjs)$/.test(e.name) && !isTest(e.name)) files.push(path.join(ROOT, e.name));
+    expect(files.filter((f) => !inside(f) && mentionsMocks(fs.readFileSync(f, 'utf8'))).map((f) => path.relative(ROOT, f))).toEqual([]);
     const offenders = files.filter((f) => !inside(f)).flatMap((f) => imports(f)
       .filter((s) => s.startsWith('.') || s.startsWith('@/'))
       .map((s) => (s.startsWith('@/') ? path.join(ROOT, 'src', s.slice(2)) : path.resolve(path.dirname(f), s)))

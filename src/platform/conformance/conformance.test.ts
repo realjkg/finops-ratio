@@ -36,7 +36,7 @@ const gateway = (over: Partial<GatewayOptions> = {}, pa = a, pb = b) => createMo
   gatewayId: 'gw-mock', bundle: conformanceBundle(), accessMode: 'enforce', detect, maxInspectBytes: 4096, windowChunks: 2,
   credentials: { 'vk-bot': { tenantId: 'tenant-syn', workloadId: 'wl-bot', actorType: 'service', actorRef: 'svc:bot' } },
   providers: { 'provider-a': { flavor: 'openai', url: pa.url }, 'provider-b': { flavor: 'anthropic', url: pb.url } },
-  digestKey: { keyId: 'k1', secret: 'synthetic-digest-key' }, now: () => '2026-10-02T12:00:00Z', ...over,
+  digestKey: { keyId: 'k1', secret: 'synthetic-digest-key' }, now: () => '2026-10-02T12:00:00Z', maxDetectorSpan: SECRET.length, ...over,
 });
 const chat = (content: unknown, more: object = {}) => ({ model: 'model-x', messages: [{ role: 'user', content }], ...more });
 const send = (g: ReturnType<typeof gateway>, path: string, body: unknown, credential = 'vk-bot', headers: Record<string, string> = {}) =>
@@ -89,7 +89,7 @@ describe('pre-dispatch: a blocked request never reaches the provider', () => {
     ['an unknown surface (embeddings)', '/v1/embeddings', { model: 'model-x', input: PROMPT }, ['ENTITLEMENT_NOT_GRANTED', 'SURFACE_NOT_ALLOWED']],
     ['a disallowed tool', '/v1/chat/completions', chat(PROMPT, { tools: [{ type: 'function', function: { name: 'shell' } }] }), ['TOOL_NOT_ALLOWED']],
     ['an uninspectable content block', '/v1/messages', { model: 'model-c', messages: [{ role: 'user', content: [{ type: 'image', source: {} }] }] }, ['DLP_UNAVAILABLE']],
-    ['malformed JSON', '/v1/chat/completions', '{"model":', ['ENTITLEMENT_NOT_GRANTED', 'DLP_UNAVAILABLE']],
+    ['malformed JSON', '/v1/chat/completions', '{"model":', ['MODEL_UNKNOWN', 'DLP_UNAVAILABLE']],
     ['a disallowed model', '/v1/chat/completions', { ...chat(PROMPT), model: 'model-z' }, ['ENTITLEMENT_NOT_GRANTED']],
   ])('%s is blocked before dispatch', async (_n, path, body, expected) => {
     const before = calls(a) + calls(b);
@@ -161,8 +161,8 @@ describe('pre-release: output policy, served-model fallback, streaming and parti
     expect(shape(r)).toEqual({ status: 403, released: ['a', 'b'], rel: 'partial', streamed: true });
     expect(r.decisions.filter((d) => d.phase === 'stream_chunk' && d.decisionId.endsWith(':p2')).map((d) => [d.outcome, d.decisionId.split(':')[3]])).toEqual([['allow', '0'], ['block', '1']]);
   });
-  it('a split marker across windows is a documented gap (overlap windows are slice C4)', async () => {
-    expect(shape(await stream({ flavor: 'openai', reply: ['a', SECRET.slice(0, 6), SECRET.slice(6), 'd'] }))).toMatchObject({ status: 200, rel: 'full' });
+  it('a marker split across windows is caught by the carried overlap; LIMITATION: the first half was already released', async () => {
+    expect(shape(await stream({ flavor: 'openai', reply: ['a', SECRET.slice(0, 6), SECRET.slice(6), 'd'] }))).toEqual({ status: 403, released: ['a', SECRET.slice(0, 6)], rel: 'partial', streamed: true });
   });
   it('pass_through (one-chunk windows, no buffering) is refused for an enforcing output policy; a monitor policy observes and never withholds', async () => {
     expect(validatePolicy(out('stream_chunk', 'pass_through')).ok).toBe(false);
