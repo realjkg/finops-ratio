@@ -1,0 +1,105 @@
+{
+  "$comment": "Platform capability evidence manifest (ADR-0001 §14, slice A0). Each capability maps the owner's 'evidence required' cell (ADR-0001 §1.1, verbatim) to its planned tests, fixtures and report artifact. An item is 'planned' until its slice lands; an 'implemented' item names the tests that prove it, which scripts/evidence/collect-pr-evidence.mjs looks up in a vitest JSON report (non-gating). The highest status this can yield is the statusCeiling; live verification is a signed evidence record in the owner's environment, never this file. SYNTHETIC fixtures only. Checked by scripts/evidence/platformEvidence.test.mjs.",
+  "schema": "ratio.platform-evidence-manifest/1",
+  "statusCeiling": "implemented and pre-release validated; live verification scheduled",
+  "capabilities": [
+    {
+      "id": 1, "name": "Track model spending", "release": "1.1", "stream": "A", "status": "planned",
+      "evidenceRequired": "Approved-source imports reconcile; unmatched charges and allocation gaps remain visible",
+      "evidence": [
+        { "id": "cap1-w0-allocation-contract", "slice": "W0", "kind": "test", "status": "implemented", "description": "allocation/1: shares plus explicit unallocated equal the source amount exactly; same sign; unique targets; pseudonymous users",
+          "tests": [{ "file": "src/platform/contracts/economics.test.ts", "suite": "FinancialRecord, RateCard, Allocation", "title": "allocation: exact sum, same sign, unique targets, pseudonymous users" }] },
+        { "id": "cap1-a4-control-totals", "slice": "A4", "kind": "fixture", "status": "planned", "description": "Approved-source cost fixture reconciles to its control totals, per currency (no cross-currency sum)" },
+        { "id": "cap1-a4-unmatched-charges", "slice": "A4", "kind": "test", "status": "planned", "description": "Unmatched and unrouted charges are listed with reasons, never dropped" },
+        { "id": "cap1-a5-allocation-gaps", "slice": "A5", "kind": "test", "status": "planned", "description": "Allocation exactness with unallocated reasons; allocation coverage and reconciliation coverage reported separately with known denominators" }
+      ],
+      "reportArtifact": "Reconciliation table with variance reasons; allocation coverage",
+      "liveVerification": { "description": "One approved billing source reconciles in the pilot", "status": "scheduled" }
+    },
+    {
+      "id": 2, "name": "Measure adoption", "release": "1.2", "stream": "B", "status": "not started",
+      "evidenceRequired": "Numerator and denominator reproducible; identities and exclusions tested",
+      "evidence": [
+        { "id": "cap2-w0-adoption-definition", "slice": "W0", "kind": "test", "status": "implemented", "description": "adoption-definition/1: actor and denominator rules",
+          "tests": [{ "file": "src/platform/contracts/adoption.test.ts", "suite": "AdoptionDefinition (cap 2)", "title": "names the actor and denominator rules" }] },
+        { "id": "cap2-b2b3-rerun-determinism", "slice": "B2/B3", "kind": "test", "status": "planned", "description": "Numerator and denominator reproducible from fixtures on re-run (versioned definitions, snapshot ids)" },
+        { "id": "cap2-b2-exclusions", "slice": "B2", "kind": "fixture", "status": "planned", "description": "Exclusion and suspended-user fixtures; memberSetSha256 stable" }
+      ],
+      "reportArtifact": "Adoption metric with definition version and snapshot id",
+      "liveVerification": { "description": "Pilot identity source snapshot", "status": "scheduled" }
+    },
+    {
+      "id": 3, "name": "Report user utilization", "release": "1.2", "stream": "B", "status": "not started",
+      "evidenceRequired": "Authorized user-level drill-down, service-account separation, retention and privacy controls",
+      "evidence": [
+        { "id": "cap3-w0-actor-types", "slice": "W0", "kind": "test", "status": "implemented", "description": "Actor-type rules: humans only as keyed pseudonyms; services never carry seats",
+          "tests": [
+            { "file": "src/platform/contracts/validate.test.ts", "suite": "identifiers, people and content", "title": "a human ref is a keyed HMAC under a named key, never an email or a bare hash" },
+            { "file": "src/platform/contracts/adoption.test.ts", "suite": "ActivityEvent and EligiblePopulationSnapshot (cap 2, 3)", "title": "missing licensed seats stay absent; services never carry seats" }
+          ] },
+        { "id": "cap3-b4-drilldown-permission", "slice": "B4", "kind": "test", "status": "planned", "description": "usage:drilldown is role-only and audited; reports:read alone cannot drill down; suppression below the minimum group size" },
+        { "id": "cap3-b4-deletion-jobs", "slice": "B4", "kind": "test", "status": "planned", "description": "Retention deletion removes rows and writes a run record" },
+        { "id": "cap3-log-redaction", "slice": "B4", "kind": "test", "status": "planned", "description": "Log redaction tests: no identity or content in logs" }
+      ],
+      "reportArtifact": "Drill-down audit log; retention run records",
+      "liveVerification": { "description": "Pilot retention run", "status": "scheduled" }
+    },
+    {
+      "id": 4, "name": "Track token costs", "release": "1.1", "stream": "A", "status": "planned",
+      "evidenceRequired": "Cache/batch semantics verified per provider; missing usage and rate gaps do not become zero",
+      "evidence": [
+        { "id": "cap4-w0-absent-usage", "slice": "W0", "kind": "test", "status": "implemented", "description": "ai-usage-event/1: absent usage stays absent (never 0); token counts are whole-token strings",
+          "tests": [
+            { "file": "src/platform/contracts/economics.test.ts", "suite": "AIUsageEvent (cap 1, 4)", "title": "absent usage stays absent: nothing is filled with 0" },
+            { "file": "src/platform/contracts/economics.test.ts", "suite": "AIUsageEvent (cap 1, 4)", "title": "token counts are canonical whole-token strings" }
+          ] },
+        { "id": "cap4-a2-accounting-profiles", "slice": "A2", "kind": "fixture", "status": "planned", "description": "Accounting-profile fixtures: overlapping vs additive token categories never double-count; absent tokens stay N/A (field mappings per public docs, to be verified live)" },
+        { "id": "cap4-a3-missing-rate-gap", "slice": "A3", "kind": "test", "status": "planned", "description": "A missing rate is a visible gap, not 0; the rate card version is recorded on every estimate; cache and batch are explicit rows" }
+      ],
+      "reportArtifact": "Token cost by category with rate card version",
+      "liveVerification": { "description": "Each provider profile verified against live usage", "status": "scheduled" }
+    },
+    {
+      "id": 5, "name": "Inspect prompts before execution", "release": "1.3/2.0", "stream": "C", "status": "not started",
+      "evidenceRequired": "Requests blocked before dispatch in supported scenarios; bypass paths assessed",
+      "evidence": [
+        { "id": "cap5-c3-zero-dispatch", "slice": "C3", "kind": "test", "status": "planned", "description": "A blocked request is never dispatched: the mock provider receives zero calls" },
+        { "id": "cap5-c6-bypass-assessment", "slice": "C6", "kind": "document", "status": "planned", "description": "Bypass assessment document for the pilot gateway" }
+      ],
+      "reportArtifact": "Decision log with rule ids",
+      "liveVerification": { "description": "Pilot gateway path blocks a seeded request", "status": "scheduled" }
+    },
+    {
+      "id": 6, "name": "Enforce input/output policies", "release": "1.3/2.0", "stream": "C", "status": "not started",
+      "evidenceRequired": "Allow, block, timeout, streaming and partial-failure behavior tested",
+      "evidence": [
+        { "id": "cap6-w0-policy-fail-closed", "slice": "W0", "kind": "test", "status": "implemented", "description": "policy/1: an enforcing policy that can block fails closed; an enforcing output policy buffers",
+          "tests": [{ "file": "src/platform/contracts/policy.test.ts", "suite": "Entitlement and Policy (cap 5-8)", "title": "an enforcing policy that can block fails closed; an enforcing output policy buffers" }] },
+        { "id": "cap6-c1-evaluation", "slice": "C1", "kind": "test", "status": "planned", "description": "Allow, block, redact, require-approval, log-only per rule; deterministic for the same inputs" },
+        { "id": "cap6-c3c4-conformance", "slice": "C3/C4", "kind": "test", "status": "planned", "description": "Conformance: timeouts, engine errors, streaming windows and partial failures" }
+      ],
+      "reportArtifact": "Conformance report",
+      "liveVerification": { "description": "Pilot gateway conformance run", "status": "scheduled" }
+    },
+    {
+      "id": 7, "name": "Block sensitive data transfers", "release": "1.3/2.0", "stream": "C", "status": "not started",
+      "evidenceRequired": "Seeded sensitive-data tests demonstrate prevention before prohibited transmission",
+      "evidence": [
+        { "id": "cap7-c4-seeded-dlp", "slice": "C4", "kind": "fixture", "status": "planned", "description": "Seeded sensitive-data fixtures, incl. encoded and tool-payload variants, blocked before the mock provider sees them; findings carry offsets only" }
+      ],
+      "reportArtifact": "DLP findings (offsets only)",
+      "liveVerification": { "description": "Pilot DLP run with seeded data", "status": "scheduled" }
+    },
+    {
+      "id": 8, "name": "Control model access", "release": "1.3/2.0", "stream": "C", "status": "not started",
+      "evidenceRequired": "Disallowed models/providers rejected; credentials and network paths prevent documented bypasses",
+      "evidence": [
+        { "id": "cap8-c1-entitlements", "slice": "C1", "kind": "test", "status": "planned", "description": "Entitlement tests: deny wins; requested and served model both checked" },
+        { "id": "cap8-c3-surface-allowlist", "slice": "C3", "kind": "test", "status": "planned", "description": "Destination allowlist per surface; unknown surface denied in enforce mode" },
+        { "id": "cap8-c6-bypass-assessment", "slice": "C6", "kind": "document", "status": "planned", "description": "Bypass assessment: provider keys only in the gateway, egress restricted" }
+      ],
+      "reportArtifact": "Entitlement decision log",
+      "liveVerification": { "description": "Pilot network and key-inventory checks", "status": "scheduled" }
+    }
+  ]
+}

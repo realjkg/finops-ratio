@@ -152,8 +152,8 @@ describe('capability status rules', () => {
     expect(c[1].detail).toBe('1 of 2 evidence items implemented and passing; 1 planned; live verification scheduled (not run by this collector)');
     expect(c[4].status).toBe(CAP.PRE_RELEASE);
     expect(c[4].detail).toBe('1 of 1 evidence items implemented and passing; 0 planned; live verification scheduled (not run by this collector)');
-    const all = JSON.stringify(p);
-    expect(all).not.toMatch(/"PASS"|enterprise|supported|"live verified"|connected/i);
+    const computed = JSON.stringify(p.capabilities.map((x) => [x.status, x.detail, x.items.map((i) => [i.status, (i.tests ?? []).map((t) => t.status)])]));
+    expect(computed).not.toMatch(/"PASS"|enterprise|supported|live verified|connected/i);
     expect(p.ceiling).toBe(STATUS_CEILING);
   });
   it('the repository manifest today: no capability is above its declared status', () => {

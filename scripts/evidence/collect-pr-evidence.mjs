@@ -21,7 +21,9 @@
 // Secrets are redacted field by field before serialization, then the JSON and its SHA fields are verified.
 // The full-set migration smoke is opt-in (--migration-smoke). Writes evidence.md and evidence.json;
 // exit 1 if any required gate or check FAILS, 2 on a usage error, 3 when it refuses to run. It never marks
-// the challenger re-review or the merge decision PASS: those are the orchestrator's.
+// the challenger re-review or the merge decision PASS: those are the orchestrator's. A NON-GATING "Platform
+// capability evidence" section (ADR-0001 §14) reports each capability of docs/evidence/platform/manifest.json from
+// a separate vitest JSON run of the manifest's implemented tests; it never changes a gate, the charter or the exit.
 import { spawn, execFileSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -37,6 +39,7 @@ import {
   parseArgs, parsePlaywrightTotals, parseVitestTotals, redact, renderEvidenceMd, rollbackStatus, secretsFromEnv, statedTotals, stripAnsi,
   totalsByCurrency, totalsMatch,
 } from './evidenceLib.mjs';
+import { PLATFORM_MANIFEST, capabilityEvidence, indexVitestJson, manifestProblems, manifestTestFiles } from './platformEvidence.mjs';
 
 const ROOT = process.cwd();
 const SELF = fileURLToPath(import.meta.url);
@@ -57,7 +60,7 @@ function collectorProvenance() {
   let commit = null;
   try { commit = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not a checkout */ }
   const file = (n) => sha256(fs.readFileSync(path.join(dir, n)));
-  return { commit, script: file('collect-pr-evidence.mjs'), lib: file('evidenceLib.mjs') };
+  return { commit, script: file('collect-pr-evidence.mjs'), lib: file('evidenceLib.mjs'), platformLib: file('platformEvidence.mjs') };
 }
 const portFree = (port) => new Promise((resolve) => { const s = net.createServer(); s.once('error', () => resolve(false)); s.listen(port, '127.0.0.1', () => s.close(() => resolve(true))); });
 
@@ -75,6 +78,7 @@ const port = Number(args.port ?? 3410);
 for (const p of [port, port + 1]) if (!(await portFree(p))) stop(EXIT.REFUSED, `port ${p} is in use (the Playwright suites need --port and --port+1); pass --port <free port>`);
 const mergeBase = git('merge-base', baseSha, headSha);
 const OUT = path.resolve(args.out ?? `docs/evidence/pr-${args.pr}`);
+const LOGS = path.resolve(args.logs ?? path.join(OUT, 'logs'));
 
 const ev = {
   schema: 'ratio.pr-evidence/2', pr: Number(args.pr), generatedAt: new Date().toISOString(),
@@ -124,6 +128,20 @@ const plan = [
 const informational = !args['migration-smoke'] ? [{ name: 'migrations smoke, full set (informational)', command: '(opt-in: --migration-smoke)', na: 'N/A: not requested (--migration-smoke)' }]
   : target.ok ? [{ name: 'migrations smoke, full set (informational)', steps: migrateSteps(allMigrations), env: migrationEnv(process.env), db: target.db }]
     : [{ name: 'migrations smoke, full set (informational)', command: 'worker migrate; migrate --down ALL; migrate', na: `N/A (informational): ${target.reason}` }];
+// Platform capability evidence (ADR-0001 §14): NON-GATING. A separate vitest JSON run of the manifest's implemented
+// tests only; its result never enters ev.gates, the charter or the exit code.
+const PLATFORM_JSON = path.join(LOGS, 'platform-vitest.json');
+let platformManifest = null;
+let platformProblems = [];
+if (fs.existsSync(path.join(ROOT, PLATFORM_MANIFEST))) {
+  try { platformManifest = JSON.parse(fs.readFileSync(path.join(ROOT, PLATFORM_MANIFEST), 'utf8')); platformProblems = manifestProblems(platformManifest); } catch (e) { platformProblems = [`manifest: not JSON (${String(e.message ?? e).slice(0, 120)})`]; }
+}
+const platformFiles = platformManifest && !platformProblems.length ? manifestTestFiles(platformManifest) : [];
+const PLATFORM_CHECK = 'platform capability tests (informational)';
+informational.push(!platformManifest && !platformProblems.length ? { name: PLATFORM_CHECK, command: '(none)', na: `N/A: no ${PLATFORM_MANIFEST} in this checkout` }
+  : platformProblems.length ? { name: PLATFORM_CHECK, command: '(none)', na: `N/A: manifest invalid (${platformProblems.length} problem(s))` }
+    : !platformFiles.length ? { name: PLATFORM_CHECK, command: '(none)', na: 'N/A: no implemented evidence test in the manifest' }
+      : { name: PLATFORM_CHECK, steps: [['npx', 'vitest', 'run', '--cache=false', '--reporter=json', `--outputFile=${PLATFORM_JSON}`, ...platformFiles]], env: base });
 if (browser.env) ev.env.browser = browser.source;
 if (PLAN_ONLY) {
   const show = (g) => ({ name: g.name, command: g.command ?? g.steps.map((a) => a.join(' ')).join(' && '), envKeys: g.env ? Object.keys(g.env).sort() : null, skip: g.skip ?? null, na: g.na ?? null, db: g.db ?? null });
@@ -133,7 +151,6 @@ if (PLAN_ONLY) {
 
 // --- running gates (async, so INT/TERM are handled promptly) --------------------------------
 // Logs live under the output directory (gitignored as docs/evidence/pr-*/logs/ in this repo), not in OS tmp.
-const LOGS = path.resolve(args.logs ?? path.join(OUT, 'logs'));
 fs.mkdirSync(LOGS, { recursive: true });
 // The running gate's process group, also written to a file so a supervisor (mac-evidence.sh) can kill it
 // if this process itself is killed with SIGKILL (a detached group would otherwise be orphaned).
@@ -243,7 +260,19 @@ for (const g of plan) {
   ev.gates.push(g.steps ? await run(g) : notRun(g));
 }
 removeShortTmp();
+fs.rmSync(PLATFORM_JSON, { force: true }); // never read a stale report from an earlier run
 for (const g of informational) ev.informational.push(g.steps ? await run(g) : notRun(g, false));
+{
+  let index = null;
+  let reason = informational.find((g) => g.name === PLATFORM_CHECK)?.na ?? null;
+  // A report that is absent or unreadable is NOT RUN, never PASS.
+  if (platformFiles.length && fs.existsSync(PLATFORM_JSON)) {
+    try { index = indexVitestJson(JSON.parse(fs.readFileSync(PLATFORM_JSON, 'utf8')), [...new Set([ROOT, fs.realpathSync(ROOT)])]); } catch { reason = 'NOT RUN: the vitest JSON report could not be read'; }
+  } else if (platformFiles.length) reason = 'NOT RUN: the targeted vitest run wrote no JSON report';
+  ev.platform = { manifest: platformManifest || platformProblems.length ? PLATFORM_MANIFEST : null, problems: platformProblems, capabilities: [],
+    ...(platformManifest && !platformProblems.length ? capabilityEvidence(platformManifest, index, index ? null : reason) : {}) };
+  if (platformProblems.length) ev.knownGaps.push(`Platform capability evidence not evaluated: ${PLATFORM_MANIFEST} is invalid (${platformProblems.slice(0, 5).join('; ')}).`);
+}
 if (git('status', '--porcelain', '--', 'next-env.d.ts')) { git('checkout', '--', 'next-env.d.ts'); ev.knownGaps.push('next-env.d.ts was rewritten by the Playwright build (its distDir) and restored from HEAD after the run.'); }
 
 // --- c. fixture provenance -----------------------------------------------------------------
