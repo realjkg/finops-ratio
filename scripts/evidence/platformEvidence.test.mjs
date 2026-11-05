@@ -193,4 +193,18 @@ describe('report section', () => {
     expect(md).toContain('## Platform capability evidence (non-gating)');
     expect(md.indexOf('## Platform capability evidence')).toBeLessThan(md.indexOf('## Known gaps'));
   });
+  it('evidence.md ends with exactly one newline, so the committed evidence passes git diff --check', () => {
+    const ev = {
+      pr: 1, command: 'c', generatedAt: 'T', head: { sha: 'h'.repeat(40), tree: 't' }, base: { ref: 'main', sha: 'm'.repeat(40), tree: 't' }, mergeBase: { sha: 'm'.repeat(40), tree: 't' },
+      env: { node: 'v22', npm: '10', os: 'linux' }, charter: [], fixtures: { files: [], determinism: [] },
+      gates: [{ name: 'unit', command: 'npx vitest', status: STATUS.PASS, exitCode: 0, durationSec: 1, summary: 'ok', tail: 'last line' }],
+      rollback: { status: STATUS.PASS, procedure: 'p', detail: 'd', production: 'r' }, knownGaps: [],
+    };
+    for (const e of [ev, { ...ev, platform: { manifest: PLATFORM_MANIFEST, ...evidence() } }]) {
+      const md = renderEvidenceMd(e);
+      expect(md.endsWith('\n')).toBe(true);
+      expect(md.endsWith('\n\n')).toBe(false);
+      expect(md).not.toMatch(/[ \t]$/m);
+    }
+  });
 });
