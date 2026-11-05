@@ -49,3 +49,13 @@ file (cluster-wide roles). Fix: the pin requires exactly the five grants for rat
 echoes of those five (anything else still fails). Checked locally with a simulated member login (PASS) and with an
 extra GRANT ... TO ratio_reader appended to the draft (FAIL, as intended); connections.db.test.ts 8 passed;
 parallelRoleDdl 19 passed.
+REVIEW ROUND GREEN (ffe894a; 68b4fd1 header trim only): lint 0, tsc 0, worker tsc 0; full vitest 312 files, 5214 passed;
+ src/ingest + parallelRoleDdl 45 files, 588 passed; connections.db.test.ts 9 passed (local PostgreSQL 16.15).
+ Privilege-model delta now pinned: the 5 worker grants + 3 triggers (append_only, 2x refuse_truncate) to review at
+ promotion. Production 392 lines (incl. the 115-line draft SQL) <= 400; tests 544 <= 600.
+Mutations (each alone, targeted suite, restored; git status clean after): 17/17 KILLED
+ R1 declaration claims verification | R2 verification not evidence-derived | R3 stale evidence counted | R4 degradation
+ not recorded | R5 evidence not tied to the latest observation | R6 evidence beyond the observed state | R7 observations
+ back in time | R8 inherited flag keys | R9 any tenant at open | R10 off-ladder observed state | SQL on Postgres: R11
+ declaration verification CHECK removed | R12 append-only trigger removed | R13 = reviewer D10 (ON DELETE CASCADE) |
+ R15 last_degraded_at after observed_at | R16 degraded observed_state | R17 TRUNCATE allowed | R14 D10 static.
