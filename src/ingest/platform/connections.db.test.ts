@@ -113,13 +113,15 @@ describe('draft 0020 on Postgres: tenant isolation (RLS)', () => {
     expect(await attempt(c, CONN, [A, 'c8', 'provider-a-usage-file', decl(), 'live-verified', 'reconciled'])).toMatchObject({ ok: true });
   }));
   it('against the reviewed privilege model, the only deviations are the five worker grants that promotion must review', () => inDraft(async (c) => {
-    expect((await privilegeModelViolations(c)).sort()).toEqual([
-      'ratio_worker holds relation:ratio.platform_connections:INSERT beyond the reviewed set',
-      'ratio_worker holds relation:ratio.platform_connections:SELECT beyond the reviewed set',
-      'ratio_worker holds relation:ratio.platform_connections:UPDATE beyond the reviewed set',
-      'ratio_worker holds relation:ratio.platform_evidence_refs:INSERT beyond the reviewed set',
-      'ratio_worker holds relation:ratio.platform_evidence_refs:SELECT beyond the reviewed set',
-    ]);
+    const FIVE = ['platform_connections:INSERT', 'platform_connections:SELECT', 'platform_connections:UPDATE', 'platform_evidence_refs:INSERT', 'platform_evidence_refs:SELECT'];
+    const v = await privilegeModelViolations(c);
+    expect(v.filter((x) => x.startsWith('ratio_worker ')).sort()).toEqual(FIVE.map((g) => `ratio_worker holds relation:ratio.${g} beyond the reviewed set`));
+    // Logins that concurrently running DB test files create as members of ratio_worker inherit the same grants and are
+    // listed too (cluster-wide roles); they may echo only these five, never anything else.
+    for (const x of v.filter((y) => !y.startsWith('ratio_worker '))) {
+      const m = /^ratio_test_login_\w+ holds relation:ratio\.(\w+:[A-Z]+) beyond the reviewed set of the ratio roles it belongs to$/.exec(x);
+      expect(m && FIVE.includes(m[1]), x).toBe(true);
+    }
   }));
   it('the down file removes exactly the two tables', () => inDraft(async (c) => {
     await c.query(DOWN);

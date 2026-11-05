@@ -43,3 +43,9 @@ Mutations (each alone in a separate worktree, targeted suite, restored with git 
  discarded; the results above are from the re-run.
 Migration handling: draft only (docs/migrations/drafts/), not in src/ingest/db/migrations; ledger unchanged; the
 ledger guard (migrationLedger.test.ts) passes in the full suite.
+ROUND 2 (CI on b8d01a9: test:db failed 1 of 731): the privilege-model pin listed 10 deviations in CI, not 5; the extra
+5 were the same grants echoed for a ratio_test_login_* member of ratio_worker created by a concurrently running DB test
+file (cluster-wide roles). Fix: the pin requires exactly the five grants for ratio_worker and allows only member-login
+echoes of those five (anything else still fails). Checked locally with a simulated member login (PASS) and with an
+extra GRANT ... TO ratio_reader appended to the draft (FAIL, as intended); connections.db.test.ts 8 passed;
+parallelRoleDdl 19 passed.
