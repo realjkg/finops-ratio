@@ -26,6 +26,7 @@ import { ALERTS } from '@/data/alerts';
 import { MODEL_REGISTRY } from '@/data/models';
 import { allGatesPassed } from '@/lib/derive';
 import { buildAIContext, createAIClient } from '@/ai';
+import { withSourceLine } from '@/ai/mock/format';
 import type { AIMessage, AIProvider } from '@/ai';
 
 export type SecondaryMode = 'value' | 'cost' | 'unit';
@@ -353,7 +354,9 @@ export const useStore = create<AppState>((set, get) => ({
       const assistantMessage: AIChatMessage = {
         id: nextMessageId(),
         role: 'assistant',
-        content: reply.message.content,
+        // Every mock answer shown names its source (review Low c). The legacy answers keep their byte-identical
+        // API text (contract golden); the panel adds the one provenance line they lack.
+        content: reply.provider === 'mock' ? withSourceLine(reply.message.content, context.asOf) : reply.message.content,
         timestamp: new Date().toISOString(),
         initiativesReferenced: reply.initiativesReferenced,
         provider: reply.provider,

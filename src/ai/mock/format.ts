@@ -69,6 +69,11 @@ export function basisLine(asOf: string): string {
   return `${SOURCE_PREFIX} as of ${asOf.slice(0, 10)} — computed by a deterministic mock (no LLM, nothing live).`;
 }
 
+/** Adds the source line to a mock answer that has none (the legacy answers), and never twice. */
+export function withSourceLine(content: string, asOf: string): string {
+  return content.includes(SOURCE_PREFIX) ? content : `${content}\n${basisLine(asOf)}`;
+}
+
 /** Render an Answer: header, body, assumptions, basis chip, next questions. */
 export function render(a: Answer, asOf: string): string {
   const lines = [a.header, ...a.body];
