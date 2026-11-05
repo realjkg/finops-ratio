@@ -86,6 +86,7 @@ export function sampleView(persona: Persona): SampleView {
     rows: models.slice(0, 6).map((m) => ({
       label: m.display_name, detail: `${m.provider} · ${m.cost_tier}`, value: `$${m.pricing.input_per_1m} / $${m.pricing.output_per_1m}`,
     })),
-    note: 'Prices are the model registry’s list rates, not a quote.',
+    // The registry has no published-price provenance, and /simulation carries no Demo badge (review M2).
+    note: 'Illustrative prices, not a quote or a current published price list.',
   };
 }
