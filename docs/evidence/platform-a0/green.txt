@@ -30,3 +30,8 @@ Mutations (each applied alone in a separate worktree, targeted suite run, restor
  17/17 KILLED.
 Status wording: no capability is above its declared status ("planned" / "not started"); the computed ceiling is
 "implemented and pre-release validated; live verification scheduled"; nothing in the section is ever PASS.
+ROUND 2 (CodeQL on ec778bb: 2 high "Incomplete string escaping" in platformEvidence.test.mjs lines 61-62, the
+quote-only escaping of test names). Fix: manifest test names must not contain a quote, backtick or backslash (asserted),
+so they are matched literally with no escaping. Targeted: npx vitest run --cache=false scripts/evidence -> 4 files,
+65 tests passed; A0-M14 and A0-M16 re-run on the fixed test: KILLED (2), KILLED (1). Full gates for this head:
+docs/evidence/pr-182/evidence.md (collector).

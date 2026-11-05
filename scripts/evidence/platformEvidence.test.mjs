@@ -58,8 +58,10 @@ describe('the repository evidence manifest', () => {
     expect(tests.length).toBeGreaterThan(0);
     for (const t of tests) {
       const src = read(t.file);
-      expect(src, `${t.file}: ${t.title}`).toContain(`it('${t.title.replace(/'/g, "\\'")}'`);
-      for (const s of t.suite.split(' > ')) expect(src, `${t.file}: ${s}`).toContain(`describe('${s.replace(/'/g, "\\'")}'`);
+      // Names are matched literally, so they may not contain a quote, a backtick or a backslash (no escaping needed).
+      for (const name of [t.title, ...t.suite.split(' > ')]) expect(name, `${t.file}: ${name}`).not.toMatch(/['"`\\]/);
+      expect(src, `${t.file}: ${t.title}`).toContain(`it('${t.title}'`);
+      for (const s of t.suite.split(' > ')) expect(src, `${t.file}: ${s}`).toContain(`describe('${s}'`);
     }
     expect(manifestTestFiles(manifest())).toEqual([...new Set(tests.map((t) => t.file))].sort());
   });
