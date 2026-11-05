@@ -12,7 +12,7 @@ import process from 'node:process';
 import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { bundledFontHashes, checkNextBundle, CLIENT_FORBIDDEN, FONT_MARKERS, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
+import { bundledFontHashes, checkNextBundle, CLIENT_FORBIDDEN, FONT_MARKERS, PLATFORM_CONTRACT_MARKERS, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
 
 const dirs = [];
 afterEach(() => {
@@ -199,5 +199,16 @@ describe('B6 bundled PDF fonts stay out of client files', () => {
     const repoFonts = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'fonts');
     expect(bundledFontHashes(repoFonts)).toHaveLength(3);
     expect(bundledFontHashes(path.join(os.tmpdir(), 'no-such-ratio-fonts'))).toEqual([]);
+  });
+});
+
+describe('B7 platform contracts stay out of client files (ADR-0001)', () => {
+  it('a client chunk carrying a contract schema version fails; the same text in a server chunk passes', () => {
+    for (const m of PLATFORM_CONTRACT_MARKERS) expect(CLIENT_FORBIDDEN).toContain(m);
+    const root = cleanTree();
+    write(root, 'server/chunks/shared._.js', 'export const v = "policy-decision/1"');
+    expect(problemsOf(root)).toEqual([]);
+    write(root, 'static/chunks/coverage.js', 'const v="ai-usage-event/1"');
+    expect(problemsOf(root)).toEqual(['client file static/chunks/coverage.js contains ai-usage-event/1']);
   });
 });

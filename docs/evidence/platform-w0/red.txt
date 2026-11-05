@@ -1,0 +1,19 @@
+RED evidence, platform wave 0 contracts (ADR-0001). Base 1056be0. Tests committed before the implementation.
+Command: npx vitest run src/platform scripts/check-next-bundle.test.mjs --cache=false (contracts modules absent; scripts/check-next-bundle.mjs at base)
+      Tests  1 failed | 30 passed (31)
+ FAIL  scripts/check-next-bundle.test.mjs > B7 platform contracts stay out of client files (ADR-0001) > a client chunk carrying a contract schema version fails; the same text in a server chunk passes
+ FAIL  src/platform/contracts/adoption.test.ts [ src/platform/contracts/adoption.test.ts ]
+ FAIL  src/platform/contracts/connector.test.ts [ src/platform/contracts/connector.test.ts ]
+ FAIL  src/platform/contracts/economics.test.ts [ src/platform/contracts/economics.test.ts ]
+ FAIL  src/platform/contracts/policy.test.ts [ src/platform/contracts/policy.test.ts ]
+ FAIL  src/platform/contracts/schemaPin.test.ts [ src/platform/contracts/schemaPin.test.ts ]
+ FAIL  src/platform/contracts/validate.test.ts [ src/platform/contracts/validate.test.ts ]
+ Test Files  7 failed (7)
+Error: Cannot find module './adoption' imported from src/platform/contracts/adoption.test.ts
+Error: Cannot find module './connector' imported from src/platform/contracts/connector.test.ts
+Error: Cannot find module './economics' imported from src/platform/contracts/economics.test.ts
+Error: Cannot find module './index' imported from src/platform/contracts/schemaPin.test.ts
+Error: Cannot find module './policy' imported from src/platform/contracts/policy.test.ts
+Error: Cannot find module './validate' imported from src/platform/contracts/validate.test.ts
+TypeError: PLATFORM_CONTRACT_MARKERS is not iterable
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
