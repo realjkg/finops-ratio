@@ -181,6 +181,9 @@ describe('pre-release: output policy, served-model fallback, streaming and parti
     expect(r.record).toMatchObject({ dispatch: 'dispatched' });
     expect(r.record?.usageEventId).toBeUndefined();
   });
+  it('a stream that ends without its terminal event is a partial failure: the pending window is withheld', async () => {
+    expect(shape(await stream({ flavor: 'openai', reply: ['a', 'b', 'c'], omitTerminal: true }))).toEqual({ status: 502, released: ['a', 'b'], rel: 'partial', streamed: true });
+  });
   it('an upstream error status is dispatched, never released', async () => {
     const r = await stream({ flavor: 'openai', reply: [], status: 500 });
     expect(shape(r)).toEqual({ status: 502, released: [], rel: 'none', streamed: true });

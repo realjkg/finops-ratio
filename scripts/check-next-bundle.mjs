@@ -22,6 +22,8 @@
 //      fails when it finds no bundled font to compare against.
 //   7. Platform contracts (src/platform/contracts) reach no client file: all
 //      schema-version strings and the contracts origin marker are client-forbidden.
+//   8. Test-only conformance mocks (src/platform/conformance) reach no client or
+//      server file: their marker is forbidden everywhere in the build.
 // Server source maps (.map) are neither executed nor served; their
 // sourcesContent is not judged. Exit 0 = clean, 1 = problems, printed.
 import crypto from 'node:crypto';
@@ -65,6 +67,9 @@ export const PLATFORM_CONTRACT_MARKERS = [
   'entitlement/1', 'policy/1', 'policy-bundle/1', 'policy-decision/1', 'gateway-request/1', 'connector-declaration/1', 'ratio-platform-contracts',
 ];
 
+/** The marker every test-only conformance mock carries (src/platform/conformance/mockProviders.ts, ADR-0001 slice C3). */
+export const TEST_ONLY_MARKERS = ['ratio-conformance-test-only'];
+
 export const CLIENT_FORBIDDEN = [
   'pg-protocol',
   'pg-connection-string',
@@ -79,6 +84,7 @@ export const CLIENT_FORBIDDEN = [
   ...WORKER_ONLY,
   ...FONT_MARKERS,
   ...PLATFORM_CONTRACT_MARKERS,
+  ...TEST_ONLY_MARKERS,
 ];
 
 const PG_TRACE = /(^|\/)node_modules\/pg(-[a-z-]+)?\//;
@@ -143,6 +149,7 @@ export function checkNextBundle(nextDir, { fontHashes = [] } = {}) {
   for (const f of serverJs) {
     const text = fs.readFileSync(f, 'utf8');
     for (const m of has(text, WORKER_ONLY)) problems.push(`server file ${rel(f)} contains worker-only ${m}`);
+    for (const m of has(text, TEST_ONLY_MARKERS)) problems.push(`server file ${rel(f)} contains test-only ${m}`);
     const reader = has(text, READER_MARKERS);
     if (reader.length === 0) continue;
     if (readerRel.has(rel(f))) {

@@ -1,0 +1,78 @@
+GREEN evidence, platform slice C3 (mock providers, mock gateway, conformance suite, ADR-0001 §13). Same tests as red.txt, code added.
+Test edit after RED (reviewed, no assertion weakened): one test ADDED after the mutation check found a survivor (a stream that ends
+without its terminal event must be a partial failure; mock option omitTerminal). Nothing removed or relaxed.
+
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (conformance + B8 lines)
+  ✓ scripts/check-next-bundle.test.mjs > B8 test-only conformance mocks stay out of every bundle (ADR-0001 slice C3) > the conformance marker fails in a client file ...
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > a clean request is dispatched once and released in full; test servers listen o...
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat user text: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat content parts: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat system: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat tool-call arguments: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat tool result: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > completions-style prompt: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > responses input: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > responses function output: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages system: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages text block: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages tool_use input: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages tool_result: seeded card is found and blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > clean /v1/completions is dispatched (surface { model: 'model-x', …(1) })
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > clean /v1/responses is dispatched (surface { model: 'model-x', …(1) })
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > clean /v1/messages is dispatched (surface { model: 'model-c', messages: [Array...
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > an unknown surface (embeddings) is blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > a disallowed tool is blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > an uninspectable content block is blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > malformed JSON is blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > a disallowed model is blocked before dispatch
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > identity comes from the gateway credential; claimed headers are ignored; an un...
+  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > an oversized input is bounded: never parsed or inspected past the limit, DLP u...
+  ✓ conformance.test.ts > fail closed on evaluation timeout and engine error > a hung engine times out at the policy deadline and the request is never dispatched
+  ✓ conformance.test.ts > fail closed on evaluation timeout and engine error > an engine that throws fails closed
+  ✓ conformance.test.ts > fail closed on evaluation timeout and engine error > monitor-only: a timeout continues with a visible gap and the request is dispatched
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a blocked response is never released (non-streamed)
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a provider-side model fallback is re-entitled before rel...
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > streams a clean response window by window
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > buffer_full: no chunk before a block is released
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > buffer_window: the blocked window and everything after i...
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a split marker across windows is a documented gap (overl...
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > pass_through (one-chunk windows, no buffering) is refuse...
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > anthropic stream: a card in streamed tool input is withheld
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > partial failure mid-stream (buffer_window): released ["a...
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > partial failure mid-stream (buffer_full): released [], r...
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a stream that ends without its terminal event is a parti...
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > an upstream error status is dispatched, never released
+  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > the default engine is the C1 library
+  ✓ guard.test.ts > conformance mocks are test-only > have exactly these modules, importing only node built-ins, the contracts, the policy library and each other
+  ✓ guard.test.ts > conformance mocks are test-only > no non-test module of the app, worker, scripts or client imports them
+  ✓ guard.test.ts > conformance mocks are test-only > the worker build does not compile them
+  ✓ guard.test.ts > conformance mocks are test-only > plant test: a minified, tree-shaken bundle of either mock carries the marker check:bundle refuses in client and...
+ Test Files  3 passed (3)
+      Tests  76 passed (76)
+
+Gates on the code tree (Linux container, Node v22.23.4):
+  npm run lint: exit 0 | npx tsc --noEmit: exit 0 | npx tsc -p tsconfig.worker.json --noEmit: exit 0 | git diff --check: clean
+  npx vitest run --cache=false: exit 0, Test Files  314 passed (314), Tests  5295 passed (5295)
+    (an earlier full run had one unrelated 5 s timeout, src/connectors/managed/boundary.test.ts, while an evidence collector ran in
+    parallel; it passes alone and in the rerun above)
+  npm run build: exit 0 | npm run check:bundle: exit 0, {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]}
+
+Mutation check (one at a time, npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs; KILLED = a test failed):
+  M1  KILLED   blocked request dispatched anyway  <- chat user text: seeded card is found and blocked before dispatch
+  M2  KILLED   fail-open on evaluation timeout  <- a hung engine times out at the policy deadline and the request is never dispatched
+  M3  KILLED   fail-open on engine error  <- an engine that throws fails closed
+  M4  KILLED   oversized bound removed  <- an oversized input is bounded: never parsed or inspected past the limit, DLP unavailable, 
+  M5  KILLED   streaming window released before (regardless of) its decision  <- buffer_full: no chunk before a block is released
+  M6  KILLED   buffer_full ignored (released per window)  <- buffer_full: no chunk before a block is released
+  M7  KILLED   tool-call arguments not inspected  <- chat tool-call arguments: seeded card is found and blocked before dispatch
+  M8  KILLED   tool results not inspected  <- messages tool_result: seeded card is found and blocked before dispatch
+  M9  KILLED   uninspectable content treated as inspected  <- an uninspectable content block is blocked before dispatch
+  M10 KILLED   partial failure releases the pending window  <- partial failure mid-stream (buffer_window): released ["a","b"], recorded as partial, no us
+  M11 KILLED   served model not re-checked before release  <- a provider-side model fallback is re-entitled before release
+  M12 KILLED   claimed tenant header trusted  <- identity comes from the gateway credential; claimed headers are ignored; an unknown creden
+  M13 KILLED   raw output text in the record  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1 
+  M14 KILLED   destination not surface-qualified  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1 
+  M15 KILLED   non-streamed blocked response released  <- a blocked response is never released (non-streamed)
+  M16 KILLED   stream without its terminal event treated as complete  <- a stream that ends without its terminal event is a partial failure: the pending window is 
+  M17 KILLED   check:bundle rule 8 (server files) removed  <- the conformance marker fails in a client file and in a server file
+  17/17 killed (first pass: 16/17; the survivor M16 led to the added test)
