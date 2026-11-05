@@ -169,4 +169,8 @@ describe('input refusal, no content', () => {
     expect({ verdict: e.verdict, decisions: e.decisions, refused: e.problems.length > 0 }).toEqual({ verdict: 'block', decisions: [], refused: true });
     expect(JSON.stringify(e)).not.toMatch(/SYNTHETIC-SECRET-TEXT|jane@/);
   });
+  it('names a refused context key under $.context (each problem path is re-rooted once)', () => {
+    expect(evaluate(input({ context: { ...ctx(), prompt: 'x' } as never })).problems).toEqual(['$.context.prompt: unknown key']);
+    expect(evaluate(input({ context: ctx({ actorRef: 'svc:$x' }) })).problems).toEqual(['$.context.actorRef: identifier']);
+  });
 });

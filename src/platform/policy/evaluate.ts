@@ -150,7 +150,7 @@ const refuse = (problems: string[]): Evaluation => ({ verdict: 'block', decision
 function admit(i: EvaluationInput): { c: RequestContext; now: string } | Evaluation {
   const r = validateRequestContext(i?.context);
   const now = i?.clock?.now;
-  const problems = [...(r.ok ? [] : r.problems.map((p) => p.replace('$', '$.context'))), ...(isIsoInstant(now) ? [] : ['$.clock.now: UTC instant ending in Z']),
+  const problems = [...(r.ok ? [] : r.problems.map((p) => `$.context${p.slice(1)}`)), ...(isIsoInstant(now) ? [] : ['$.clock.now: UTC instant ending in Z']),
     ...(i?.accessMode === 'monitor' || i?.accessMode === 'enforce' ? [] : ['$.accessMode: one of monitor|enforce'])];
   return problems.length || !r.ok ? refuse(problems) : { c: r.value, now: now as string };
 }
