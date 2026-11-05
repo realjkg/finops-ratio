@@ -1,12 +1,13 @@
 {
   "schema": "ratio.pr-evidence/2",
   "pr": 183,
-  "generatedAt": "2026-11-05T10:42:02.226Z",
-  "command": "node scripts/evidence/collect-pr-evidence.mjs --base origin/main --head d562c86d10cc7c5b05d5c3fd3ff83aaa7e2fd387 --pr 183",
+  "generatedAt": "2026-11-05T12:11:26.814Z",
+  "command": "node scripts/evidence/collect-pr-evidence.mjs --base origin/main --head 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2 --pr 183",
   "collector": {
-    "commit": "d562c86d10cc7c5b05d5c3fd3ff83aaa7e2fd387",
-    "script": "e838d092119f3746bb710a40d6c8b9886991838073522f83d4a587a90c2f1119",
-    "lib": "c37c77ab228e3f7e8563834e27ddb075696cf2484e8c2f4527f6fefa10375e62"
+    "commit": "551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2",
+    "script": "d925c4888420c49b89e250ba12c7dfe22a7740d509ad1e775b2bfad3b686e197",
+    "lib": "d08282c31df04568e308840f040fd05f12c6582fdd53798abcb0d648ac2b17b1",
+    "platformLib": "35351ec54cf4657f449117f56ab16bea872cae2d4b1c2f9c03c32747caba63f5"
   },
   "env": {
     "node": "v22.23.4",
@@ -32,18 +33,18 @@
   },
   "base": {
     "ref": "origin/main",
-    "sha": "6c809afec4c54300f004d1c7880637aa632aac84",
-    "tree": "7f4fec7f00eafd897f091ec67cda3b0faa278f6c"
+    "sha": "f2aeec81e9ddcca992058a6124bb4a621df06ce8",
+    "tree": "9ee2ad2cbc4d10d15268237fcd996f9df0110907"
   },
   "mergeBase": {
-    "sha": "6c809afec4c54300f004d1c7880637aa632aac84",
-    "tree": "7f4fec7f00eafd897f091ec67cda3b0faa278f6c"
+    "sha": "f2aeec81e9ddcca992058a6124bb4a621df06ce8",
+    "tree": "9ee2ad2cbc4d10d15268237fcd996f9df0110907"
   },
   "head": {
-    "sha": "d562c86d10cc7c5b05d5c3fd3ff83aaa7e2fd387",
-    "tree": "4eecfc1f6908fe438978667b8e08e37d31d2d924"
+    "sha": "551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2",
+    "tree": "fbc1ccd0f18e9c928fe12a736ec1c3b6f0bd9fcb"
   },
-  "evidenceCommitNote": "This file attests code SHA `d562c86d10cc7c5b05d5c3fd3ff83aaa7e2fd387`. A commit that adds it must change only `docs/evidence/pr-183/`.",
+  "evidenceCommitNote": "This file attests code SHA `551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2`. A commit that adds it must change only `docs/evidence/pr-183/`.",
   "gates": [
     {
       "name": "npm ci",
@@ -55,12 +56,12 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:42:02.954Z",
-      "end": "2026-11-05T10:42:34.171Z",
-      "durationSec": 31.2,
+      "start": "2026-11-05T12:11:27.350Z",
+      "end": "2026-11-05T12:11:56.368Z",
+      "durationSec": 29,
       "log": "docs/evidence/pr-183/logs/npm_ci.log",
-      "logSha256": "516eb635bc1fe57d5e458b58c629eb527eb940dbb68126ea1bda2e2c09b237b7",
-      "tail": "$ npm ci\nnpm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.\nnpm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported\nnpm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.\nnpm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me\nnpm warn deprecated fstream@1.0.12: This package is no longer supported.\n\nadded 536 packages, and audited 537 packages in 31s\n\n99 packages are looking for funding\n  run `npm fund` for details\n\n17 vulnerabilities (12 moderate, 4 high, 1 critical)\n\nTo address issues that do not require attention, run:\n  npm audit fix\n\nTo address all issues (including breaking changes), run:\n  npm audit fix --force\n\nRun `npm audit` for details.",
+      "logSha256": "b89fc72083d4a168018c6da35c2255c370a2b65f542c72f32add57e1be8b2c3a",
+      "tail": "$ npm ci\nnpm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.\nnpm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported\nnpm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.\nnpm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me\nnpm warn deprecated fstream@1.0.12: This package is no longer supported.\n\nadded 536 packages, and audited 537 packages in 28s\n\n99 packages are looking for funding\n  run `npm fund` for details\n\n17 vulnerabilities (12 moderate, 4 high, 1 critical)\n\nTo address issues that do not require attention, run:\n  npm audit fix\n\nTo address all issues (including breaking changes), run:\n  npm audit fix --force\n\nRun `npm audit` for details.",
       "totals": null,
       "expectTotals": false,
       "db": null,
@@ -78,9 +79,9 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:42:34.173Z",
-      "end": "2026-11-05T10:42:58.192Z",
-      "durationSec": 24,
+      "start": "2026-11-05T12:11:56.369Z",
+      "end": "2026-11-05T12:12:19.226Z",
+      "durationSec": 22.9,
       "log": "docs/evidence/pr-183/logs/lint.log",
       "logSha256": "c4f0db4f3945e89bf42320c3e4ef5b572fcf71d17c561926bf6d9270cf5a4ff7",
       "tail": "$ npm run lint\n\n> ratio@1.0.0 lint\n> eslint .",
@@ -101,9 +102,9 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:42:58.195Z",
-      "end": "2026-11-05T10:43:06.372Z",
-      "durationSec": 8.2,
+      "start": "2026-11-05T12:12:19.227Z",
+      "end": "2026-11-05T12:12:25.523Z",
+      "durationSec": 6.3,
       "log": "docs/evidence/pr-183/logs/typecheck_app_.log",
       "logSha256": "c80636726de2a49758fceff3bb96b5b01706d0f21ba507de399fa5c5dedf63cb",
       "tail": "$ npx tsc --noEmit",
@@ -124,9 +125,9 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:43:06.374Z",
-      "end": "2026-11-05T10:43:11.564Z",
-      "durationSec": 5.2,
+      "start": "2026-11-05T12:12:25.524Z",
+      "end": "2026-11-05T12:12:30.110Z",
+      "durationSec": 4.6,
       "log": "docs/evidence/pr-183/logs/typecheck_worker_.log",
       "logSha256": "cd91f5f661f697ea66f39ce5b4ceee9fa285ca84fda15206ff6e157968611ac1",
       "tail": "$ npx tsc -p tsconfig.worker.json --noEmit",
@@ -142,39 +143,39 @@
       "command": "npx vitest run --cache=false",
       "cwd": ".",
       "ran": true,
-      "exitCode": 1,
+      "exitCode": 0,
       "signal": null,
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:43:11.565Z",
-      "end": "2026-11-05T10:47:41.800Z",
-      "durationSec": 270.2,
+      "start": "2026-11-05T12:12:30.111Z",
+      "end": "2026-11-05T12:15:17.464Z",
+      "durationSec": 167.4,
       "log": "docs/evidence/pr-183/logs/unit_tests_vitest_.log",
-      "logSha256": "6460dfccdb11c127312d5d0702b81a2e33b3a108a267095e30536168eb19ed34",
-      "tail": "    104|\n    105| describe('managed connector boundary', () => {\n    106|   it('no file Next can bundle reaches a worker-only managed module (an…\n       |   ^\n    107|     const roots = bundleRoots();\n    108|     expect(roots.map((r) => r.root)).toEqual(expect.arrayContaining(['…\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯\n\n FAIL  src/connectors/managed/evidence/redact.test.ts > redactString > finishes 1 MB hostile inputs in under a second each\nAssertionError: expected [ 'a=', false ] to deeply equal [ 'a=', true ]\n\n- Expected\n+ Received\n\n  [\n    \"a=\",\n-   true,\n+   false,\n  ]\n\n ❯ src/connectors/managed/evidence/redact.test.ts:15:45\n     13|       const t = Date.now();\n     14|       red(s);\n     15|       expect([unit, Date.now() - t < 1000]).toEqual([unit, true]);\n       |                                             ^\n     16|     }\n     17|   });\n\n⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯\n\n\n Test Files  2 failed | 311 passed (313)\n      Tests  2 failed | 5280 passed (5282)\n   Start at  10:43:12\n   Duration  269.13s (tests 82%, import 11%, environment 4%, transform 3%)\n\n    Isolate  313 workers spawned · ~370ms startup each (spawn + environment, per file)\n             at least ~38.26s faster with isolate: false — reuses workers across files instead of one per file",
+      "logSha256": "c1d1798a47fc422488203a5869a4b6a07c6b8009aa7dba81bf214eb95c338b07",
+      "tail": "    at PersonaProvider (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/components/PersonaProvider.tsx:20:28)\n\n ✓ src/executive/spendSummaryBar.honesty.test.tsx (2 tests) 44ms\n ✓ src/lib/scales.test.ts (3 tests) 8ms\nstderr | src/executive/InitiativeCard.na.test.tsx > InitiativeCard budget used > shows N/A with the reason when the approved budget is invalid\nWarning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.\n    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/components/EvidenceMark.tsx:31:25)\n    at p\n    at article\n    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/executive/InitiativeCard.tsx:21:27)\n\nstderr | src/executive/InitiativeCard.na.test.tsx > InitiativeCard budget used > caps only the bar width for an over-budget workload, not the printed percent\nWarning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.\n    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/components/EvidenceMark.tsx:31:25)\n    at p\n    at article\n    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/executive/InitiativeCard.tsx:21:27)\n\n ✓ src/executive/InitiativeCard.na.test.tsx (2 tests) 62ms\n ✓ scripts/completion/core.test.mjs (3 tests) 6ms\n(node:26726) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n ✓ src/ingest/usersDispatch.test.ts (1 test) 51ms\n ✓ src/ai/demoPrompts.test.ts (1 test) 75ms\n ✓ src/lib/basePath.test.ts (3 tests) 5ms\n ✓ src/connectors/managed/registry.test.ts (2 tests) 14ms\n ✓ src/data/alertPresentation.test.ts (3 tests) 7ms\n ✓ src/ingest/db/testing/requireTestDatabaseUrl.test.ts (3 tests) 6ms\n ✓ src/finio/utcValidation.test.ts (1 test) 15ms\n ✓ src/costsource/transports/listingCompleteness.test.ts (1 test) 4ms\n ✓ src/attribution/liveAccrualHonesty.test.tsx (1 test) 261ms\n\n Test Files  318 passed (318)\n      Tests  5364 passed (5364)\n   Start at  12:12:31\n   Duration  166.31s (tests 83%, import 10%, transform 3%, environment 3%)\n\n    Isolate  318 workers spawned · ~200ms startup each (spawn + environment, per file)\n             at least ~20.97s faster with isolate: false — reuses workers across files instead of one per file",
       "totals": {
         "kind": "vitest",
         "files": {
-          "passed": 311,
-          "failed": 2,
+          "passed": 318,
+          "failed": 0,
           "skipped": 0,
           "todo": 0,
-          "total": 313
+          "total": 318
         },
         "tests": {
-          "passed": 5280,
-          "failed": 2,
+          "passed": 5364,
+          "failed": 0,
           "skipped": 0,
           "todo": 0,
-          "total": 5282
+          "total": 5364
         }
       },
       "expectTotals": true,
       "db": null,
-      "status": "FAIL",
+      "status": "PASS",
       "note": null,
-      "summary": "311/313 files, 5280 passed, 2 failed, 0 skipped"
+      "summary": "318/318 files, 5364 passed, 0 failed, 0 skipped"
     },
     {
       "name": "integration tests (Postgres)",
@@ -208,11 +209,11 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:47:41.819Z",
-      "end": "2026-11-05T10:47:55.740Z",
-      "durationSec": 13.9,
+      "start": "2026-11-05T12:15:17.478Z",
+      "end": "2026-11-05T12:16:04.173Z",
+      "durationSec": 46.7,
       "log": "docs/evidence/pr-183/logs/build.log",
-      "logSha256": "ed1412a32affbfc56fa69b197f3608f1e2ccd923a07942b6c26909cea0175e5f",
+      "logSha256": "f7ce35d7f551d7647b4cb797f9a268335076e230ec024a0eceed501ec57ad90a",
       "tail": "├ ƒ /api/v1/a2a/handshake\n├ ƒ /api/v1/ai/chat\n├ ƒ /api/v1/cm/change\n├ ƒ /api/v1/connectors\n├ ƒ /api/v1/costs/published\n├ ƒ /api/v1/finio/export\n├ ƒ /api/v1/reports/engagement\n├ ƒ /api/v1/reports/facts\n├ ƒ /api/v1/simulation/chat\n├ ƒ /api/v1/simulation/command\n├ ƒ /api/v1/simulation/frank\n├ ƒ /api/v1/simulation/operations\n├ ƒ /api/v1/simulation/report\n├ ƒ /api/v1/simulation/session\n├ ƒ /api/v1/simulation/state\n├ ƒ /api/v1/simulation/status\n├ ○ /attribution\n├ ○ /connectors\n├ ○ /costsource\n├ ○ /demo\n├ ƒ /engagement\n├ ○ /finio\n├ ○ /finio/demo\n├ ○ /frameworks\n├ ○ /hello\n├ ○ /mission\n├ ○ /outcomes\n├ ○ /overview\n├ ○ /prediction\n├ ○ /reports\n├ ○ /simulation\n├ ○ /tokenomics\n├ ○ /workloads\n└ ○ /workspace\n\nƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\nƒ  (Dynamic)  server-rendered on demand",
       "totals": null,
       "expectTotals": false,
@@ -231,8 +232,8 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:47:55.744Z",
-      "end": "2026-11-05T10:47:56.189Z",
+      "start": "2026-11-05T12:16:04.174Z",
+      "end": "2026-11-05T12:16:04.538Z",
       "durationSec": 0.4,
       "log": "docs/evidence/pr-183/logs/bundle_check.log",
       "logSha256": "d47070c1fe6c18be48bb0e3c07cff33f02e261c906747420adf5abab5876e500",
@@ -254,12 +255,12 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:47:57.072Z",
-      "end": "2026-11-05T10:56:01.885Z",
-      "durationSec": 484.8,
+      "start": "2026-11-05T12:16:05.457Z",
+      "end": "2026-11-05T12:21:52.033Z",
+      "durationSec": 346.6,
       "log": "docs/evidence/pr-183/logs/Playwright_simulation_suite.log",
-      "logSha256": "d972c4a22a0edd0c59b173f36d4e7f63ef8be0c10c316ce484c9975f4c20b047",
-      "tail": "  ✓  25 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 320px (finding card and KPI card) (3.1s)\n  ✓  26 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 360px (finding card and KPI card) (2.9s)\n  ✓  27 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 390px (finding card and KPI card) (2.9s)\n  ✓  28 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 768px (finding card and KPI card) (2.5s)\n  ✓  29 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 1440px (finding card and KPI card) (3.1s)\n  ✓  30 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 100% text (4.2s)\n  ✓  31 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 360px, 100% text (4.6s)\n  ✓  32 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 390px, 100% text (4.7s)\n  ✓  33 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 130% text (4.2s)\n  ✓  34 tests/simulation/phone-ui.spec.ts:59:5 › the strip is reachable by keyboard: tabbing to the last item brings it fully into view (2.7s)\n  ✓  35 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 320px (2.1s)\n  ✓  36 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 360px (1.8s)\n  ✓  37 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 390px (2.0s)\n  ✓  38 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 320px, with 44px targets (5.0s)\n  ✓  39 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 360px, with 44px targets (4.6s)\n  ✓  40 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 390px, with 44px targets (5.0s)\n  ✓  41 tests/simulation/phone-ui.spec.ts:134:5 › Estimated value: opening it describes the button and announces the text; Escape inside the Frank panel leaves it open (2.8s)\n  ✓  42 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 390px (2.9s)\n  ✓  43 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 768px (3.2s)\n  ✓  44 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1024px (3.6s)\n  ✓  45 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1280px (3.5s)\n  ✓  46 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1440px (3.7s)\n  ✓  47 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 390px (3.2s)\n  ✓  48 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 1440px (4.2s)\n  ✓  49 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 320px (4.3s)\n  ✓  50 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 390px (4.3s)\n  ✓  51 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 430px (4.7s)\n  ✓  52 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1440px (8.0s)\n  ✓  53 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 390px (7.6s)\n  ✓  54 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 1440px (8.3s)\n  ✓  55 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 390px (7.1s)\n  ✓  56 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 320px (7.4s)\n  ✓  57 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 360px (7.0s)\n  ✓  58 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 768px (7.5s)\n  ✓  59 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1024px (7.1s)\n  ✓  60 tests/simulation/typography-layout.spec.ts:97:5 › both top-bar panels stay inside the viewport at 130% and 115% (14.7s)\n  ✓  61 tests/simulation/z-agent-workflows.spec.ts:13:5 › embedded reviews recover interruptions and require independent human review (5.1s)\n  ✓  62 tests/simulation/zz-frank.spec.ts:15:5 › Frank guides an accountable review, retains evidence boundaries and hands approval to another persona (3.5s)\n\n  62 passed (8.1m)",
+      "logSha256": "c34176466f0e4108d77d3975cdda7255e0f5c4b39348453276ab9f71bd1a3b5e",
+      "tail": "  ✓  25 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 320px (finding card and KPI card) (1.4s)\n  ✓  26 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 360px (finding card and KPI card) (1.6s)\n  ✓  27 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 390px (finding card and KPI card) (1.5s)\n  ✓  28 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 768px (finding card and KPI card) (1.7s)\n  ✓  29 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 1440px (finding card and KPI card) (1.6s)\n  ✓  30 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 100% text (2.8s)\n  ✓  31 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 360px, 100% text (2.6s)\n  ✓  32 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 390px, 100% text (2.7s)\n  ✓  33 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 130% text (2.8s)\n  ✓  34 tests/simulation/phone-ui.spec.ts:59:5 › the strip is reachable by keyboard: tabbing to the last item brings it fully into view (1.1s)\n  ✓  35 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 320px (1.1s)\n  ✓  36 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 360px (1.1s)\n  ✓  37 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 390px (1.2s)\n  ✓  38 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 320px, with 44px targets (2.7s)\n  ✓  39 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 360px, with 44px targets (2.8s)\n  ✓  40 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 390px, with 44px targets (2.8s)\n  ✓  41 tests/simulation/phone-ui.spec.ts:134:5 › Estimated value: opening it describes the button and announces the text; Escape inside the Frank panel leaves it open (1.3s)\n  ✓  42 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 390px (1.9s)\n  ✓  43 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 768px (1.9s)\n  ✓  44 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1024px (1.9s)\n  ✓  45 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1280px (1.9s)\n  ✓  46 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1440px (2.0s)\n  ✓  47 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 390px (2.2s)\n  ✓  48 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 1440px (2.3s)\n  ✓  49 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 320px (2.6s)\n  ✓  50 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 390px (2.5s)\n  ✓  51 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 430px (2.6s)\n  ✓  52 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1440px (5.8s)\n  ✓  53 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 390px (5.8s)\n  ✓  54 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 1440px (5.9s)\n  ✓  55 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 390px (5.7s)\n  ✓  56 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 320px (5.6s)\n  ✓  57 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 360px (5.7s)\n  ✓  58 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 768px (6.0s)\n  ✓  59 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1024px (6.0s)\n  ✓  60 tests/simulation/typography-layout.spec.ts:97:5 › both top-bar panels stay inside the viewport at 130% and 115% (9.9s)\n  ✓  61 tests/simulation/z-agent-workflows.spec.ts:13:5 › embedded reviews recover interruptions and require independent human review (4.3s)\n  ✓  62 tests/simulation/zz-frank.spec.ts:15:5 › Frank guides an accountable review, retains evidence boundaries and hands approval to another persona (3.1s)\n\n  62 passed (5.7m)",
       "totals": {
         "kind": "playwright",
         "passed": 62,
@@ -283,12 +284,12 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:56:01.887Z",
-      "end": "2026-11-05T10:56:12.064Z",
-      "durationSec": 10.2,
+      "start": "2026-11-05T12:21:52.035Z",
+      "end": "2026-11-05T12:22:02.907Z",
+      "durationSec": 10.9,
       "log": "docs/evidence/pr-183/logs/Playwright_engagement_report_spec.log",
-      "logSha256": "03ab7e7be9d25b38cf4a767b3e1bfd18fd474f8de6f359fbc535fd29287c3fba",
-      "tail": "$ npx playwright test --config playwright.engagement.config.ts\n[WebServer] (node:16925) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n[WebServer] (node:16944) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n\nRunning 7 tests using 1 worker\n\n  ✓  1 tests/engagement/report-page.spec.ts:14:5 › anonymous: 401, no-store, Vary: Cookie, CSP enforced with no violation, only a sign-in link per enabled connection (1.3s)\n[WebServer] {\"tag\":\"gateway\",\"event\":\"unhandled_error\",\"requestId\":\"e2641cb5-34e7-4fcd-9bb9-cadd5de1fd63\",\"method\":\"GET\",\"path\":\"/api/v1/reports/engagement\",\"status\":500,\"error\":\"connect ECONNREFUSED 127.0.0.1:1\"}\n  ✓  2 tests/engagement/report-page.spec.ts:27:5 › analyst: report table and both exports; the real route is reached with the session (DB absent: fixed unavailable message) (980ms)\n  ✓  3 tests/engagement/report-page.spec.ts:42:5 › viewer: no export links; the export route itself refuses the viewer (403) (688ms)\n  ✓  4 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (light) (758ms)\n  ✓  5 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (dark) (819ms)\n  ✓  6 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (high-contrast) (792ms)\n[WebServer] {\"tag\":\"gateway\",\"event\":\"unhandled_error\",\"requestId\":\"da93cbad-c857-46f7-9c7f-99b9baf6ff09\",\"method\":\"GET\",\"path\":\"/api/v1/reports/engagement\",\"status\":500,\"error\":\"connect ECONNREFUSED 127.0.0.1:1\"}\n  ✓  7 tests/engagement/report-page.spec.ts:80:5 › engagement mode never shows the Demo badge (anonymous and signed in), and demo routes stay 404 (1.3s)\n\n  7 passed (8.9s)",
+      "logSha256": "a124bfca7c59723cf17919c2f4862b3fbdb32ffa8a496e5acb7762383d20b25d",
+      "tail": "$ npx playwright test --config playwright.engagement.config.ts\n[WebServer] (node:29951) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n[WebServer] (node:29970) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n\nRunning 7 tests using 1 worker\n\n  ✓  1 tests/engagement/report-page.spec.ts:14:5 › anonymous: 401, no-store, Vary: Cookie, CSP enforced with no violation, only a sign-in link per enabled connection (1.4s)\n[WebServer] {\"tag\":\"gateway\",\"event\":\"unhandled_error\",\"requestId\":\"5d0ff9ab-eec2-45f2-b131-04e30b7ddd75\",\"method\":\"GET\",\"path\":\"/api/v1/reports/engagement\",\"status\":500,\"error\":\"connect ECONNREFUSED 127.0.0.1:1\"}\n  ✓  2 tests/engagement/report-page.spec.ts:27:5 › analyst: report table and both exports; the real route is reached with the session (DB absent: fixed unavailable message) (974ms)\n  ✓  3 tests/engagement/report-page.spec.ts:42:5 › viewer: no export links; the export route itself refuses the viewer (403) (804ms)\n  ✓  4 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (light) (757ms)\n  ✓  5 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (dark) (810ms)\n  ✓  6 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (high-contrast) (754ms)\n[WebServer] {\"tag\":\"gateway\",\"event\":\"unhandled_error\",\"requestId\":\"a68e0c54-ab11-4327-8eb2-d4094406e20b\",\"method\":\"GET\",\"path\":\"/api/v1/reports/engagement\",\"status\":500,\"error\":\"connect ECONNREFUSED 127.0.0.1:1\"}\n  ✓  7 tests/engagement/report-page.spec.ts:80:5 › engagement mode never shows the Demo badge (anonymous and signed in), and demo routes stay 404 (1.4s)\n\n  7 passed (9.7s)",
       "totals": {
         "kind": "playwright",
         "passed": 7,
@@ -314,8 +315,8 @@
       "timedOut": false,
       "timeoutMin": 60,
       "spawnError": null,
-      "start": "2026-11-05T10:47:56.191Z",
-      "end": "2026-11-05T10:47:57.071Z",
+      "start": "2026-11-05T12:16:04.539Z",
+      "end": "2026-11-05T12:16:05.456Z",
       "durationSec": 0.9,
       "log": "docs/evidence/pr-183/logs/chromium-launch.log",
       "logSha256": "cd969a6d1e343b3894ab6a393fb1a15a3c04ad9819855394176f8bb7e082f44a",
@@ -337,6 +338,29 @@
       "summary": "N/A: not requested (--migration-smoke)",
       "status": "N/A",
       "note": null
+    },
+    {
+      "name": "platform capability tests (informational)",
+      "command": "npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/docs/evidence/pr-183/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/validate.test.ts",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T12:22:02.963Z",
+      "end": "2026-11-05T12:22:05.382Z",
+      "durationSec": 2.4,
+      "log": "docs/evidence/pr-183/logs/platform_capability_tests_informational_.log",
+      "logSha256": "3f35262dc970e6ad50df476f7a6d5a936d1daaa7e87775859b2447431177e534",
+      "tail": "$ npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/docs/evidence/pr-183/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/src/platform/contracts/validate.test.ts\nJSON report written to /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc3/docs/evidence/pr-183/logs/platform-vitest.json",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
     }
   ],
   "fixtures": {
@@ -344,9 +368,9 @@
     "determinism": []
   },
   "rollback": {
-    "procedure": "Test: a temporary worktree at d562c86d10cc7c5b05d5c3fd3ff83aaa7e2fd387 under the OS temp directory (outside the checkout); `git diff --no-color --no-ext-diff --no-textconv --binary --src-prefix=a/ --dst-prefix=b/ 6c809afec4c54300f004d1c7880637aa632aac84 d562c86d10cc7c5b05d5c3fd3ff83aaa7e2fd387 > pr.diff`; in the worktree `git apply -R --binary pr.diff && git add -A && git write-tree` (git -c color.ui=never -c core.autocrlf=false); compare with the merge-base tree; then lint, typecheck (app and worker) and the full vitest suite there; the worktree is removed by exact path (also on INT/TERM).",
-    "production": "after merge, `git revert -m 1 <merge sha>` (merge commit) or `git revert <squash sha>` (squash), or reverse-apply `git diff 6c809afec4c54300f004d1c7880637aa632aac84 d562c86d10cc7c5b05d5c3fd3ff83aaa7e2fd387` with `git apply -R`; no data, schema or config migration needs undoing.",
-    "treeAfterReverse": "7f4fec7f00eafd897f091ec67cda3b0faa278f6c",
+    "procedure": "Test: a temporary worktree at 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2 under the OS temp directory (outside the checkout); `git diff --no-color --no-ext-diff --no-textconv --binary --src-prefix=a/ --dst-prefix=b/ f2aeec81e9ddcca992058a6124bb4a621df06ce8 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2 > pr.diff`; in the worktree `git apply -R --binary pr.diff && git add -A && git write-tree` (git -c color.ui=never -c core.autocrlf=false); compare with the merge-base tree; then lint, typecheck (app and worker) and the full vitest suite there; the worktree is removed by exact path (also on INT/TERM).",
+    "production": "after merge, `git revert -m 1 <merge sha>` (merge commit) or `git revert <squash sha>` (squash), or reverse-apply `git diff f2aeec81e9ddcca992058a6124bb4a621df06ce8 551e5800bc5c6c26c03ba3e43a5ac0ca6c3f43a2` with `git apply -R`; no data, schema or config migration needs undoing.",
+    "treeAfterReverse": "9ee2ad2cbc4d10d15268237fcd996f9df0110907",
     "gates": [
       {
         "name": "rollback: dependencies",
@@ -381,12 +405,12 @@
         "status": "PASS",
         "note": null,
         "exitCode": 0,
-        "summary": "309/309 files, 5177 passed, 0 failed, 0 skipped",
-        "logSha256": "24eaafb945115e5780285bde2907d0cfc7fe11baf2e7f412c7125aa303808754"
+        "summary": "313/313 files, 5239 passed, 0 failed, 0 skipped",
+        "logSha256": "e086a679ecd4a1a3e84681d43f80f92d6e88a34087aa63c0766d3edb3b7b3149"
       }
     ],
     "status": "PASS",
-    "detail": "Reverse-applied tree 7f4fec7f00eafd897f091ec67cda3b0faa278f6c equals the merge-base tree 7f4fec7f00eafd897f091ec67cda3b0faa278f6c. On the rolled-back tree: dependencies PASS (exit 0); lint PASS (exit 0); typecheck PASS (exit 0); unit tests PASS (309/309 files, 5177 passed, 0 failed, 0 skipped)."
+    "detail": "Reverse-applied tree 9ee2ad2cbc4d10d15268237fcd996f9df0110907 equals the merge-base tree 9ee2ad2cbc4d10d15268237fcd996f9df0110907. On the rolled-back tree: dependencies PASS (exit 0); lint PASS (exit 0); typecheck PASS (exit 0); unit tests PASS (313/313 files, 5239 passed, 0 failed, 0 skipped)."
   },
   "knownGaps": [
     "integration tests (Postgres): NOT RUN: no database in this environment (RATIO_EVIDENCE_TEST_DATABASE_URL unset)",
@@ -396,8 +420,8 @@
     {
       "id": 1,
       "item": "All gates green on the head SHA (lint, typecheck, unit + integration tests, migrations up/down where defined, build)",
-      "status": "FAIL",
-      "evidence": "FAILED: unit tests (vitest)"
+      "status": "NOT RUN",
+      "evidence": "9 PASS, 1 N/A, 1 NOT RUN (see Known gaps)"
     },
     {
       "id": 2,
@@ -423,5 +447,347 @@
       "status": "PENDING (orchestrator)",
       "evidence": "Decision: <to be written by the orchestrator in the PR body>"
     }
-  ]
+  ],
+  "platform": {
+    "manifest": "docs/evidence/platform/manifest.json",
+    "problems": [],
+    "capabilities": [
+      {
+        "id": 1,
+        "name": "Track model spending",
+        "release": "1.1",
+        "evidenceRequired": "Approved-source imports reconcile; unmatched charges and allocation gaps remain visible",
+        "declared": "planned",
+        "status": "PLANNED",
+        "items": [
+          {
+            "id": "cap1-w0-allocation-contract",
+            "slice": "W0",
+            "kind": "test",
+            "description": "allocation/1: shares plus explicit unallocated equal the source amount exactly; same sign; unique targets; pseudonymous users",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/economics.test.ts",
+                "suite": "FinancialRecord, RateCard, Allocation",
+                "title": "allocation: exact sum, same sign, unique targets, pseudonymous users",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap1-a4-control-totals",
+            "slice": "A4",
+            "kind": "fixture",
+            "description": "Approved-source cost fixture reconciles to its control totals, per currency (no cross-currency sum)",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap1-a4-unmatched-charges",
+            "slice": "A4",
+            "kind": "test",
+            "description": "Unmatched and unrouted charges are listed with reasons, never dropped",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap1-a5-allocation-gaps",
+            "slice": "A5",
+            "kind": "test",
+            "description": "Allocation exactness with unallocated reasons; allocation coverage and reconciliation coverage reported separately with known denominators",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 4 evidence items implemented and passing; 3 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Reconciliation table with variance reasons; allocation coverage",
+        "liveVerification": "One approved billing source reconciles in the pilot"
+      },
+      {
+        "id": 2,
+        "name": "Measure adoption",
+        "release": "1.2",
+        "evidenceRequired": "Numerator and denominator reproducible; identities and exclusions tested",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap2-w0-adoption-definition",
+            "slice": "W0",
+            "kind": "test",
+            "description": "adoption-definition/1: actor and denominator rules",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/adoption.test.ts",
+                "suite": "AdoptionDefinition (cap 2)",
+                "title": "names the actor and denominator rules",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap2-b2b3-rerun-determinism",
+            "slice": "B2/B3",
+            "kind": "test",
+            "description": "Numerator and denominator reproducible from fixtures on re-run (versioned definitions, snapshot ids)",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap2-b2-exclusions",
+            "slice": "B2",
+            "kind": "fixture",
+            "description": "Exclusion and suspended-user fixtures; memberSetSha256 stable",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 3 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Adoption metric with definition version and snapshot id",
+        "liveVerification": "Pilot identity source snapshot"
+      },
+      {
+        "id": 3,
+        "name": "Report user utilization",
+        "release": "1.2",
+        "evidenceRequired": "Authorized user-level drill-down, service-account separation, retention and privacy controls",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap3-w0-actor-types",
+            "slice": "W0",
+            "kind": "test",
+            "description": "Actor-type rules: humans only as keyed pseudonyms; services never carry seats",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/validate.test.ts",
+                "suite": "identifiers, people and content",
+                "title": "a human ref is a keyed HMAC under a named key, never an email or a bare hash",
+                "status": "PASSED"
+              },
+              {
+                "file": "src/platform/contracts/adoption.test.ts",
+                "suite": "ActivityEvent and EligiblePopulationSnapshot (cap 2, 3)",
+                "title": "missing licensed seats stay absent; services never carry seats",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap3-b4-drilldown-permission",
+            "slice": "B4",
+            "kind": "test",
+            "description": "usage:drilldown is role-only and audited; reports:read alone cannot drill down; suppression below the minimum group size",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap3-b4-deletion-jobs",
+            "slice": "B4",
+            "kind": "test",
+            "description": "Retention deletion removes rows and writes a run record",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap3-log-redaction",
+            "slice": "B4",
+            "kind": "test",
+            "description": "Log redaction tests: no identity or content in logs",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 4 evidence items implemented and passing; 3 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Drill-down audit log; retention run records",
+        "liveVerification": "Pilot retention run"
+      },
+      {
+        "id": 4,
+        "name": "Track token costs",
+        "release": "1.1",
+        "evidenceRequired": "Cache/batch semantics verified per provider; missing usage and rate gaps do not become zero",
+        "declared": "planned",
+        "status": "PLANNED",
+        "items": [
+          {
+            "id": "cap4-w0-absent-usage",
+            "slice": "W0",
+            "kind": "test",
+            "description": "ai-usage-event/1: absent usage stays absent (never 0); token counts are whole-token strings",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/economics.test.ts",
+                "suite": "AIUsageEvent (cap 1, 4)",
+                "title": "absent usage stays absent: nothing is filled with 0",
+                "status": "PASSED"
+              },
+              {
+                "file": "src/platform/contracts/economics.test.ts",
+                "suite": "AIUsageEvent (cap 1, 4)",
+                "title": "token counts are canonical whole-token strings",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap4-w0-rate-card-rows",
+            "slice": "W0",
+            "kind": "test",
+            "description": "rate-card/1: cache and batch are explicit rows, never multipliers (golden corpus)",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/schemaPin.test.ts",
+                "suite": "schema version pins and the golden corpus",
+                "title": "rate-card/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap4-a2-accounting-profiles",
+            "slice": "A2",
+            "kind": "fixture",
+            "description": "Accounting-profile fixtures: overlapping vs additive token categories never double-count; absent tokens stay N/A (field mappings per public docs, to be verified live)",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap4-a3-missing-rate-gap",
+            "slice": "A3",
+            "kind": "test",
+            "description": "A missing rate is a visible gap, not 0; the rate card version is recorded on every estimate; cache and batch are explicit rows",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "2 of 4 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Token cost by category with rate card version",
+        "liveVerification": "Each provider profile verified against live usage"
+      },
+      {
+        "id": 5,
+        "name": "Inspect prompts before execution",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Requests blocked before dispatch in supported scenarios; bypass paths assessed",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap5-c3-zero-dispatch",
+            "slice": "C3",
+            "kind": "test",
+            "description": "A blocked request is never dispatched: the mock provider receives zero calls",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap5-c6-bypass-assessment",
+            "slice": "C6",
+            "kind": "document",
+            "description": "Bypass assessment document for the pilot gateway",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "0 of 2 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Decision log with rule ids",
+        "liveVerification": "Pilot gateway path blocks a seeded request"
+      },
+      {
+        "id": 6,
+        "name": "Enforce input/output policies",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Allow, block, timeout, streaming and partial-failure behavior tested",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap6-w0-policy-fail-closed",
+            "slice": "W0",
+            "kind": "test",
+            "description": "policy/1: an enforcing policy that can block fails closed; an enforcing output policy buffers",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/policy.test.ts",
+                "suite": "Entitlement and Policy (cap 5-8)",
+                "title": "an enforcing policy that can block fails closed; an enforcing output policy buffers",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap6-c1-evaluation",
+            "slice": "C1",
+            "kind": "test",
+            "description": "Allow, block, redact, require-approval, log-only per rule; deterministic for the same inputs",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap6-c3c4-conformance",
+            "slice": "C3/C4",
+            "kind": "test",
+            "description": "Conformance: timeouts, engine errors, streaming windows and partial failures",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 3 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Conformance report",
+        "liveVerification": "Pilot gateway conformance run"
+      },
+      {
+        "id": 7,
+        "name": "Block sensitive data transfers",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Seeded sensitive-data tests demonstrate prevention before prohibited transmission",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap7-c4-seeded-dlp",
+            "slice": "C4",
+            "kind": "fixture",
+            "description": "Seeded sensitive-data fixtures, incl. encoded and tool-payload variants, blocked before the mock provider sees them; findings carry offsets only",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "0 of 1 evidence items implemented and passing; 1 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "DLP findings (offsets only)",
+        "liveVerification": "Pilot DLP run with seeded data"
+      },
+      {
+        "id": 8,
+        "name": "Control model access",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Disallowed models/providers rejected; credentials and network paths prevent documented bypasses",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap8-c1-entitlements",
+            "slice": "C1",
+            "kind": "test",
+            "description": "Entitlement tests: deny wins; requested and served model both checked",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap8-c3-surface-allowlist",
+            "slice": "C3",
+            "kind": "test",
+            "description": "Destination allowlist per surface; unknown surface denied in enforce mode",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap8-c6-bypass-assessment",
+            "slice": "C6",
+            "kind": "document",
+            "description": "Bypass assessment: provider keys only in the gateway, egress restricted",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "0 of 3 evidence items implemented and passing; 3 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Entitlement decision log",
+        "liveVerification": "Pilot network and key-inventory checks"
+      }
+    ],
+    "ceiling": "implemented and pre-release validated; live verification scheduled",
+    "run": {
+      "available": true
+    }
+  }
 }
