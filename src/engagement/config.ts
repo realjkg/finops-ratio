@@ -14,6 +14,7 @@ import { createHash } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { MODEL_REGISTRY } from '../data/models'; // relative: also compiled into dist-worker (users command)
+import { PLATFORM_CAPABILITIES, PLATFORM_OFF, parsePlatformBlock, type PlatformCapability, type PlatformFlags } from '../platform/flags';
 
 type Env = Record<string, string | undefined>;
 
@@ -110,6 +111,8 @@ export const SUPPORTED_IN_THIS_BUILD = {
   managedConnectors: ['aws-data-exports'] as readonly ManagedConnector[],
   sourceKinds: ['focus-export', 'native-export'] as readonly SourceMetadata['source_kind'][],
   deliveryFormats: ['csv', 'csv-gzip'] as readonly SourceMetadata['delivery']['format'][],
+  /** ADR-0001 D7: platform capabilities this build can run when the owner enables them. None yet. */
+  platformCapabilities: [] as readonly PlatformCapability[],
 };
 
 export interface EngagementSource {
@@ -178,7 +181,12 @@ export interface EngagementConfig {
   budgets: EngagementBudget[];
   scenarios: EngagementScenario[];
   outcomesFile?: string;
+  /** ADR-0001 D7: the per-instance platform opt-in, normalized; absent = every platform capability off. */
+  platform?: PlatformFlags;
 }
+
+/** The instance's platform flags; all off unless the config enables them (ADR-0001 D7). */
+export const platformFlagsOf = (config: EngagementConfig): PlatformFlags => config.platform ?? PLATFORM_OFF;
 
 export type ValidateResult = { ok: true; config: EngagementConfig } | { ok: false; problems: string[] };
 export type LoadResult = { ok: true; config: EngagementConfig; sha256: string } | { ok: false; problems: string[] };
@@ -531,7 +539,7 @@ function retrievalBlock(c: Ctx, v: unknown, key: string): Retrieval | null {
   return { kind: 'managed', connector, params, ...(secretRef ? { secretRef } : {}) };
 }
 
-const TOP_KEYS = ['engagementId', 'tenantId', 'displayName', 'currency', 'sources', 'allocation', 'budgets', 'scenarios', 'outcomesFile'] as const;
+const TOP_KEYS = ['engagementId', 'tenantId', 'displayName', 'currency', 'sources', 'allocation', 'budgets', 'scenarios', 'outcomesFile', 'platform'] as const;
 
 /** Schema validation of an already parsed value. Never echoes values. */
 export function validateEngagementConfig(input: unknown): ValidateResult {
@@ -695,13 +703,20 @@ export function validateEngagementConfig(input: unknown): ValidateResult {
     else c.bad('outcomesFile', 'must be a non-empty file path string');
   }
 
+  let platform: PlatformFlags | undefined;
+  if (has(root, 'platform')) {
+    const r = parsePlatformBlock(root.platform);
+    if (r.ok) platform = r.flags;
+    else c.problems.push(...r.problems);
+  }
+
   if (c.problems.length > 0 || !engagementId || !tenantId || !displayName || !currency || !workloadTagKey || !ownerTagKey) return { ok: false, problems: c.problems.length ? c.problems : ['config: invalid'] };
   return {
     ok: true,
     config: {
       engagementId, tenantId, displayName, currency, sources,
       allocation: { workloadTagKey, ownerTagKey, subAccountMap, workloads, sharedCostRules },
-      budgets, scenarios, ...(outcomesFile ? { outcomesFile } : {}),
+      budgets, scenarios, ...(outcomesFile ? { outcomesFile } : {}), ...(platform ? { platform } : {}),
     },
   };
 }
@@ -718,6 +733,7 @@ function supportedInThisBuild(config: EngagementConfig): string[] {
     if (!SUPPORTED_IN_THIS_BUILD.sourceKinds.includes(s.metadata.source_kind)) p.push(`${k}.metadata.source_kind: ${NOT_IMPLEMENTED}`);
     if (!SUPPORTED_IN_THIS_BUILD.deliveryFormats.includes(s.metadata.delivery.format)) p.push(`${k}.metadata.delivery.format: ${NOT_IMPLEMENTED}`);
   });
+  for (const cap of PLATFORM_CAPABILITIES) if (config.platform?.[cap] && !SUPPORTED_IN_THIS_BUILD.platformCapabilities.includes(cap)) p.push(`platform.${cap}: ${NOT_IMPLEMENTED}`);
   return p;
 }
 
