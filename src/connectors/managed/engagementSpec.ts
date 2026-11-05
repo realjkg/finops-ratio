@@ -14,6 +14,7 @@
 // Problems name the KEY, never the value.
 import fs from 'fs';
 import path from 'path';
+import { PLATFORM_CAPABILITIES, parsePlatformBlock } from '../../platform/flags';
 
 export const MANAGED_CONNECTORS = ['aws-data-exports', 'azure-cost-export', 'gcp-bigquery-export', 'oci-cost-report', 'nutanix', 'servicenow', 'pointfive', 'opencost', 'openai-usage', 'anthropic-usage'] as const;
 export const CREDENTIAL_RE: readonly RegExp[] = [/-----BEGIN [A-Z ]*-----/, /^eyJ[\w-]{8,}\.[\w-]{8,}\.?[\w-]*$/, /^(AKIA|ASIA)[A-Z0-9]{16}$/, /^[A-Za-z0-9+/_=-]{40,}$/];
@@ -24,7 +25,7 @@ const MAX_LEAF_CHARS = 1000;
 const MAX_SOURCES = 50;
 const MAX_BYTES = 1024 * 1024;
 const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-const TOP_KEYS = ['engagementId', 'tenantId', 'displayName', 'currency', 'sources', 'allocation', 'budgets', 'scenarios', 'outcomesFile'];
+const TOP_KEYS = ['engagementId', 'tenantId', 'displayName', 'currency', 'sources', 'allocation', 'budgets', 'scenarios', 'outcomesFile', 'platform'];
 const SOURCE_KEYS = ['id', 'providers', 'layout', 'retrieval', 'metadata'];
 const RETRIEVAL_KEYS = ['kind', 'connector', 'params', 'secretRef'];
 // eslint-disable-next-line no-control-regex
@@ -149,6 +150,11 @@ export function engagementProblems(input: unknown, approved: readonly string[] =
   const p: string[] = [];
   unknownKeys(input, TOP_KEYS, '', p);
   if (typeof input.tenantId !== 'string' || !UUID_RE.test(input.tenantId)) p.push('tenantId: must be a canonical UUID');
+  // ADR-0001 D7: R1's platform block, parsed by the same module. The worker runs no platform capability in this build,
+  // so it refuses every one that is on (fail closed), as R1's SUPPORTED_IN_THIS_BUILD.platformCapabilities does.
+  const platform = parsePlatformBlock(input.platform);
+  if (!platform.ok) p.push(...platform.problems);
+  else for (const cap of PLATFORM_CAPABILITIES) if (platform.flags[cap]) p.push(`platform.${cap}: not implemented in this build`);
   const sources = input.sources;
   if (!Array.isArray(sources) || sources.length < 1 || sources.length > MAX_SOURCES) return [...p, `sources: must be an array of 1 to ${MAX_SOURCES} items`];
   const seen = new Set<string>();

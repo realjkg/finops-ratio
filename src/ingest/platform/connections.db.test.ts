@@ -5,6 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { privilegeModelViolations } from '../db/privilegeModel';
 import { attempt, createTestDatabase, withRole, type TestDatabase } from '../db/testing/harness';
 import { connector } from '../../platform/contracts/testing/fixtures';
 import { EVIDENCE_REF_SCHEMA } from './connections';
@@ -105,6 +106,20 @@ describe('draft 0020 on Postgres: tenant isolation (RLS)', () => {
       expect(await attempt(c, CONN, [A, 'c7', 'provider-a-usage-file', decl(), 'degraded', null])).toMatchObject({ ok: true });
       expect(await attempt(c, CONN, [A, 'c8', 'provider-a-usage-file', decl(), 'live-verified', 'reconciled'])).toMatchObject({ ok: true });
     });
+  });
+  it('against the reviewed privilege model, the only deviations are the five worker grants that promotion must review', async () => {
+    const c = await db.pool.connect();
+    try {
+      expect((await privilegeModelViolations(c)).sort()).toEqual([
+        'ratio_worker holds relation:ratio.platform_connections:INSERT beyond the reviewed set',
+        'ratio_worker holds relation:ratio.platform_connections:SELECT beyond the reviewed set',
+        'ratio_worker holds relation:ratio.platform_connections:UPDATE beyond the reviewed set',
+        'ratio_worker holds relation:ratio.platform_evidence_refs:INSERT beyond the reviewed set',
+        'ratio_worker holds relation:ratio.platform_evidence_refs:SELECT beyond the reviewed set',
+      ]);
+    } finally {
+      c.release();
+    }
   });
   it('the down file removes exactly the two tables', async () => {
     const c = await db.pool.connect();
