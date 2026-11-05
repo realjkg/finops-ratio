@@ -13,3 +13,39 @@ AssertionError: expected [] to deeply equal [ 'context.ts', 'evaluate.ts', …(1
 AssertionError: expected [ 'src/ingest/**/*.ts', …(2) ] to include 'src/platform/policy/*.ts'
  Test Files  3 failed (3)
       Tests  2 failed | 1 passed (3)
+
+REVIEW ROUND 1 (challenger review of #183 at 13009d6: M1, M2, L1-L7). Tests committed before the fixes.
+Command: npx vitest run src/platform/policy --cache=false (evaluate.ts/context.ts at 13009d6)
+     × deny model-x blocks model-x@20261001
+     × deny model-x blocks model-x-2026-10-01
+     × deny model-x blocks MODEL-X
+     × deny model-x blocks Model-X.v2
+     × deny model-x blocks model-x:ft
+     × re-checks a dated served id against the family deny before release
+     × a refused context (duplicate tools) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (257 teams) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (1001 findings) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a 129-character requestRef) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a symbol key) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a throwing getter) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a proxy) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (null) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a missing model is MODEL_UNKNOWN: blocked in enforce, recorded and allowed in monitor; a not_in model rule holds
+     × an unreadable bundle and a failed evaluation follow the access mode (monitor never enforces)
+     × a clock that throws is recorded under the epoch with CLOCK_INVALID, and blocks in enforce
+     × the access mode is bound to the D7 flags by one helper; a mismatch is refused (enforce)
+     × only the highest version of an entitlement or policy id is evaluated
+     × a dropped (contract-invalid) decision fails the evaluation closed (M20)
+     × a compiled bundle gives the same result as the raw one; a look-alike object is not trusted as compiled
+     × reads each input getter once (a strict copy is validated and evaluated)
+     × hostile inputs never throw, never allow in enforce mode, and always record a decision
+     × P9: at the contract maxima a compiled bundle evaluates within a bounded time (recorded in green.txt)
+     × an unreadable bundle is one denied decision under a placeholder id, in the access mode (monitor: verdict allow)
+     × refuses a content key: block, one recorded denied decision, no echoed value
+     × refuses a bad clock: block, one recorded denied decision, no echoed value
+     × refuses an email as actor: block, one recorded denied decision, no echoed value
+     × refuses a bad finding: block, one recorded denied decision, no echoed value
+     × random junk as input never throws and never allows
+⎯⎯⎯⎯⎯⎯ Failed Tests 30 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  3 failed | 1 passed (4)
+      Tests  30 failed | 74 passed (104)

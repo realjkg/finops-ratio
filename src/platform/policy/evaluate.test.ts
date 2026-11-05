@@ -136,10 +136,10 @@ describe('the failure table (ADR-0001 §3.3)', () => {
     expect({ verdict: e.verdict, source: e.source }).toEqual({ verdict: 'block', source: 'none' });
     for (const d of e.decisions) expect(view(d)).toEqual({ outcome: 'block', enforced: true, ruleIds: [], reasonCodes: [code], failure, handling: 'denied' });
   });
-  it('an unreadable bundle is one enforced, denied decision under a placeholder id', () => {
-    const e = valid(evaluate(input({ bundle: { ...bundle(), prompt: 'x' }, accessMode: 'monitor' })));
-    expect(e.decisions.map((d) => [d.bundleId, d.mode, d.failure, d.outcome, d.reasonCodes])).toEqual([['unreadable-bundle', 'enforce', 'policy_invalid', 'block', ['BUNDLE_INVALID']]]);
-    expect(e.verdict).toBe('block');
+  it.each([['enforce', 'block'], ['monitor', 'allow']] as const)('an unreadable bundle is one denied decision under a placeholder id, in the access mode (%s: verdict %s)', (accessMode, verdict) => {
+    const e = valid(evaluate(input({ bundle: { ...bundle(), prompt: 'x' }, accessMode })));
+    expect(e.decisions.map((d) => [d.bundleId, d.mode, d.failure, d.outcome, d.reasonCodes])).toEqual([['unreadable-bundle', accessMode, 'policy_invalid', 'block', ['BUNDLE_INVALID']]]);
+    expect(e.verdict).toBe(verdict);
   });
 });
 
@@ -164,9 +164,10 @@ describe('input refusal, no content', () => {
   it.each([
     ['a content key', { context: { ...ctx(), prompt: 'SYNTHETIC-SECRET-TEXT' } }], ['a bad clock', { clock: { now: '2026-10-02 12:00' } }],
     ['an email as actor', { context: ctx({ actorType: 'human', actorRef: 'jane@corp.example' }) }], ['a bad finding', { context: ctx({ findings: [{ ...card(), matched: 'SYNTHETIC-SECRET-TEXT' }] as never }) }],
-  ])('refuses %s: block, no decision, no echoed value', (_n, over) => {
-    const e = evaluate(input(over as never));
-    expect({ verdict: e.verdict, decisions: e.decisions, refused: e.problems.length > 0 }).toEqual({ verdict: 'block', decisions: [], refused: true });
+  ])('refuses %s: block, one recorded denied decision, no echoed value', (_n, over) => {
+    const e = valid(evaluate(input(over as never)));
+    expect({ verdict: e.verdict, refused: e.problems.length > 0, d: e.decisions.map((d) => [d.failure, d.failureHandling, d.outcome, d.enforced, d.reasonCodes[0]]) })
+      .toEqual({ verdict: 'block', refused: true, d: [['engine_error', 'denied', 'block', true, 'CONTEXT_INVALID']] });
     expect(JSON.stringify(e)).not.toMatch(/SYNTHETIC-SECRET-TEXT|jane@/);
   });
   it('names a refused context key under $.context (each problem path is re-rooted once)', () => {

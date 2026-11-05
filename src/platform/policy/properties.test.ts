@@ -153,6 +153,7 @@ describe('policy evaluation properties over 400 seeded random scenarios', () => 
     for (let n = 0; n < 300; n++) {
       const e = evaluate({ bundle: chance(r, 0.5) ? junk() : bundle(), context: (chance(r, 0.5) ? junk() : ctx()) as never, clock: chance(r, 0.8) ? { now: NOW } : (junk() as never), accessMode: 'enforce' });
       if (e.problems.length || e.source === 'none') expect(e.verdict).toBe('block');
+      expect(e.decisions.length).toBeGreaterThan(0); // no verdict without a decision record
       for (const d of e.decisions) expect(validatePolicyDecision(d).ok).toBe(true);
     }
   });
