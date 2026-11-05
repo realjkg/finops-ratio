@@ -211,4 +211,12 @@ describe('B7 platform contracts stay out of client files (ADR-0001)', () => {
     write(root, 'static/chunks/coverage.js', 'const v="ai-usage-event/1"');
     expect(problemsOf(root)).toEqual(['client file static/chunks/coverage.js contains ai-usage-event/1']);
   });
+
+  it('covers all 13 schema versions and the origin marker every validator carries', () => {
+    expect(PLATFORM_CONTRACT_MARKERS).toHaveLength(14);
+    expect(PLATFORM_CONTRACT_MARKERS).toContain('ratio-platform-contracts');
+    const root = cleanTree();
+    write(root, 'static/chunks/validate.js', 'Object.assign(f,{desc:d,origin:"ratio-platform-contracts"})');
+    expect(problemsOf(root)).toEqual(['client file static/chunks/validate.js contains ratio-platform-contracts']);
+  });
 });

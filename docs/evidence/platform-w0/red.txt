@@ -17,3 +17,45 @@ Error: Cannot find module './policy' imported from src/platform/contracts/policy
 Error: Cannot find module './validate' imported from src/platform/contracts/validate.test.ts
 TypeError: PLATFORM_CONTRACT_MARKERS is not iterable
 ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ROUND 2 (challenger review of ba42695: M1-M4, lows 1-12). Tests, golden corpus and ledger guard committed before the fixes.
+Command: npx vitest run src/platform src/ingest/db/migrationLedger.test.ts scripts/check-next-bundle.test.mjs --cache=false (contracts and check-next-bundle.mjs at ba42695; no iso4217.ts, no docs/migrations/ledger.json)
+Test Files  7 failed | 1 passed (8)
+Tests  36 failed | 42 passed (78)
+FAIL  src/platform/contracts/validate.test.ts [ src/platform/contracts/validate.test.ts ]
+× a bundle is signed, single-tenant, unique and expires after it is issued
+× a credit is never positive; an estimate is priced at a contract or list rate
+× a platform migration cannot land while a 1.0 number below it is still reserved
+× a rate card basis matches its provenance
+× a request that was not dispatched has no output trace; an output digest needs its size
+× a user subject is a pseudonym
+× activity-event/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× adoption-definition/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× ai-financial-record/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× ai-usage-event/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× allocation/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× allocation: exact sum, same sign, unique targets, pseudonymous users
+× an unreserved number, a merged entry without a file, a duplicate or a reordered line is refused
+× check:bundle forbids every schema version and the contracts origin marker in client files
+× connector-declaration/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× covers all 13 schema versions and the origin marker every validator carries
+× each validator requires its own schemaVersion literal
+× eligibility-snapshot/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× enforced is true exactly in enforce mode
+× entitlement/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× every contract shape matches the pin of its schemaVersion
+× gateway-request/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× has exactly these modules, importing only each other and the pure decimal helper
+× in enforce mode, unavailable controls and bad policies never continue
+× it can land once the lower numbers are merged or released and its own entry is merged
+× missing licensed seats stay absent; services never carry seats
+× names the actor and denominator rules
+× names the actor mismatch and the receipt order
+× only an expired or invalid bundle may fall back to an approved last-known-good, and the decision records it
+× policy-bundle/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× policy-decision/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× policy/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× rate-card/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× the repository ledger matches the migrations directory
+× timeouts and engine errors continue only for log-only controls, or in monitor mode
+× token counts are canonical whole-token strings

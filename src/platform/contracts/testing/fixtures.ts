@@ -72,6 +72,7 @@ export const policy = (): Policy => ({
 export const bundle = (): PolicyBundle => ({
   schemaVersion: 'policy-bundle/1', bundleId: 'bundle-syn', version: 4, tenantId: 'tenant-syn', issuedAt: '2026-10-01T00:00:00Z', notAfter: '2026-10-08T00:00:00Z',
   policies: [policy()], entitlements: [entitlement()], contentSha256: 'd4'.repeat(32), lastKnownGoodApproved: false,
+  signature: { keyId: 'k-bundle-1', alg: 'ed25519', value: `${'A'.repeat(86)}==` },
 });
 
 export const finding = (): DlpFinding => ({
@@ -80,7 +81,7 @@ export const finding = (): DlpFinding => ({
 
 export const decision = (): PolicyDecision => ({
   schemaVersion: 'policy-decision/1', decisionId: 'dec-1', tenantId: 'tenant-syn', requestRef: 'gw-req-1', bundleId: 'bundle-syn', bundleVersion: 4,
-  phase: 'pre_request', mode: 'enforce', outcome: 'block', enforced: true, ruleIds: ['r-cards'], reasonCodes: ['DLP_PAYMENT_CARD'],
+  phase: 'pre_request', mode: 'enforce', controlClass: 'hard', outcome: 'block', enforced: true, ruleIds: ['r-cards'], reasonCodes: ['DLP_PAYMENT_CARD'],
   findings: [finding()], latencyMicros: 850, evaluatedAt: '2026-10-01T12:00:00.001Z',
 });
 

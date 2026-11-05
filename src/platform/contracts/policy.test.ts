@@ -1,89 +1,63 @@
+// Messages and the §3.3 failure table. Accept/reject coverage per contract lives in the golden corpus (corpus/*.json).
 import { describe, expect, it } from 'vitest';
-import { validateDlpFinding, validateEntitlement, validateGatewayRequestRecord, validatePolicy, validatePolicyBundle, validatePolicyDecision } from './policy';
-import { bundle, decision, entitlement, finding, gatewayRecord, policy } from './testing/fixtures';
+import { DENY_IN_ENFORCE, FAILURES, validateEntitlement, validateGatewayRequestRecord, validatePolicy, validatePolicyBundle, validatePolicyDecision, type PolicyDecision } from './policy';
+import { bundle, decision, entitlement, gatewayRecord, policy } from './testing/fixtures';
 
 const problems = (r: { ok: boolean; problems?: string[] }) => (r.ok ? [] : r.problems);
+const SHA = 'e5'.repeat(32);
 
-describe('Entitlement (cap 8)', () => {
-  it('accepts a workload allowed one model of one provider', () => {
-    expect(validateEntitlement(entitlement()).ok).toBe(true);
+describe('Entitlement and Policy (cap 5-8)', () => {
+  it('a user subject is a pseudonym', () => {
+    expect(problems(validateEntitlement({ ...entitlement(), subjectKind: 'user', subjectRef: 'jane.doe' }))).toEqual(['$.subjectRef: does not match subjectKind user']);
   });
-  it('* stands alone and dates are ordered', () => {
-    expect(validateEntitlement({ ...entitlement(), models: ['*'] }).ok).toBe(true);
-    expect(problems(validateEntitlement({ ...entitlement(), models: ['*', 'model-x'], effectiveTo: '2026-01-01' }))).toEqual(['$.models: * stands alone', '$.effectiveTo: must be after effectiveFrom']);
-  });
-});
-
-describe('Policy (cap 5, 6, 7)', () => {
-  it('accepts an enforcing, fail-closed input DLP policy', () => {
-    expect(validatePolicy(policy()).ok).toBe(true);
-  });
-  it('an enforcing policy that can block fails closed on timeout and engine error', () => {
+  it('an enforcing policy that can block fails closed; an enforcing output policy buffers', () => {
     expect(problems(validatePolicy({ ...policy(), onTimeout: 'continue_with_gap' }))).toEqual(['$: an enforcing policy fails closed (onTimeout and onEngineError must be deny)']);
-    expect(problems(validatePolicy({ ...policy(), mode: 'enforce', rules: [{ ...policy().rules[0], action: 'log_only' }], defaultAction: 'block', onEngineError: 'continue_with_gap' }))).toHaveLength(1);
+    expect(problems(validatePolicy({ ...policy(), phase: 'stream_chunk' }))).toEqual(['$.release: an enforcing output policy must buffer']);
   });
-  it('monitor-only or log-only policies may continue with a visible gap', () => {
-    expect(validatePolicy({ ...policy(), mode: 'monitor', onTimeout: 'continue_with_gap', onEngineError: 'continue_with_gap' }).ok).toBe(true);
-    expect(validatePolicy({ ...policy(), rules: [{ ...policy().rules[0], action: 'log_only' }], onTimeout: 'continue_with_gap' }).ok).toBe(true);
-  });
-  it('an enforcing output policy must buffer: released stream content cannot be withdrawn', () => {
-    const out = { ...policy(), phase: 'stream_chunk' as const };
-    expect(problems(validatePolicy(out))).toEqual(['$.release: an enforcing output policy must buffer']);
-    expect(problems(validatePolicy({ ...out, release: 'pass_through' }))).toEqual(['$.release: an enforcing output policy must buffer']);
-    expect(validatePolicy({ ...out, release: 'buffer_window' }).ok).toBe(true);
-    expect(problems(validatePolicy({ ...policy(), release: 'buffer_full' }))).toEqual(['$.release: only for output phases']);
-  });
-  it('conditions are a closed, deterministic set; rule ids are unique; the timeout is bounded', () => {
-    expect(problems(validatePolicy({ ...policy(), rules: [{ ...policy().rules[0], condition: { kind: 'llm_judge', prompt: 'is this bad?' } }] }))).toEqual(['$.rules[0].condition.kind: one of always|dlp_category|destination|model|tool|input_bytes_over|signal']);
-    expect(problems(validatePolicy({ ...policy(), rules: [policy().rules[0], policy().rules[0]] }))).toEqual(['$.rules: duplicate ruleId']);
-    expect(problems(validatePolicy({ ...policy(), evaluationTimeoutMs: 0 }))).toEqual(['$.evaluationTimeoutMs: integer 1..10000']);
-  });
-});
-
-describe('PolicyBundle (cap 5-8)', () => {
-  it('accepts the synthetic bundle', () => {
+  it('a bundle is signed, single-tenant, unique and expires after it is issued', () => {
     expect(validatePolicyBundle(bundle()).ok).toBe(true);
-  });
-  it('every policy and entitlement belongs to the bundle tenant (tenant isolation)', () => {
     const b = bundle();
-    expect(problems(validatePolicyBundle({ ...b, policies: [{ ...policy(), tenantId: 'other' }], entitlements: [{ ...entitlement(), tenantId: 'other' }] }))).toEqual([
-      '$.policies[0].tenantId: not the bundle tenant', '$.entitlements[0].tenantId: not the bundle tenant',
-    ]);
-  });
-  it('nested policies are held to the same fail-closed rules, and versions are unique', () => {
-    expect(problems(validatePolicyBundle({ ...bundle(), policies: [{ ...policy(), onTimeout: 'continue_with_gap' }] }))).toEqual(['$.policies[0]: an enforcing policy fails closed (onTimeout and onEngineError must be deny)']);
-    expect(problems(validatePolicyBundle({ ...bundle(), policies: [policy(), policy()] }))).toEqual(['$.policies: duplicate policyId and version']);
+    expect(problems(validatePolicyBundle({ ...b, notAfter: b.issuedAt, entitlements: [entitlement(), entitlement()] }))).toEqual(['$.entitlements: duplicate entitlementId and version', '$.notAfter: must be after issuedAt']);
   });
 });
 
-describe('PolicyDecision and DlpFinding (no raw content)', () => {
-  it('accepts a blocking decision with an offsets-only finding', () => {
-    expect(validatePolicyDecision(decision()).ok).toBe(true);
-    expect(validateDlpFinding(finding()).ok).toBe(true);
+describe('PolicyDecision: the failure table (ADR-0001 §3.3)', () => {
+  const failed = (failure: PolicyDecision['failure'], failureHandling: PolicyDecision['failureHandling'], over: Partial<PolicyDecision> = {}): PolicyDecision =>
+    ({ ...decision(), failure, failureHandling, outcome: failureHandling === 'continued_with_gap' ? 'allow' : 'block', findings: [], ...over });
+
+  it('in enforce mode, unavailable controls and bad policies never continue', () => {
+    for (const f of DENY_IN_ENFORCE) {
+      expect(validatePolicyDecision(failed(f, 'denied')).ok).toBe(true);
+      expect(problems(validatePolicyDecision(failed(f, 'continued_with_gap', { controlClass: 'log_only' })))).toEqual([`$.failureHandling: ${f} denies in enforce mode`]);
+    }
   });
-  it('a finding carries offsets, never the matched text', () => {
-    expect(problems(validateDlpFinding({ ...finding(), match: '4111111111111111' }))).toEqual(['$.match: unknown key']);
-    expect(problems(validateDlpFinding({ ...finding(), end: 10 }))).toEqual(['$.end: must be after start']);
+  it('timeouts and engine errors continue only for log-only controls, or in monitor mode', () => {
+    for (const f of ['timeout', 'engine_error'] as const) {
+      expect(problems(validatePolicyDecision(failed(f, 'continued_with_gap')))).toEqual(['$.failureHandling: a hard control never continues with a gap']);
+      expect(validatePolicyDecision(failed(f, 'continued_with_gap', { controlClass: 'log_only' })).ok).toBe(true);
+      expect(validatePolicyDecision(failed(f, 'continued_with_gap', { mode: 'monitor', enforced: false })).ok).toBe(true);
+    }
   });
-  it('a monitor-only decision is never enforced; it records what enforcement would have done', () => {
-    expect(validatePolicyDecision({ ...decision(), mode: 'monitor', enforced: false }).ok).toBe(true);
-    expect(problems(validatePolicyDecision({ ...decision(), mode: 'monitor' }))).toEqual(['$.enforced: a monitor-only decision is never enforced']);
+  it('only an expired or invalid bundle may fall back to an approved last-known-good, and the decision records it', () => {
+    const lkg = (failure: PolicyDecision['failure'], reason: 'policy_expired' | 'policy_invalid' = 'policy_expired') =>
+      failed(failure, 'last_known_good', { lastKnownGood: { contentSha256: SHA, reason } });
+    expect(validatePolicyDecision(lkg('policy_expired')).ok).toBe(true);
+    expect(validatePolicyDecision(lkg('policy_invalid', 'policy_invalid')).ok).toBe(true);
+    expect(problems(validatePolicyDecision(lkg('policy_invalid')))).toEqual(['$.lastKnownGood.reason: differs from failure']);
+    for (const f of FAILURES.filter((x) => x !== 'policy_expired' && x !== 'policy_invalid')) {
+      expect(problems(validatePolicyDecision(lkg(f)))).toContain('$.failureHandling: last_known_good only for policy_expired or policy_invalid');
+    }
+    expect(problems(validatePolicyDecision(failed('policy_expired', 'last_known_good')))).toEqual(['$.lastKnownGood: present exactly when a last-known-good bundle was used']);
   });
-  it('a failure states its handling: denied is a block, continued is an allow with a gap', () => {
-    expect(validatePolicyDecision({ ...decision(), failure: 'timeout', failureHandling: 'denied' }).ok).toBe(true);
-    expect(problems(validatePolicyDecision({ ...decision(), failure: 'timeout' }))).toEqual(['$.failureHandling: present exactly when failure is']);
-    expect(problems(validatePolicyDecision({ ...decision(), outcome: 'allow', failure: 'dlp_unavailable', failureHandling: 'denied' }))).toEqual(['$.outcome: a denied failure is a block']);
-    expect(problems(validatePolicyDecision({ ...decision(), failure: 'engine_error', failureHandling: 'continued_with_gap' }))).toEqual(['$.outcome: a continued failure is an allow with a gap']);
+  it('enforced is true exactly in enforce mode', () => {
+    expect(problems(validatePolicyDecision({ ...decision(), enforced: false }))).toEqual(['$.enforced: true exactly in enforce mode']);
+    expect(problems(validatePolicyDecision({ ...decision(), mode: 'monitor' }))).toEqual(['$.enforced: true exactly in enforce mode']);
   });
 });
 
 describe('GatewayRequestRecord', () => {
-  it('accepts a blocked, never-dispatched request with sizes and a keyed digest', () => {
-    expect(validateGatewayRequestRecord(gatewayRecord()).ok).toBe(true);
-  });
-  it('refuses a plain hash or body; a request not dispatched has no output', () => {
-    expect(problems(validateGatewayRequestRecord({ ...gatewayRecord(), inputDigest: 'e5'.repeat(32), body: '{}' }))).toEqual(['$.body: unknown key', '$.inputDigest: keyed content digest hm1:<keyId>:<hex>']);
-    expect(problems(validateGatewayRequestRecord({ ...gatewayRecord(), released: 'partial' }))).toEqual(['$.dispatch: a request that was not dispatched has no output, served model or release']);
-    expect(validateGatewayRequestRecord({ ...gatewayRecord(), dispatch: 'dispatched', released: 'partial', streamed: true, outputBytes: 512 }).ok).toBe(true);
+  it('a request that was not dispatched has no output trace; an output digest needs its size', () => {
+    expect(problems(validateGatewayRequestRecord({ ...gatewayRecord(), usageEventId: 'evt-1' }))).toEqual(['$.dispatch: a request that was not dispatched has no output, served model, usage event or release']);
+    expect(problems(validateGatewayRequestRecord({ ...gatewayRecord(), dispatch: 'dispatched', released: 'full', outputDigest: `hm1:k1:${SHA}` }))).toEqual(['$.outputDigest: requires outputBytes']);
   });
 });
