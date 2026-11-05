@@ -1,0 +1,138 @@
+RED evidence, platform slice C3 (mock providers, mock gateway and conformance suite, ADR-0001 §13). Base 54964d7 (C1 head, PR #183). Tests committed before the code.
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false (src/platform/conformance/{mockProviders,mockGateway}.ts absent; scripts/check-next-bundle.mjs at base)
+     × the conformance marker fails in a client file and in a server file
+ FAIL  src/platform/conformance/conformance.test.ts [ src/platform/conformance/conformance.test.ts ]
+Error: Cannot find module './mockGateway' imported from src/platform/conformance/conformance.test.ts
+ FAIL  src/platform/conformance/guard.test.ts [ src/platform/conformance/guard.test.ts ]
+Error: Cannot find module './mockProviders' imported from src/platform/conformance/guard.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  scripts/check-next-bundle.test.mjs > B8 test-only conformance mocks stay out of every bundle (ADR-0001 slice C3) > the conformance marker fails in a client file and in a server file
+AssertionError: expected undefined to deeply equal [ 'ratio-conformance-test-only' ]
+ Test Files  3 failed (3)
+      Tests  1 failed | 32 passed (33)
+
+REVIEW ROUND 1 (challenger review of #184 at c42657c: H1, M1-M5, L1-L5). Tests committed before the fixes, on 2e11f0e (gateway on the C1 compiled-bundle API).
+Command: npx vitest run src/platform/conformance --cache=false
+     × malformed JSON is blocked before dispatch
+     × a marker split across windows is caught by the carried overlap; LIMITATION: the first half was already released
+     × an oversized request for a denied model: 403, zero provider calls
+     × a model string that is not a model id: 403, zero provider calls
+     × an oversized request under allow * and no DLP policy: 403, zero provider calls
+     × the bound is in bytes: 2100 two-byte characters exceed a 4096-byte bound (N7)
+     × chat tools[].function.description: blocked before dispatch
+     × chat legacy functions[]: blocked before dispatch
+     × chat assistant function_call.arguments: blocked before dispatch
+     × chat prediction.content: blocked before dispatch
+     × chat message name: blocked before dispatch
+     × chat metadata: blocked before dispatch
+     × responses tools[].description: blocked before dispatch
+     × messages tools[].description: blocked before dispatch
+     × messages tools[].input_schema: blocked before dispatch
+     × nested JSON escape in tool arguments: blocked before dispatch
+     × content nested past the depth bound fails closed (DLP unavailable)
+     × a CPU-bound engine over the deadline is a timeout (enforce: 403, 0 calls)
+     × a CPU-bound engine over the deadline is a timeout (monitor: 200, 1 calls)
+     × under a last-known-good, the release window and the deadline come from the bundle being evaluated
+     × a tool declared and called in one request is evaluated (enforce), never a 403 without decisions
+     × buffer_full, split inside the buffer: the marker is caught on the joined window
+     × buffer_window, split inside one window: the marker is caught on the joined window
+     × buffer_window, split across windows (overlap): the marker is caught on the joined window
+     × a stream with no content still gets an output-phase decision (and its served model is re-checked)
+     × prototype-named credentials and paths are refused cleanly (L3)
+     × no non-test module of the app, worker, scripts or client imports them
+⎯⎯⎯⎯⎯⎯ Failed Tests 27 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  3 failed (3)
+      Tests  27 failed | 47 passed (74)
+
+REVIEW ROUND 2 (challenger review of #184 at 87ee647: M1-M3, L1-L6). Tests committed before the fixes, on ba18bf4 (merge of #183 551e580 incl. main; gateway passes the required D7 flags, no behavior change).
+Test helper: testing/seeded.ts reports EVERY occurrence of each marker (L3); conformance and review tests use it (all still pass at ba18bf4).
+Command: npx vitest run src/platform/conformance --cache=false
+     × a marker as a JSON key in tool arguments is blocked before dispatch
+     × a marker as a top-level key is blocked before dispatch
+     × a marker as a metadata key is blocked before dispatch
+     × a PAN as a JSON number in tool arguments is blocked before dispatch
+     × a PAN as a JSON number in metadata is blocked before dispatch
+     × a 19-digit PAN number (beyond float precision) in metadata is blocked before dispatch
+     × code_interpreter (no name)
+     × an mcp server not allowed
+     × a tool without name or type
+     × a name that is not an id (_shell), not allowed
+     × a Image block is opaque: DLP unavailable
+     × a image_file block is opaque: DLP unavailable
+     × a INPUT_AUDIO block is opaque: DLP unavailable
+     × a video_url block is opaque: DLP unavailable
+     × a detector span below 2 is refused at creation (a 1-character span would carry the whole stream)
+     × the text scan catches every import form: relative, @/ alias, bare baseUrl, template-literal and dynamic imports, require
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  2 failed | 2 passed (4)
+      Tests  16 failed | 82 passed (98)
+
+REVIEW ROUND 3 (challenger review of #184 at 67201ec: M1, L1-L4; L1 decision: unknown content-block types and binary-ish typeless parts are uninspectable).
+Tests committed before the fixes, on 662ef85 (merge of #183 6b81bfe). Tool policies in the tests now name function tools fn:<name> (L2).
+Test infrastructure in this commit: the mock provider gains an 'extra' option (fields merged into a non-streamed response).
+Command: npx vitest run src/platform/conformance --cache=false
+     × a tool without name or type
+     × a name that is not an id (_lookup), allowed as fn:_lookup
+     × a function named mcp:deepwiki (no collision with mcp:deepwiki)
+     × a nameless, typeless tool although unidentified-tool is listed
+     × parallel tool calls search + search
+     × a messages block of unknown type with base64 data is uninspectable: DLP unavailable
+     × a messages image_base64 block is uninspectable: DLP unavailable
+     × a chat input_pdf part is uninspectable: DLP unavailable
+     × a typeless chat part with image_url is uninspectable: DLP unavailable
+     × a content object (not array) with image_url is uninspectable: DLP unavailable
+     × JSON-schema fields in tool definitions are data, not content blocks; 10,001 token ids are one segment
+     × number findings carry their real location: tool_use input numbers are tool_arguments; response numbers are output (N46)
+     × a disallowed tool is blocked before dispatch
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  2 failed | 2 passed (4)
+      Tests  13 failed | 98 passed (111)
+
+REVIEW ROUND 4 (challenger review of #184 at 201c973: M1, L1-L6). #183 merged (e6eee94); main merged in first (54846f8).
+Tests committed before the fixes in 02ebdd4: C3 in src/platform/conformance/review2.test.ts ("round 4"), C1 in src/platform/policy/review2.test.ts.
+Tests that already pass before the fix guard mutations N38, N49, N50 and the accepted L5 availability cost.
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance
+     × Messages mcp_servers under an fn:search allowlist (M1)
+     × a nameless mcp_servers entry, no tool policy
+     × an unknown tool-declaring parameter (plugins), no tool policy
+     × a bundle listing the unidentified sentinel is refused (L2)
+     × server_tool_use in history is type:web_search (L4)
+     × mcp_tool_use in history is mcp:<server_name>
+     × a Responses mcp_call item is mcp:<server_label>
+     × a Responses input item of unknown type (L3) is uninspectable: DLP unavailable
+     × a typeless Responses input item with data is uninspectable: DLP unavailable
+     × function_call_output.output parts of unknown type is uninspectable: DLP unavailable
+     × known Responses items stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly
+     × a bundle naming an unidentified: tool is refused (L2)
+     × an unidentified tool is refused by the access decision (enforce: block)
+     × an unidentified tool is refused by the access decision (monitor: allow)
+     × unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)
+ Test Files  2 failed | 7 passed (9)
+      Tests  15 failed | 257 passed (272)
+
+REVIEW ROUND 5 (challenger review of #184 at e2ea5ee: M1, L1 orchestrator decision: per-surface parameter lists, L2, L3). Tests committed
+before the fixes in 7dad05a, with the lists module surfaceParams.ts (data, not used by the gateway until the fix) and the guard module list.
+The M50 test (failureEvaluation, off flags, invalid context) passes before the fix: it guards that mutation.
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance
+     × Messages {type: custom, name: shell} under an fn:shell denylist (M1)
+     × Responses {type: custom, name: shell} under an fn:shell denylist
+     × Messages {type: custom, name: search} under an fn:search allowlist
+     × a Responses custom_tool_call history item
+     × a Responses mcp_list_tools item is mcp:<server_label> (L2)
+     × tools listed by mcp_list_tools are not function identities
+     × chat web_search_options is type:web_search
+     × a Messages skill under a skill denylist
+     × a Messages container id as a string
+     × a Responses stored prompt is prompt:<id>
+     × a container without id or skills, no tool policy
+     × /v1/chat/completions: the unlisted parameter extensions is unidentified (blocked in enforce)
+     × /v1/chat/completions: the unlisted parameter capabilities is unidentified (blocked in enforce)
+     × /v1/chat/completions: the unlisted parameter actions is unidentified (blocked in enforce)
+     × /v1/chat/completions: the unlisted parameter extra_body is unidentified (blocked in enforce)
+     × /v1/messages: the unlisted parameter skills is unidentified (blocked in enforce)
+     × /v1/messages: the unlisted parameter extensions is unidentified (blocked in enforce)
+     × /v1/responses: the unlisted parameter skills is unidentified (blocked in enforce)
+     × every listed parameter that is not tool-affecting adds no unidentified tool, on each surface
+     × unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)
+ Test Files  2 failed | 7 passed (9)
+      Tests  20 failed | 273 passed (293)

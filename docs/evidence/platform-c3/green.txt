@@ -1,0 +1,134 @@
+GREEN evidence, platform slice C3 (mock providers, mock gateway, conformance suite, ADR-0001 §13). Same tests as red.txt, code added.
+Test edit after RED (reviewed, no assertion weakened): one test ADDED after the mutation check found a survivor (a stream that ends
+without its terminal event must be a partial failure; mock option omitTerminal). Nothing removed or relaxed.
+
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (conformance + B8 lines)
+  (round 0 listing condensed in round 1: 44 tests listed at commit 91f1145; reproducible with the command above)
+ Test Files  3 passed (3)
+      Tests  76 passed (76)
+
+Gates on the code tree (Linux container, Node v22.23.4):
+  npm run lint: exit 0 | npx tsc --noEmit: exit 0 | npx tsc -p tsconfig.worker.json --noEmit: exit 0 | git diff --check: clean
+  npx vitest run --cache=false: exit 0, Test Files  314 passed (314), Tests  5295 passed (5295)
+    (an earlier full run had one unrelated 5 s timeout, src/connectors/managed/boundary.test.ts, while an evidence collector ran in
+    parallel; it passes alone and in the rerun above)
+  npm run build: exit 0 | npm run check:bundle: exit 0, {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]}
+
+Mutation check (one at a time, npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs; KILLED = a test failed):
+  M1  KILLED   blocked request dispatched anyway  <- chat user text: seeded card is found and blocked before dispatch
+  M2  KILLED   fail-open on evaluation timeout  <- a hung engine times out at the policy deadline and the request is never dispatched
+  M3  KILLED   fail-open on engine error  <- an engine that throws fails closed
+  M4  KILLED   oversized bound removed  <- an oversized input is bounded: never parsed or inspected past the limit, DLP unavailable,
+  M5  KILLED   streaming window released before (regardless of) its decision  <- buffer_full: no chunk before a block is released
+  M6  KILLED   buffer_full ignored (released per window)  <- buffer_full: no chunk before a block is released
+  M7  KILLED   tool-call arguments not inspected  <- chat tool-call arguments: seeded card is found and blocked before dispatch
+  M8  KILLED   tool results not inspected  <- messages tool_result: seeded card is found and blocked before dispatch
+  M9  KILLED   uninspectable content treated as inspected  <- an uninspectable content block is blocked before dispatch
+  M10 KILLED   partial failure releases the pending window  <- partial failure mid-stream (buffer_window): released ["a","b"], recorded as partial, no us
+  M11 KILLED   served model not re-checked before release  <- a provider-side model fallback is re-entitled before release
+  M12 KILLED   claimed tenant header trusted  <- identity comes from the gateway credential; claimed headers are ignored; an unknown creden
+  M13 KILLED   raw output text in the record  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1
+  M14 KILLED   destination not surface-qualified  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1
+  M15 KILLED   non-streamed blocked response released  <- a blocked response is never released (non-streamed)
+  M16 KILLED   stream without its terminal event treated as complete  <- a stream that ends without its terminal event is a partial failure: the pending window is
+  M17 KILLED   check:bundle rule 8 (server files) removed  <- the conformance marker fails in a client file and in a server file
+  17/17 killed (first pass: 16/17; the survivor M16 led to the added test)
+
+REVIEW ROUND 1 (challenger review of #184 at c42657c). Same tests as the round-1 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the empty-stream test also checks an OpenAI stream (the mock now sends the role chunk with
+the model first, as real streams do); one test added for a buffered window over the inspection bound (mutation R12 survived first).
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (review.test.ts lines)
+  (31 review.test.ts tests listed at commit 37b40cf; condensed in round 2, reproducible with the command above)
+  Test Files  4 passed (4)
+  Tests  108 passed (108)
+
+Mutation check, round 1 (one at a time, same command): reviewer set N1-N20 and the round-0 set M1-M17 adapted, R1-R12 new.
+  killed: N1/M1, N2/M2, N3/M3, N4/M4, N5/M5, N7, N8/M9, N9/M12, N10/M11, N11/M16, N12/M10, N14/M8, N15/M15, N16, N17, N18/M6, N19, N20, M13, M14, M17, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12
+  33/33 killed (* R12 survived the first pass; killed after the added over-bound test).
+
+REVIEW ROUND 2 (challenger review of #184 at 87ee647). Same tests as the round-2 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the float-precision case now ends in the PAN (9 + PAN, 17 digits), since a PAN prefix
+survives rounding (mutation R2-4 survived first); a status placeholder was removed from one test title.
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (review2 + guard scan lines)
+  ✓ M1: object keys and non-string scalars are inspected > a marker as a JSON key in tool arguments is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a marker as a top-level key is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a marker as a metadata key is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a PAN as a JSON number in tool arguments is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a PAN as a JSON number in metadata is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a 17-digit number ending in a PAN (beyond float precision) in metadata is blocked before dispatch
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > code_interpreter (no name)
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > an mcp server not allowed
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > an allowed mcp server
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > web_search_preview, allowed by type
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > a tool without name or type
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > a name that is not an id (_shell), not allowed
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > a name that is not an id (_lookup), allowed by its norm...
+  ✓ M3: over-cap findings or tools never flip block to allow (monitor access, enforce DLP policy) > 1 marker: blocked, zero calls
+  ✓ M3: over-cap findings or tools never flip block to allow (monitor access, enforce DLP policy) > 1001 markers: blocked, zero calls
+  ✓ M3: over-cap findings or tools never flip block to allow (monitor access, enforce DLP policy) > 1 marker + 257 tools: blocked, zero calls
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a Image block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a image_file block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a INPUT_AUDIO block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a video_url block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a finding in the carried overlap is not re-reported, and a second occurrence a...
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > an oversized non-streamed response is not inspected: DLP unavailable, withheld...
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a detector span below 2 is refused at creation (a 1-character span would carry...
+  ✓ src/platform/conformance/guard.test.ts > conformance mocks are test-only > the text scan catches every import form: relative, @/ alias, bare baseUrl, tem...
+  Test Files  5 passed (5)
+  Tests  131 passed (131)
+Mutation check, round 2 (one at a time, same command): reviewer set rv183b-mut-c3 (34, anchors adapted) + R2-1..R2-12 new: 44/46 killed
+  incl. R2-4 after the strengthened test. Killed: rv-N1, rv-N2, rv-N2b, rv-N3, rv-N4, rv-N5, rv-N6, rv-N7, rv-N8, rv-N9, rv-N10, rv-N11, rv-N12, rv-N15, rv-N16, rv-N17, rv-N18, rv-N19
+  rv-N20, rv-N21, rv-N22, rv-N23, rv-N24, rv-N25, rv-N26, rv-N27, rv-N28, rv-N29, rv-N30, rv-N31, rv-N32, rv-N33, rv-N34, R2-1, R2-2, R2-3
+  R2-5, R2-6, R2-7, R2-8, R2-9, R2-10, R2-11, R2-4.
+  Not killed: rv-N13 is an equivalent mutant (with no route the provider is "unrouted", which has no target, so the 404 branch is
+  reached either way); R2-12 (booleans as text) was removed from the code instead: booleans and null carry no text.
+
+REVIEW ROUND 3 (challenger review of #184 at 67201ec). Same tests as the round-3 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): three cases added after mutation survivors (a function with two names; a name that is not an id
+even with the fn: prefix; a media object outside a content-block position).
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (round-3 lines)
+  ✓ an mcp tool with a decoy name
+  ✓ code_interpreter with a decoy name
+  ✓ a function named mcp:deepwiki (no collision with mcp:deepwiki)
+  ✓ a nameless, typeless tool although unidentified-tool is listed
+  ✓ a function with two names (function.name search, name shell)
+  ✓ a function name that is not an id even with the prefix ("search x")
+  ✓ parallel tool calls search + shell
+  ✓ parallel tool calls search + search
+  ✓ a messages block of unknown type with base64 data is uninspectable: DLP unavailable
+  ✓ a messages image_base64 block is uninspectable: DLP unavailable
+  ✓ a chat input_pdf part is uninspectable: DLP unavailable
+  ✓ a typeless chat part with image_url is uninspectable: DLP unavailable
+  ✓ a content object (not array) with image_url is uninspectable: DLP unavailable
+  ✓ a media object outside a content-block position (any case) is also uninspectable
+  ✓ JSON-schema fields in tool definitions are data, not content blocks; 10,001 token ids are one segment
+  ✓ number findings carry their real location: tool_use input numbers are tool_arguments; response numbers are output (N46)
+  Test Files  5 passed (5)
+  Tests  147 passed (147)
+Mutation check, round 3 (one at a time, same command): reviewer set rv183c-mut-c3 (46, nine anchors adapted) + R3-1..R3-10 new: 55/56
+  killed (rv-N25, rv-N41, rv-N42, R3-3 after the added cases). Killed: rv-N1, rv-N2, rv-N2b, rv-N3, rv-N4, rv-N5, rv-N6, rv-N7, rv-N8, rv-N9, rv-N10, rv-N11, rv-N12, rv-N15, rv-N16, rv-N17
+  rv-N18, rv-N19, rv-N20, rv-N21, rv-N22, rv-N23, rv-N24, rv-N25, rv-N26, rv-N27, rv-N28, rv-N29, rv-N30, rv-N31, rv-N32, rv-N33, rv-N34, rv-N35
+  rv-N36, rv-N37, rv-N38, rv-N39, rv-N40, rv-N41, rv-N42, rv-N43, rv-N44, rv-N45, rv-N46, R3-1, R3-2, R3-3, R3-4, R3-5, R3-6, R3-7, R3-8, R3-9, R3-10
+  Not killed: rv-N13, equivalent (no route means provider "unrouted", which has no target; the 404 branch is reached either way).
+
+REVIEW ROUND 4 (challenger review of #184 at 201c973). Same tests as the round-4 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the server_tool_use case uses a type:web_search denylist; the control case adds tool_choice-style keys, a typed
+message item, mcp_call, server_tool_use and mcp_tool_use; the source-text case also patches JSON.parse to check creation. One round-2 expectation is now
+exact for the access decision: "a tool without name or type" reports TOOL_UNIDENTIFIED and TOOL_NOT_ALLOWED.
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance scripts/check-next-bundle.test.mjs --reporter=verbose (round-4 lines)
+  (round-4 listing condensed in round 5: 22 round-4 tests listed at commit 336f70c; 305 passed; reproducible with the command above)
+Mutation check, round 4 (one at a time, policy + conformance + check-next-bundle tests): reviewer set rv183d-mut-c3 (53, five anchors adapted: N19, N26,
+  N37, N40, N50): 52/53 killed, incl. the reviewer survivors N38, N49, N50. R4-1..R4-21 new (mcp_servers, unknown tool parameters, non-declaring keys,
+  bundle sentinel, TOOL_UNIDENTIFIED, unnamespacedTools, history identities, Responses positions, text block types, source-text check): 20/21 killed.
+  Not killed, equivalent: rv-N13 (no route means provider "unrouted", which has no target; 404 either way); R4-20 (a source-text fallback in parse is
+  unreachable: the gateway refuses to start without source text).
+
+REVIEW ROUND 5 (challenger review of #184 at e2ea5ee: M1, L1 orchestrator decision, L2, L3). Same tests as the round-5 RED section of red.txt;
+fixes added. Test edits after RED (strengthened or made exact): the round-4 control case adds custom_tool_call, custom_tool_call_output and
+mcp_list_tools items and drops function_call from its Responses body (not a Responses parameter); the unlisted-parameter table adds the empty key
+on legacy Completions; "a marker as a top-level key" now also reports TOOL_UNIDENTIFIED (an unlisted top-level key).
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance scripts/check-next-bundle.test.mjs: all 20 round-5 RED tests pass
+  Test Files  10 passed (10)
+  Tests  327 passed (327)
+Mutation check, round 5 (one at a time): reviewer sets rv184e-mut-c1 56/56 killed (M50 by the new test), rv184e-mut-fix 6/6, rv184e-mut-c3 62/63
+  (13 anchors re-anchored to the new code; N53 and N54 now target the list classification); R5-1..R5-17 new 17/17. Not killed: rv-N13, equivalent.

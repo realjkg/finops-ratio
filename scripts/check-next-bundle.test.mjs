@@ -12,7 +12,7 @@ import process from 'node:process';
 import { Buffer } from 'node:buffer';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { bundledFontHashes, checkNextBundle, CLIENT_FORBIDDEN, FONT_MARKERS, PLATFORM_CONTRACT_MARKERS, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
+import { bundledFontHashes, checkNextBundle, CLIENT_FORBIDDEN, FONT_MARKERS, PLATFORM_CONTRACT_MARKERS, TEST_ONLY_MARKERS, COSTS_ENTRY, ENGAGEMENT_REPORT_ENTRY, READER_ENTRIES, READER_MARKERS, REPORT_FACTS_ENTRY, WORKER_ONLY } from './check-next-bundle.mjs';
 
 const dirs = [];
 afterEach(() => {
@@ -218,5 +218,18 @@ describe('B7 platform contracts stay out of client files (ADR-0001)', () => {
     const root = cleanTree();
     write(root, 'static/chunks/validate.js', 'Object.assign(f,{desc:d,origin:"ratio-platform-contracts"})');
     expect(problemsOf(root)).toEqual(['client file static/chunks/validate.js contains ratio-platform-contracts']);
+  });
+});
+
+describe('B8 test-only conformance mocks stay out of every bundle (ADR-0001 slice C3)', () => {
+  it('the conformance marker fails in a client file and in a server file', () => {
+    expect(TEST_ONLY_MARKERS).toEqual(['ratio-conformance-test-only']);
+    for (const m of TEST_ONLY_MARKERS) expect(CLIENT_FORBIDDEN).toContain(m);
+    const root = cleanTree();
+    write(root, 'server/chunks/mock._.js', 'const o="ratio-conformance-test-only"');
+    expect(problemsOf(root)).toEqual(['server file server/chunks/mock._.js contains test-only ratio-conformance-test-only']);
+    const client = cleanTree();
+    write(client, 'static/chunks/mock.js', 'const o="ratio-conformance-test-only"');
+    expect(problemsOf(client)).toEqual(['client file static/chunks/mock.js contains ratio-conformance-test-only']);
   });
 });

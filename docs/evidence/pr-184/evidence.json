@@ -1,0 +1,793 @@
+{
+  "schema": "ratio.pr-evidence/2",
+  "pr": 184,
+  "generatedAt": "2026-11-05T16:05:30.208Z",
+  "command": "node scripts/evidence/collect-pr-evidence.mjs --base origin/main --head 757288fc6fe7fb4a23fd05bb86f50f6864250176 --pr 184",
+  "collector": {
+    "commit": "757288fc6fe7fb4a23fd05bb86f50f6864250176",
+    "script": "d925c4888420c49b89e250ba12c7dfe22a7740d509ad1e775b2bfad3b686e197",
+    "lib": "d08282c31df04568e308840f040fd05f12c6582fdd53798abcb0d648ac2b17b1",
+    "platformLib": "35351ec54cf4657f449117f56ab16bea872cae2d4b1c2f9c03c32747caba63f5"
+  },
+  "env": {
+    "node": "v22.23.4",
+    "npm": "10.9.9",
+    "os": "Linux 6.18.44-fc-v236 x64",
+    "gateEnvKeys": [
+      "HOME",
+      "HTTPS_PROXY",
+      "NEXT_TELEMETRY_DISABLED",
+      "NODE_EXTRA_CA_CERTS",
+      "NO_PROXY",
+      "PATH",
+      "PLAYWRIGHT_BROWSERS_PATH",
+      "SHELL",
+      "SSL_CERT_FILE",
+      "TERM",
+      "https_proxy",
+      "no_proxy",
+      "npm_config_https_proxy",
+      "npm_config_noproxy"
+    ],
+    "browser": "explicit path (RATIO_EVIDENCE_CHROMIUM)"
+  },
+  "base": {
+    "ref": "origin/main",
+    "sha": "e6eee947ba95d9ddf6f93ed64f081b461384d0a9",
+    "tree": "857af4cbbcf7afe8e81b9ae71c00fb366898796b"
+  },
+  "mergeBase": {
+    "sha": "e6eee947ba95d9ddf6f93ed64f081b461384d0a9",
+    "tree": "857af4cbbcf7afe8e81b9ae71c00fb366898796b"
+  },
+  "head": {
+    "sha": "757288fc6fe7fb4a23fd05bb86f50f6864250176",
+    "tree": "55b45fd7a20e2662db208f5ba17f726909fa05fe"
+  },
+  "evidenceCommitNote": "This file attests code SHA `757288fc6fe7fb4a23fd05bb86f50f6864250176`. A commit that adds it must change only `docs/evidence/pr-184/`.",
+  "gates": [
+    {
+      "name": "npm ci",
+      "command": "npm ci",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:05:30.813Z",
+      "end": "2026-11-05T16:06:03.775Z",
+      "durationSec": 33,
+      "log": "docs/evidence/pr-184/logs/npm_ci.log",
+      "logSha256": "93d88120af1b87d7a1820b1308c4e97132937167290e4e325fa5e1d3514b7a12",
+      "tail": "$ npm ci\nnpm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.\nnpm warn deprecated rimraf@2.7.1: Rimraf versions prior to v4 are no longer supported\nnpm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.\nnpm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me\nnpm warn deprecated fstream@1.0.12: This package is no longer supported.\n\nadded 536 packages, and audited 537 packages in 32s\n\n99 packages are looking for funding\n  run `npm fund` for details\n\n17 vulnerabilities (12 moderate, 4 high, 1 critical)\n\nTo address issues that do not require attention, run:\n  npm audit fix\n\nTo address all issues (including breaking changes), run:\n  npm audit fix --force\n\nRun `npm audit` for details.",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    },
+    {
+      "name": "lint",
+      "command": "npm run lint",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:06:03.777Z",
+      "end": "2026-11-05T16:06:24.134Z",
+      "durationSec": 20.4,
+      "log": "docs/evidence/pr-184/logs/lint.log",
+      "logSha256": "c4f0db4f3945e89bf42320c3e4ef5b572fcf71d17c561926bf6d9270cf5a4ff7",
+      "tail": "$ npm run lint\n\n> ratio@1.0.0 lint\n> eslint .",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    },
+    {
+      "name": "typecheck (app)",
+      "command": "npx tsc --noEmit",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:06:24.135Z",
+      "end": "2026-11-05T16:06:54.331Z",
+      "durationSec": 30.2,
+      "log": "docs/evidence/pr-184/logs/typecheck_app_.log",
+      "logSha256": "c80636726de2a49758fceff3bb96b5b01706d0f21ba507de399fa5c5dedf63cb",
+      "tail": "$ npx tsc --noEmit",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    },
+    {
+      "name": "typecheck (worker)",
+      "command": "npx tsc -p tsconfig.worker.json --noEmit",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:06:54.332Z",
+      "end": "2026-11-05T16:06:58.826Z",
+      "durationSec": 4.5,
+      "log": "docs/evidence/pr-184/logs/typecheck_worker_.log",
+      "logSha256": "cd91f5f661f697ea66f39ce5b4ceee9fa285ca84fda15206ff6e157968611ac1",
+      "tail": "$ npx tsc -p tsconfig.worker.json --noEmit",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    },
+    {
+      "name": "unit tests (vitest)",
+      "command": "npx vitest run --cache=false",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:06:58.827Z",
+      "end": "2026-11-05T16:09:46.736Z",
+      "durationSec": 167.9,
+      "log": "docs/evidence/pr-184/logs/unit_tests_vitest_.log",
+      "logSha256": "377af6dd72113a05f1e4bd653eb7fac8e4fe377172eb3acc847383ea869709a3",
+      "tail": "    at PersonaProvider (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/components/PersonaProvider.tsx:20:28)\n\n ✓ src/executive/spendSummaryBar.honesty.test.tsx (2 tests) 35ms\n ✓ src/lib/scales.test.ts (3 tests) 10ms\nstderr | src/executive/InitiativeCard.na.test.tsx > InitiativeCard budget used > shows N/A with the reason when the approved budget is invalid\nWarning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.\n    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/components/EvidenceMark.tsx:31:25)\n    at p\n    at article\n    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/executive/InitiativeCard.tsx:21:27)\n\nstderr | src/executive/InitiativeCard.na.test.tsx > InitiativeCard budget used > caps only the bar width for an over-budget workload, not the printed percent\nWarning: useLayoutEffect does nothing on the server, because its effect cannot be encoded into the server renderer's output format. This will lead to a mismatch between the initial, non-hydrated UI and the intended UI. To avoid this, useLayoutEffect should only be used in components that render exclusively on the client. See https://reactjs.org/link/uselayouteffect-ssr for common fixes.\n    at EvidenceMark (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/components/EvidenceMark.tsx:31:25)\n    at p\n    at article\n    at InitiativeCard (/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/executive/InitiativeCard.tsx:21:27)\n\n ✓ src/executive/InitiativeCard.na.test.tsx (2 tests) 49ms\n ✓ scripts/completion/core.test.mjs (3 tests) 13ms\n(node:8847) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n(Use `node --trace-warnings ...` to show where the warning was created)\n ✓ src/ingest/usersDispatch.test.ts (1 test) 56ms\n ✓ src/lib/basePath.test.ts (3 tests) 11ms\n ✓ src/connectors/managed/registry.test.ts (2 tests) 13ms\n ✓ src/ai/demoPrompts.test.ts (1 test) 81ms\n ✓ src/data/alertPresentation.test.ts (3 tests) 7ms\n ✓ src/finio/utcValidation.test.ts (1 test) 13ms\n ✓ src/ingest/db/testing/requireTestDatabaseUrl.test.ts (3 tests) 8ms\n ✓ src/costsource/transports/listingCompleteness.test.ts (1 test) 5ms\n ✓ src/attribution/liveAccrualHonesty.test.tsx (1 test) 250ms\n\n Test Files  322 passed (322)\n      Tests  5535 passed (5535)\n   Start at  16:06:59\n   Duration  166.86s (tests 82%, import 10%, transform 4%, environment 3%)\n\n    Isolate  322 workers spawned · ~206ms startup each (spawn + environment, per file)\n             at least ~21.87s faster with isolate: false — reuses workers across files instead of one per file",
+      "totals": {
+        "kind": "vitest",
+        "files": {
+          "passed": 322,
+          "failed": 0,
+          "skipped": 0,
+          "todo": 0,
+          "total": 322
+        },
+        "tests": {
+          "passed": 5535,
+          "failed": 0,
+          "skipped": 0,
+          "todo": 0,
+          "total": 5535
+        }
+      },
+      "expectTotals": true,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "322/322 files, 5535 passed, 0 failed, 0 skipped"
+    },
+    {
+      "name": "integration tests (Postgres)",
+      "command": "npm run test:db",
+      "ran": false,
+      "na": false,
+      "exitCode": null,
+      "durationSec": null,
+      "summary": "NOT RUN: no database in this environment (RATIO_EVIDENCE_TEST_DATABASE_URL unset)",
+      "status": "NOT RUN",
+      "note": null
+    },
+    {
+      "name": "migrations up/down/up (changed)",
+      "command": "(none)",
+      "ran": false,
+      "na": true,
+      "exitCode": null,
+      "durationSec": null,
+      "summary": "N/A: no migrations changed",
+      "status": "N/A",
+      "note": null
+    },
+    {
+      "name": "build",
+      "command": "npm run build",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:09:46.751Z",
+      "end": "2026-11-05T16:09:58.511Z",
+      "durationSec": 11.8,
+      "log": "docs/evidence/pr-184/logs/build.log",
+      "logSha256": "f7f155b8ef05ccf520ba0844a41c5e417a37cb8396b98abd2228d8d99cfe73ac",
+      "tail": "├ ƒ /api/v1/a2a/handshake\n├ ƒ /api/v1/ai/chat\n├ ƒ /api/v1/cm/change\n├ ƒ /api/v1/connectors\n├ ƒ /api/v1/costs/published\n├ ƒ /api/v1/finio/export\n├ ƒ /api/v1/reports/engagement\n├ ƒ /api/v1/reports/facts\n├ ƒ /api/v1/simulation/chat\n├ ƒ /api/v1/simulation/command\n├ ƒ /api/v1/simulation/frank\n├ ƒ /api/v1/simulation/operations\n├ ƒ /api/v1/simulation/report\n├ ƒ /api/v1/simulation/session\n├ ƒ /api/v1/simulation/state\n├ ƒ /api/v1/simulation/status\n├ ○ /attribution\n├ ○ /connectors\n├ ○ /costsource\n├ ○ /demo\n├ ƒ /engagement\n├ ○ /finio\n├ ○ /finio/demo\n├ ○ /frameworks\n├ ○ /hello\n├ ○ /mission\n├ ○ /outcomes\n├ ○ /overview\n├ ○ /prediction\n├ ○ /reports\n├ ○ /simulation\n├ ○ /tokenomics\n├ ○ /workloads\n└ ○ /workspace\n\nƒ Proxy (Middleware)\n\n○  (Static)   prerendered as static content\nƒ  (Dynamic)  server-rendered on demand",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    },
+    {
+      "name": "bundle check",
+      "command": "npm run check:bundle",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:09:58.512Z",
+      "end": "2026-11-05T16:09:58.897Z",
+      "durationSec": 0.4,
+      "log": "docs/evidence/pr-184/logs/bundle_check.log",
+      "logSha256": "d47070c1fe6c18be48bb0e3c07cff33f02e261c906747420adf5abab5876e500",
+      "tail": "$ npm run check:bundle\n\n> ratio@1.0.0 check:bundle\n> node scripts/check-next-bundle.mjs\n\n{\"type\":\"ratio.bundle-check\",\"pass\":true,\"stats\":{\"clientFiles\":147,\"serverFiles\":171},\"problems\":[]}",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    },
+    {
+      "name": "Playwright simulation suite",
+      "command": "npx playwright test --config playwright.simulation.config.ts",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:09:59.922Z",
+      "end": "2026-11-05T16:15:56.360Z",
+      "durationSec": 356.4,
+      "log": "docs/evidence/pr-184/logs/Playwright_simulation_suite.log",
+      "logSha256": "64311f69e26c6ba9a14bec29032e5fa831b3ab0fc5789ef74d766adce0f42ef1",
+      "tail": "  ✓  25 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 320px (finding card and KPI card) (1.5s)\n  ✓  26 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 360px (finding card and KPI card) (1.6s)\n  ✓  27 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 390px (finding card and KPI card) (1.7s)\n  ✓  28 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 768px (finding card and KPI card) (1.6s)\n  ✓  29 tests/simulation/phone-ui.spec.ts:19:7 › Estimated value popup stays inside the viewport at 1440px (finding card and KPI card) (1.7s)\n  ✓  30 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 100% text (2.7s)\n  ✓  31 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 360px, 100% text (2.7s)\n  ✓  32 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 390px, 100% text (2.7s)\n  ✓  33 tests/simulation/phone-ui.spec.ts:41:7 › current nav item is fully visible on direct load at 320px, 130% text (2.8s)\n  ✓  34 tests/simulation/phone-ui.spec.ts:59:5 › the strip is reachable by keyboard: tabbing to the last item brings it fully into view (1.2s)\n  ✓  35 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 320px (1.2s)\n  ✓  36 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 360px (1.2s)\n  ✓  37 tests/simulation/phone-ui.spec.ts:75:7 › primary controls have 44px touch targets at 390px (1.2s)\n  ✓  38 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 320px, with 44px targets (3.0s)\n  ✓  39 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 360px, with 44px targets (2.9s)\n  ✓  40 tests/simulation/phone-ui.spec.ts:103:7 › top bar: logo, Demo badge, Display, Text and Ask Frank share one row at 390px, with 44px targets (2.9s)\n  ✓  41 tests/simulation/phone-ui.spec.ts:134:5 › Estimated value: opening it describes the button and announces the text; Escape inside the Frank panel leaves it open (1.4s)\n  ✓  42 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 390px (1.9s)\n  ✓  43 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 768px (2.1s)\n  ✓  44 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1024px (2.0s)\n  ✓  45 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1280px (1.9s)\n  ✓  46 tests/simulation/synthetic-connections.spec.ts:6:7 › synthetic API connections import and reconcile client-side at 1440px (2.1s)\n  ✓  47 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 390px (1.8s)\n  ✓  48 tests/simulation/theme-dismissal.spec.ts:3:7 › theme editor saves and dismisses without losing the selected theme at 1440px (2.4s)\n  ✓  49 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 320px (2.6s)\n  ✓  50 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 390px (2.6s)\n  ✓  51 tests/simulation/theme-mobile.spec.ts:7:7 › theme switcher fits the top bar at 430px (2.8s)\n  ✓  52 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1440px (5.7s)\n  ✓  53 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 390px (5.5s)\n  ✓  54 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 1440px (5.8s)\n  ✓  55 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (system-mono) has no overflow, clipping or overlap at 390px (5.8s)\n  ✓  56 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 320px (5.6s)\n  ✓  57 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 360px (5.8s)\n  ✓  58 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 768px (5.9s)\n  ✓  59 tests/simulation/typography-layout.spec.ts:73:7 › 130% text (default) has no overflow, clipping or overlap at 1024px (6.0s)\n  ✓  60 tests/simulation/typography-layout.spec.ts:97:5 › both top-bar panels stay inside the viewport at 130% and 115% (10.7s)\n  ✓  61 tests/simulation/z-agent-workflows.spec.ts:13:5 › embedded reviews recover interruptions and require independent human review (4.4s)\n  ✓  62 tests/simulation/zz-frank.spec.ts:15:5 › Frank guides an accountable review, retains evidence boundaries and hands approval to another persona (3.1s)\n\n  62 passed (5.9m)",
+      "totals": {
+        "kind": "playwright",
+        "passed": 62,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0
+      },
+      "expectTotals": true,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "62 passed, 0 failed, 0 skipped, 0 flaky"
+    },
+    {
+      "name": "Playwright engagement report spec",
+      "command": "npx playwright test --config playwright.engagement.config.ts",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:15:56.362Z",
+      "end": "2026-11-05T16:16:07.621Z",
+      "durationSec": 11.3,
+      "log": "docs/evidence/pr-184/logs/Playwright_engagement_report_spec.log",
+      "logSha256": "bb8d5acbf1d2299e06b397b2e5c4808fde91e60fdfc3813fb0d120c78df465a8",
+      "tail": "$ npx playwright test --config playwright.engagement.config.ts\n[WebServer] (node:11990) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n[WebServer] (node:12009) ExperimentalWarning: SQLite is an experimental feature and might change at any time\n[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)\n\nRunning 7 tests using 1 worker\n\n  ✓  1 tests/engagement/report-page.spec.ts:14:5 › anonymous: 401, no-store, Vary: Cookie, CSP enforced with no violation, only a sign-in link per enabled connection (1.4s)\n[WebServer] {\"tag\":\"gateway\",\"event\":\"unhandled_error\",\"requestId\":\"9ccfad9c-5d70-4d63-8bde-38d6e760ca4f\",\"method\":\"GET\",\"path\":\"/api/v1/reports/engagement\",\"status\":500,\"error\":\"connect ECONNREFUSED 127.0.0.1:1\"}\n  ✓  2 tests/engagement/report-page.spec.ts:27:5 › analyst: report table and both exports; the real route is reached with the session (DB absent: fixed unavailable message) (1.1s)\n  ✓  3 tests/engagement/report-page.spec.ts:42:5 › viewer: no export links; the export route itself refuses the viewer (403) (836ms)\n  ✓  4 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (light) (907ms)\n  ✓  5 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (dark) (894ms)\n  ✓  6 tests/engagement/report-page.spec.ts:52:7 › WCAG AA text contrast on the signed-in page (high-contrast) (865ms)\n[WebServer] {\"tag\":\"gateway\",\"event\":\"unhandled_error\",\"requestId\":\"08015128-4a7b-4ee6-80e8-aea1a5b3af08\",\"method\":\"GET\",\"path\":\"/api/v1/reports/engagement\",\"status\":500,\"error\":\"connect ECONNREFUSED 127.0.0.1:1\"}\n  ✓  7 tests/engagement/report-page.spec.ts:80:5 › engagement mode never shows the Demo badge (anonymous and signed in), and demo routes stay 404 (1.4s)\n\n  7 passed (10.0s)",
+      "totals": {
+        "kind": "playwright",
+        "passed": 7,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0
+      },
+      "expectTotals": true,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "7 passed, 0 failed, 0 skipped, 0 flaky"
+    }
+  ],
+  "informational": [
+    {
+      "name": "Chromium launch preflight",
+      "command": "node -e const { chromium } = require('playwright-core'); const p = process.env.RATIO_CHROMIUM_PATH; chromium.launch({ headless: true, ...(p ? { executablePath: p, args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {}) }).then((b) => b.close()).then(() => process.exit(0), (e) => { console.error('launch failed: ' + String(e.message).split('\\n')[0]); process.exit(1); });",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:09:58.899Z",
+      "end": "2026-11-05T16:09:59.921Z",
+      "durationSec": 1,
+      "log": "docs/evidence/pr-184/logs/chromium-launch.log",
+      "logSha256": "cd969a6d1e343b3894ab6a393fb1a15a3c04ad9819855394176f8bb7e082f44a",
+      "tail": "$ node -e const { chromium } = require('playwright-core'); const p = process.env.RATIO_CHROMIUM_PATH; chromium.launch({ headless: true, ...(p ? { executablePath: p, args: ['--no-sandbox', '--disable-dev-shm-usage'] } : {}) }).then((b) => b.close()).then(() => process.exit(0), (e) => { console.error('launch failed: ' + String(e.message).split('\\n')[0]); process.exit(1); });",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    },
+    {
+      "name": "migrations smoke, full set (informational)",
+      "command": "(opt-in: --migration-smoke)",
+      "ran": false,
+      "na": true,
+      "exitCode": null,
+      "durationSec": null,
+      "summary": "N/A: not requested (--migration-smoke)",
+      "status": "N/A",
+      "note": null
+    },
+    {
+      "name": "platform capability tests (informational)",
+      "command": "npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/docs/evidence/pr-184/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/validate.test.ts",
+      "cwd": ".",
+      "ran": true,
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "timeoutMin": 60,
+      "spawnError": null,
+      "start": "2026-11-05T16:16:07.674Z",
+      "end": "2026-11-05T16:16:10.309Z",
+      "durationSec": 2.6,
+      "log": "docs/evidence/pr-184/logs/platform_capability_tests_informational_.log",
+      "logSha256": "04e0b396b81336a1d9c12fa86b388db008feed7e1153c72f4fd3a9f899e12a1d",
+      "tail": "$ npx vitest run --cache=false --reporter=json --outputFile=/tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/docs/evidence/pr-184/logs/platform-vitest.json /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/adoption.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/economics.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/policy.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/schemaPin.test.ts /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/src/platform/contracts/validate.test.ts\nJSON report written to /tmp/claude-0/-home-user/025c913e-fc00-5509-afd3-eda9750ade16/scratchpad/sc6/docs/evidence/pr-184/logs/platform-vitest.json",
+      "totals": null,
+      "expectTotals": false,
+      "db": null,
+      "status": "PASS",
+      "note": null,
+      "summary": "exit 0"
+    }
+  ],
+  "fixtures": {
+    "files": [],
+    "determinism": []
+  },
+  "rollback": {
+    "procedure": "Test: a temporary worktree at 757288fc6fe7fb4a23fd05bb86f50f6864250176 under the OS temp directory (outside the checkout); `git diff --no-color --no-ext-diff --no-textconv --binary --src-prefix=a/ --dst-prefix=b/ e6eee947ba95d9ddf6f93ed64f081b461384d0a9 757288fc6fe7fb4a23fd05bb86f50f6864250176 > pr.diff`; in the worktree `git apply -R --binary pr.diff && git add -A && git write-tree` (git -c color.ui=never -c core.autocrlf=false); compare with the merge-base tree; then lint, typecheck (app and worker) and the full vitest suite there; the worktree is removed by exact path (also on INT/TERM).",
+    "production": "after merge, `git revert -m 1 <merge sha>` (merge commit) or `git revert <squash sha>` (squash), or reverse-apply `git diff e6eee947ba95d9ddf6f93ed64f081b461384d0a9 757288fc6fe7fb4a23fd05bb86f50f6864250176` with `git apply -R`; no data, schema or config migration needs undoing.",
+    "treeAfterReverse": "857af4cbbcf7afe8e81b9ae71c00fb366898796b",
+    "gates": [
+      {
+        "name": "rollback: dependencies",
+        "command": "ls node_modules/.bin/vitest",
+        "status": "PASS",
+        "note": null,
+        "exitCode": 0,
+        "summary": "exit 0",
+        "logSha256": "dc4eef896c04917d0ee4c1fde6b881e9643868b876e32c1083337e0d9fd8b3c0"
+      },
+      {
+        "name": "rollback: lint",
+        "command": "npm run lint",
+        "status": "PASS",
+        "note": null,
+        "exitCode": 0,
+        "summary": "exit 0",
+        "logSha256": "c4f0db4f3945e89bf42320c3e4ef5b572fcf71d17c561926bf6d9270cf5a4ff7"
+      },
+      {
+        "name": "rollback: typecheck",
+        "command": "npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit",
+        "status": "PASS",
+        "note": null,
+        "exitCode": 0,
+        "summary": "exit 0",
+        "logSha256": "22bf599621144e177c65ae3cc31497af4ffc0d5c16fcc99cb0884fefb80a143d"
+      },
+      {
+        "name": "rollback: unit tests",
+        "command": "npx vitest run --cache=false",
+        "status": "PASS",
+        "note": null,
+        "exitCode": 0,
+        "summary": "318/318 files, 5376 passed, 0 failed, 0 skipped",
+        "logSha256": "62616db0ebbca57a198c572ca6226ac31250ccecc3c092e59dbbf3d3d64b9147"
+      }
+    ],
+    "status": "PASS",
+    "detail": "Reverse-applied tree 857af4cbbcf7afe8e81b9ae71c00fb366898796b equals the merge-base tree 857af4cbbcf7afe8e81b9ae71c00fb366898796b. On the rolled-back tree: dependencies PASS (exit 0); lint PASS (exit 0); typecheck PASS (exit 0); unit tests PASS (318/318 files, 5376 passed, 0 failed, 0 skipped)."
+  },
+  "knownGaps": [
+    "integration tests (Postgres): NOT RUN: no database in this environment (RATIO_EVIDENCE_TEST_DATABASE_URL unset)",
+    "next-env.d.ts was rewritten by the Playwright build (its distDir) and restored from HEAD after the run."
+  ],
+  "charter": [
+    {
+      "id": 1,
+      "item": "All gates green on the head SHA (lint, typecheck, unit + integration tests, migrations up/down where defined, build)",
+      "status": "NOT RUN",
+      "evidence": "9 PASS, 1 N/A, 1 NOT RUN (see Known gaps)"
+    },
+    {
+      "id": 2,
+      "item": "Challenger re-review passed with zero open High findings",
+      "status": "PENDING (orchestrator)",
+      "evidence": "Review link: <to be added by the orchestrator>"
+    },
+    {
+      "id": 3,
+      "item": "Operational evidence complete (exact commands, results, fixture provenance, known gaps)",
+      "status": "PASS",
+      "evidence": "Commands, exit codes, durations and log hashes below; 0 changed fixture file(s) recomputed with BigInt, determinism N/A; 2 known gap(s) listed"
+    },
+    {
+      "id": 4,
+      "item": "Rollback verified in test (procedure + result)",
+      "status": "PASS",
+      "evidence": "See \"Rollback in test\""
+    },
+    {
+      "id": 5,
+      "item": "Merge decision logged with reasoning in the PR body",
+      "status": "PENDING (orchestrator)",
+      "evidence": "Decision: <to be written by the orchestrator in the PR body>"
+    }
+  ],
+  "platform": {
+    "manifest": "docs/evidence/platform/manifest.json",
+    "problems": [],
+    "capabilities": [
+      {
+        "id": 1,
+        "name": "Track model spending",
+        "release": "1.1",
+        "evidenceRequired": "Approved-source imports reconcile; unmatched charges and allocation gaps remain visible",
+        "declared": "planned",
+        "status": "PLANNED",
+        "items": [
+          {
+            "id": "cap1-w0-allocation-contract",
+            "slice": "W0",
+            "kind": "test",
+            "description": "allocation/1: shares plus explicit unallocated equal the source amount exactly; same sign; unique targets; pseudonymous users",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/economics.test.ts",
+                "suite": "FinancialRecord, RateCard, Allocation",
+                "title": "allocation: exact sum, same sign, unique targets, pseudonymous users",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap1-a4-control-totals",
+            "slice": "A4",
+            "kind": "fixture",
+            "description": "Approved-source cost fixture reconciles to its control totals, per currency (no cross-currency sum)",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap1-a4-unmatched-charges",
+            "slice": "A4",
+            "kind": "test",
+            "description": "Unmatched and unrouted charges are listed with reasons, never dropped",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap1-a5-allocation-gaps",
+            "slice": "A5",
+            "kind": "test",
+            "description": "Allocation exactness with unallocated reasons; allocation coverage and reconciliation coverage reported separately with known denominators",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 4 evidence items implemented and passing; 3 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Reconciliation table with variance reasons; allocation coverage",
+        "liveVerification": "One approved billing source reconciles in the pilot"
+      },
+      {
+        "id": 2,
+        "name": "Measure adoption",
+        "release": "1.2",
+        "evidenceRequired": "Numerator and denominator reproducible; identities and exclusions tested",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap2-w0-adoption-definition",
+            "slice": "W0",
+            "kind": "test",
+            "description": "adoption-definition/1: actor and denominator rules",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/adoption.test.ts",
+                "suite": "AdoptionDefinition (cap 2)",
+                "title": "names the actor and denominator rules",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap2-b2b3-rerun-determinism",
+            "slice": "B2/B3",
+            "kind": "test",
+            "description": "Numerator and denominator reproducible from fixtures on re-run (versioned definitions, snapshot ids)",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap2-b2-exclusions",
+            "slice": "B2",
+            "kind": "fixture",
+            "description": "Exclusion and suspended-user fixtures; memberSetSha256 stable",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 3 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Adoption metric with definition version and snapshot id",
+        "liveVerification": "Pilot identity source snapshot"
+      },
+      {
+        "id": 3,
+        "name": "Report user utilization",
+        "release": "1.2",
+        "evidenceRequired": "Authorized user-level drill-down, service-account separation, retention and privacy controls",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap3-w0-actor-types",
+            "slice": "W0",
+            "kind": "test",
+            "description": "Actor-type rules: humans only as keyed pseudonyms; services never carry seats",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/validate.test.ts",
+                "suite": "identifiers, people and content",
+                "title": "a human ref is a keyed HMAC under a named key, never an email or a bare hash",
+                "status": "PASSED"
+              },
+              {
+                "file": "src/platform/contracts/adoption.test.ts",
+                "suite": "ActivityEvent and EligiblePopulationSnapshot (cap 2, 3)",
+                "title": "missing licensed seats stay absent; services never carry seats",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap3-b4-drilldown-permission",
+            "slice": "B4",
+            "kind": "test",
+            "description": "usage:drilldown is role-only and audited; reports:read alone cannot drill down; suppression below the minimum group size",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap3-b4-deletion-jobs",
+            "slice": "B4",
+            "kind": "test",
+            "description": "Retention deletion removes rows and writes a run record",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap3-log-redaction",
+            "slice": "B4",
+            "kind": "test",
+            "description": "Log redaction tests: no identity or content in logs",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 4 evidence items implemented and passing; 3 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Drill-down audit log; retention run records",
+        "liveVerification": "Pilot retention run"
+      },
+      {
+        "id": 4,
+        "name": "Track token costs",
+        "release": "1.1",
+        "evidenceRequired": "Cache/batch semantics verified per provider; missing usage and rate gaps do not become zero",
+        "declared": "planned",
+        "status": "PLANNED",
+        "items": [
+          {
+            "id": "cap4-w0-absent-usage",
+            "slice": "W0",
+            "kind": "test",
+            "description": "ai-usage-event/1: absent usage stays absent (never 0); token counts are whole-token strings",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/economics.test.ts",
+                "suite": "AIUsageEvent (cap 1, 4)",
+                "title": "absent usage stays absent: nothing is filled with 0",
+                "status": "PASSED"
+              },
+              {
+                "file": "src/platform/contracts/economics.test.ts",
+                "suite": "AIUsageEvent (cap 1, 4)",
+                "title": "token counts are canonical whole-token strings",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap4-w0-rate-card-rows",
+            "slice": "W0",
+            "kind": "test",
+            "description": "rate-card/1: cache and batch are explicit rows, never multipliers (golden corpus)",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/schemaPin.test.ts",
+                "suite": "schema version pins and the golden corpus",
+                "title": "rate-card/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap4-a2-accounting-profiles",
+            "slice": "A2",
+            "kind": "fixture",
+            "description": "Accounting-profile fixtures: overlapping vs additive token categories never double-count; absent tokens stay N/A (field mappings per public docs, to be verified live)",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap4-a3-missing-rate-gap",
+            "slice": "A3",
+            "kind": "test",
+            "description": "A missing rate is a visible gap, not 0; the rate card version is recorded on every estimate; cache and batch are explicit rows",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "2 of 4 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Token cost by category with rate card version",
+        "liveVerification": "Each provider profile verified against live usage"
+      },
+      {
+        "id": 5,
+        "name": "Inspect prompts before execution",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Requests blocked before dispatch in supported scenarios; bypass paths assessed",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap5-c3-zero-dispatch",
+            "slice": "C3",
+            "kind": "test",
+            "description": "A blocked request is never dispatched: the mock provider receives zero calls",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap5-c6-bypass-assessment",
+            "slice": "C6",
+            "kind": "document",
+            "description": "Bypass assessment document for the pilot gateway",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "0 of 2 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Decision log with rule ids",
+        "liveVerification": "Pilot gateway path blocks a seeded request"
+      },
+      {
+        "id": 6,
+        "name": "Enforce input/output policies",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Allow, block, timeout, streaming and partial-failure behavior tested",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap6-w0-policy-fail-closed",
+            "slice": "W0",
+            "kind": "test",
+            "description": "policy/1: an enforcing policy that can block fails closed; an enforcing output policy buffers",
+            "status": "PASSED",
+            "tests": [
+              {
+                "file": "src/platform/contracts/policy.test.ts",
+                "suite": "Entitlement and Policy (cap 5-8)",
+                "title": "an enforcing policy that can block fails closed; an enforcing output policy buffers",
+                "status": "PASSED"
+              }
+            ]
+          },
+          {
+            "id": "cap6-c1-evaluation",
+            "slice": "C1",
+            "kind": "test",
+            "description": "Allow, block, redact, require-approval, log-only per rule; deterministic for the same inputs",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap6-c3c4-conformance",
+            "slice": "C3/C4",
+            "kind": "test",
+            "description": "Conformance: timeouts, engine errors, streaming windows and partial failures",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "1 of 3 evidence items implemented and passing; 2 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Conformance report",
+        "liveVerification": "Pilot gateway conformance run"
+      },
+      {
+        "id": 7,
+        "name": "Block sensitive data transfers",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Seeded sensitive-data tests demonstrate prevention before prohibited transmission",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap7-c4-seeded-dlp",
+            "slice": "C4",
+            "kind": "fixture",
+            "description": "Seeded sensitive-data fixtures, incl. encoded and tool-payload variants, blocked before the mock provider sees them; findings carry offsets only",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "0 of 1 evidence items implemented and passing; 1 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "DLP findings (offsets only)",
+        "liveVerification": "Pilot DLP run with seeded data"
+      },
+      {
+        "id": 8,
+        "name": "Control model access",
+        "release": "1.3/2.0",
+        "evidenceRequired": "Disallowed models/providers rejected; credentials and network paths prevent documented bypasses",
+        "declared": "not started",
+        "status": "NOT STARTED",
+        "items": [
+          {
+            "id": "cap8-c1-entitlements",
+            "slice": "C1",
+            "kind": "test",
+            "description": "Entitlement tests: deny wins; requested and served model both checked",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap8-c3-surface-allowlist",
+            "slice": "C3",
+            "kind": "test",
+            "description": "Destination allowlist per surface; unknown surface denied in enforce mode",
+            "status": "PLANNED"
+          },
+          {
+            "id": "cap8-c6-bypass-assessment",
+            "slice": "C6",
+            "kind": "document",
+            "description": "Bypass assessment: provider keys only in the gateway, egress restricted",
+            "status": "PLANNED"
+          }
+        ],
+        "detail": "0 of 3 evidence items implemented and passing; 3 planned; live verification scheduled (not run by this collector)",
+        "reportArtifact": "Entitlement decision log",
+        "liveVerification": "Pilot network and key-inventory checks"
+      }
+    ],
+    "ceiling": "implemented and pre-release validated; live verification scheduled",
+    "run": {
+      "available": true
+    }
+  }
+}
