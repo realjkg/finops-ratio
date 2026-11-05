@@ -13,7 +13,11 @@ const ROOT = path.resolve(DIR, '..', '..', '..');
 const isTest = (f: string) => /\.test\.(ts|tsx|mjs|js)$/.test(f);
 const prod = fs.readdirSync(DIR).filter((f) => f.endsWith('.ts') && !isTest(f)).sort();
 /** A text scan for any reference to the mocks (catches bare baseUrl, template-literal and dynamic imports); check:bundle rule 8 is the backstop on builds. */
-const mentionsMocks = (text: string) => /conformance\/(mock|\$\{)|\$\{["'`]conformance["'`]\}/.test(text);
+const mentionsMocks = (text: string) => {
+  const joined = text.replace(/(['"`])\s*\+\s*(['"`])/g, ''); // 'a' + 'b' reads as 'ab' (string-concatenated paths)
+  const norm = joined.replace(/\/(\.\/)+/g, '/').replace(/\/{2,}/g, '/'); // ./ and // segments removed
+  return /conformance\/(mock|\$\{)|\$\{["'`]conformance["'`]\}/.test(norm);
+};
 const imports = (file: string) => ts.preProcessFile(fs.readFileSync(file, 'utf8'), true, true).importedFiles.map((i) => i.fileName);
 
 describe('conformance mocks are test-only', () => {

@@ -38,7 +38,7 @@ describe('M1: object keys and non-string scalars are inspected', () => {
     ['a marker as a JSON key in tool arguments', args(JSON.stringify({ [SECRET]: 'x' }))], ['a marker as a top-level key', { ...chat('q'), [SECRET]: 1 }],
     ['a marker as a metadata key', chat('q', { metadata: { [SECRET]: 'v' } })], ['a PAN as a JSON number in tool arguments', args(`{"card":${PAN}}`)],
     ['a PAN as a JSON number in metadata', `{"model":"model-x","metadata":{"card":${PAN}},"messages":[{"role":"user","content":"q"}]}`],
-    ['a 19-digit PAN number (beyond float precision) in metadata', `{"model":"model-x","metadata":{"card":${PAN}123},"messages":[{"role":"user","content":"q"}]}`],
+    ['a 17-digit number ending in a PAN (beyond float precision) in metadata', `{"model":"model-x","metadata":{"card":9${PAN}},"messages":[{"role":"user","content":"q"}]}`],
   ])('%s is blocked before dispatch', async (_n, body) => {
     expect(await go('/v1/chat/completions', body)).toMatchObject({ ...blocked, codes: ['DLP_PAYMENT_CARD'] });
   });

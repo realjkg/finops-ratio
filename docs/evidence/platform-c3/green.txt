@@ -38,72 +38,47 @@ REVIEW ROUND 1 (challenger review of #184 at c42657c). Same tests as the round-1
 Test edits after RED (strengthened only): the empty-stream test also checks an OpenAI stream (the mock now sends the role chunk with
 the model first, as real streams do); one test added for a buffered window over the inspection bound (mutation R12 survived first).
 Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (review.test.ts lines)
-  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > an oversized request for a denied model: 403, zero provider calls
-  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > a model string that is not a model id: 403, zero provider calls
-  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > an oversized request under allow * and no DLP policy: 403, zero provider calls
-  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > a small request for the denied model: 403, zero provider calls
-  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > blocked requests open no TCP connection to the provider; an allowed one opens one (raw soc...
-  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > the bound is in bytes: 2100 two-byte characters exceed a 4096-byte bound (N7)
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat tools[].function.description: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat legacy functions[]: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat assistant function_call.arguments: blocked before dis...
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat prediction.content: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat message name: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat metadata: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > responses tools[].description: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > messages tools[].description: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > messages tools[].input_schema: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > nested JSON escape in tool arguments: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > doubly nested JSON in tool arguments: blocked before dispatch
-  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > content nested past the depth bound fails closed (DLP unav...
-  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a CPU-bound engine over the deadline is a timeout (enforce: 403, 0 calls)
-  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a CPU-bound engine over the deadline is a timeout (monitor: 200, 1 calls)
-  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > under a last-known-good, the release window and the deadline come from the bundl...
-  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a tool declared and called in one request is evaluated (monitor), never a 403 wi...
-  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a tool declared and called in one request is evaluated (enforce), never a 403 wi...
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > buffer_full, split inside the buffer: the marker is caught on the join...
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > buffer_window, split inside one window: the marker is caught on the jo...
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > buffer_window, split across windows (overlap): the marker is caught on...
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > a buffered window over the inspection bound is not inspected: DLP unav...
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > a streamed served-model fallback is re-entitled before release (N17)
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > a stream with no content still gets an output-phase decision (and its ...
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > prototype-named credentials and paths are refused cleanly (L3)
-  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > 40 parallel requests, 20 with the seeded card: exactly 20 provider cal...
+  (31 review.test.ts tests listed at commit 37b40cf; condensed in round 2, reproducible with the command above)
   Test Files  4 passed (4)
   Tests  108 passed (108)
 
 Mutation check, round 1 (one at a time, same command): reviewer set N1-N20 and the round-0 set M1-M17 adapted, R1-R12 new.
-  KILLED   N1/M1 blocked request dispatched anyway (socket opened)
-  KILLED   N2/M2 fail-open on evaluation timeout
-  KILLED   N3/M3 fail-open on engine error
-  KILLED   N4/M4 oversized input parsed and inspected
-  KILLED   N5/M5 window released regardless of its decision
-  KILLED   N7 bound measured in characters
-  KILLED   N8/M9 media (opaque) content treated as inspected
-  KILLED   N9/M12 claimed tenant header trusted
-  KILLED   N10/M11 served model not re-checked (non-stream)
-  KILLED   N11/M16 truncated stream treated as complete
-  KILLED   N12/M10 pending window released after a mid-stream failure
-  KILLED   N14/M8 tool results not inspected (location lost)
-  KILLED   N15/M15 non-stream blocked response released
-  KILLED   N16 mock provider does not count calls
-  KILLED   N17 streamed served model ignored
-  KILLED   N18/M6 buffer_full ignored
-  KILLED   N19 tool names not collected
-  KILLED   N20 marker dropped from providers
-  KILLED   M13 raw output text in the record
-  KILLED   M14 destination not surface-qualified
-  KILLED   M17 check:bundle rule 8 (server files) removed
-  KILLED   R1 H1 unreadable model defaulted to a placeholder
-  KILLED   R2 M1 allowlist walker (only messages content)
-  KILLED   R3 M1 nested JSON not decoded
-  KILLED   R4 M1 depth bound removed
-  KILLED   R5 M2 synchronous overrun not measured
-  KILLED   R6 M3 per-chunk detection (no joined window)
-  KILLED   R7 M3 no overlap carried between windows
-  KILLED   R8 M4 window and deadline from the primary bundle
-  KILLED   R9 M5 tool names not de-duplicated
-  KILLED   R10 L3 prototype credentials resolved
-  KILLED   R11 L4 empty stream not decided
-  KILLED*  R12 stream window over the bound inspected
+  killed: N1/M1, N2/M2, N3/M3, N4/M4, N5/M5, N7, N8/M9, N9/M12, N10/M11, N11/M16, N12/M10, N14/M8, N15/M15, N16, N17, N18/M6, N19, N20, M13, M14, M17, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12
   33/33 killed (* R12 survived the first pass; killed after the added over-bound test).
+
+REVIEW ROUND 2 (challenger review of #184 at 87ee647). Same tests as the round-2 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the float-precision case now ends in the PAN (9 + PAN, 17 digits), since a PAN prefix
+survives rounding (mutation R2-4 survived first); a status placeholder was removed from one test title.
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (review2 + guard scan lines)
+  ✓ M1: object keys and non-string scalars are inspected > a marker as a JSON key in tool arguments is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a marker as a top-level key is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a marker as a metadata key is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a PAN as a JSON number in tool arguments is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a PAN as a JSON number in metadata is blocked before dispatch
+  ✓ M1: object keys and non-string scalars are inspected > a 17-digit number ending in a PAN (beyond float precision) in metadata is blocked before dispatch
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > code_interpreter (no name)
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > an mcp server not allowed
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > an allowed mcp server
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > web_search_preview, allowed by type
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > a tool without name or type
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > a name that is not an id (_shell), not allowed
+  ✓ M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist > a name that is not an id (_lookup), allowed by its norm...
+  ✓ M3: over-cap findings or tools never flip block to allow (monitor access, enforce DLP policy) > 1 marker: blocked, zero calls
+  ✓ M3: over-cap findings or tools never flip block to allow (monitor access, enforce DLP policy) > 1001 markers: blocked, zero calls
+  ✓ M3: over-cap findings or tools never flip block to allow (monitor access, enforce DLP policy) > 1 marker + 257 tools: blocked, zero calls
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a Image block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a image_file block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a INPUT_AUDIO block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a video_url block is opaque: DLP unavailable
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a finding in the carried overlap is not re-reported, and a second occurrence a...
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > an oversized non-streamed response is not inspected: DLP unavailable, withheld...
+  ✓ L2-L4: media types, carried findings, oversized responses, detector span > a detector span below 2 is refused at creation (a 1-character span would carry...
+  ✓ src/platform/conformance/guard.test.ts > conformance mocks are test-only > the text scan catches every import form: relative, @/ alias, bare baseUrl, tem...
+  Test Files  5 passed (5)
+  Tests  131 passed (131)
+Mutation check, round 2 (one at a time, same command): reviewer set rv183b-mut-c3 (34, anchors adapted) + R2-1..R2-12 new: 44/46 killed
+  incl. R2-4 after the strengthened test. Killed: rv-N1, rv-N2, rv-N2b, rv-N3, rv-N4, rv-N5, rv-N6, rv-N7, rv-N8, rv-N9, rv-N10, rv-N11, rv-N12, rv-N15, rv-N16, rv-N17, rv-N18, rv-N19
+  rv-N20, rv-N21, rv-N22, rv-N23, rv-N24, rv-N25, rv-N26, rv-N27, rv-N28, rv-N29, rv-N30, rv-N31, rv-N32, rv-N33, rv-N34, R2-1, R2-2, R2-3
+  R2-5, R2-6, R2-7, R2-8, R2-9, R2-10, R2-11, R2-4.
+  Not killed: rv-N13 is an equivalent mutant (with no route the provider is "unrouted", which has no target, so the 404 branch is
+  reached either way); R2-12 (booleans as text) was removed from the code instead: booleans and null carry no text.
