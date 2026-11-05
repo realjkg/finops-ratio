@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { validateGatewayRequestRecord, validatePolicyDecision, type Policy } from '../contracts';
 import { bundle, ent, pol, rule } from '../policy/testing/fixtures';
 import { createMockGateway, requireSourceText, type GatewayOptions, type GatewayResult } from './mockGateway';
+import { SURFACE_PARAMS } from './surfaceParams';
 import { startMockProvider, type MockProvider, type MockProviderOptions } from './mockProviders';
 import { seeded } from './testing/seeded';
 
@@ -120,10 +121,11 @@ describe('round 3: tool identities, content-block positions, numbers', () => {
     expect({ status: o.status, at: o.r.decisions.flatMap((d) => d.findings.map((f) => f.location)) }).toEqual({ status: 403, at: ['output'] });
   });
 });
+const only = (tools: string[], match: 'in' | 'not_in' = 'not_in') => bundle({ entitlements: ENTS, policies: [pol({ policyId: 'pol-tools', rules: [rule({ ruleId: 'r-tools', condition: { kind: 'tool', tools, match }, reasonCode: 'TOOL_NOT_ALLOWED' })] })] });
+const msgs = (more: object, ...content: unknown[]) => ({ model: 'model-c', messages: [{ role: 'user', content: 'q' }, ...content.map((c) => ({ role: 'assistant', content: [c] }))], ...more });
+const U = ['TOOL_UNIDENTIFIED'], N = ['TOOL_NOT_ALLOWED'], R = '/v1/responses', M = '/v1/messages', C = '/v1/chat/completions', L = '/v1/completions';
 describe('round 4: tools declared outside tools, history identities, item and block positions', () => {
-  const only = (tools: string[], match: 'in' | 'not_in' = 'not_in') => bundle({ entitlements: ENTS, policies: [pol({ policyId: 'pol-tools', rules: [rule({ ruleId: 'r-tools', condition: { kind: 'tool', tools, match }, reasonCode: 'TOOL_NOT_ALLOWED' })] })] });
-  const msgs = (more: object, ...content: unknown[]) => ({ model: 'model-c', messages: [{ role: 'user', content: 'q' }, ...content.map((c) => ({ role: 'assistant', content: [c] }))], ...more });
-  const evil = { type: 'url', url: 'https://evil.invalid/sse', name: 'evil' }, U = ['TOOL_UNIDENTIFIED'], N = ['TOOL_NOT_ALLOWED'], R = '/v1/responses', M = '/v1/messages';
+  const evil = { type: 'url', url: 'https://evil.invalid/sse', name: 'evil' };
   it.each([
     ['Messages mcp_servers under an fn:search allowlist (M1)', M, msgs({ tools: [{ name: 'search' }], mcp_servers: [evil] }), only(['fn:search']), 403, N],
     ['Messages mcp_servers allowed as mcp:evil', M, msgs({ tools: [{ name: 'search' }], mcp_servers: [evil] }), only(['fn:search', 'mcp:evil']), 200, []],
@@ -150,5 +152,32 @@ describe('round 4: tools declared outside tools, history identities, item and bl
     JSON.parse = ((s: string, r?: (k: string, v: unknown) => unknown) => real(s, r && ((k: string, v: unknown) => r(k, v)))) as typeof JSON.parse; // no source text
     try { expect([requireSourceText, () => gw()].map((f) => { try { f(); return 'ok'; } catch (e) { return String(e); } })).toEqual([expect.stringMatching(/source text/), expect.stringMatching(/source text/)]); } finally { JSON.parse = real; }
     expect(() => requireSourceText()).not.toThrow();
+  });
+});
+describe('round 5: custom tools, per-surface parameter lists, mcp_list_tools', () => {
+  it.each([
+    ['Messages {type: custom, name: shell} under an fn:shell denylist (M1)', M, msgs({ tools: [{ type: 'custom', name: 'shell', input_schema: { type: 'object' } }] }), only(['fn:shell'], 'in'), 403, N],
+    ['Responses {type: custom, name: shell} under an fn:shell denylist', R, { model: 'model-x', input: 'q', tools: [{ type: 'custom', name: 'shell' }] }, only(['fn:shell'], 'in'), 403, N],
+    ['Messages {type: custom, name: search} under an fn:search allowlist', M, msgs({ tools: [{ type: 'custom', name: 'search' }] }), only(['fn:search']), 200, []],
+    ['a Responses custom_tool_call history item', R, { model: 'model-x', input: [{ type: 'custom_tool_call', call_id: 'c', name: 'shell', input: 'ls' }] }, only(['fn:shell'], 'in'), 403, N],
+    ['a Responses mcp_list_tools item is mcp:<server_label> (L2)', R, { model: 'model-x', input: [{ type: 'mcp_list_tools', server_label: 'evil', tools: [{ name: 'run' }] }] }, only(['mcp:evil'], 'in'), 403, N],
+    ['tools listed by mcp_list_tools are not function identities', R, { model: 'model-x', input: [{ type: 'mcp_list_tools', server_label: 'wiki', tools: [{ name: 'run' }] }] }, only(['mcp:wiki']), 200, []],
+    ['chat web_search_options is type:web_search', C, chat('q', { web_search_options: {} }), only(['type:web_search'], 'in'), 403, N],
+    ['a Messages container with skills is container:<id> and skill:<skill_id>', M, msgs({ container: { id: 'cnt-1', skills: [{ type: 'anthropic', skill_id: 'pptx' }] } }), only(['container:cnt-1', 'skill:pptx']), 200, []],
+    ['a Messages skill under a skill denylist', M, msgs({ container: { skills: [{ type: 'anthropic', skill_id: 'pptx' }] } }), only(['skill:pptx'], 'in'), 403, N],
+    ['a Messages container id as a string', M, msgs({ container: 'cnt-1' }), only(['container:cnt-1'], 'in'), 403, N],
+    ['a Responses stored prompt is prompt:<id>', R, { model: 'model-x', input: 'q', prompt: { id: 'pmpt-1', version: '2' } }, only(['prompt:pmpt-1'], 'in'), 403, N],
+    ['a container without id or skills, no tool policy', M, msgs({ container: {} }), undefined, 403, U],
+  ])('%s', async (_n, path, body, b, status, codes) => expect(await go(path, body, b ? { bundle: b } : {})).toMatchObject({ status, codes }));
+  const BASE: Record<string, [string, Record<string, unknown>]> = { openai_chat: [C, chat('q')], openai_responses: [R, { model: 'model-x', input: 'q' }], anthropic_messages: [M, msgs({})], openai_completions: [L, { model: 'model-x', prompt: 'q' }] };
+  it.each([[C, 'extensions'], [C, 'capabilities'], [C, 'actions'], [C, 'extra_body'], [M, 'skills'], [M, 'extensions'], [R, 'skills'], [L, 'tools']])('%s: the unlisted parameter %s is unidentified (blocked in enforce)', async (path, p) => {
+    const body = { ...Object.values(BASE).find(([x]) => x === path)![1], [p]: [{ id: 'x' }] };
+    expect(await go(path, body)).toMatchObject({ status: 403, codes: U });
+    expect((await go(path, body, { accessMode: 'monitor' })).status).toBe(200);
+  });
+  it('every listed parameter that is not tool-affecting adds no unidentified tool, on each surface', async () => {
+    for (const [dest, [path, base]] of Object.entries(BASE)) for (const [cls, names] of Object.entries(SURFACE_PARAMS[dest])) for (const p of cls === 'affecting' ? [] : names.split(' ').filter(Boolean)) {
+      expect([dest, p, (await go(path, { ...base, [p]: base[p] ?? null })).codes]).toEqual([dest, p, []]);
+    }
   });
 });

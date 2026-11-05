@@ -22,8 +22,8 @@ const imports = (file: string) => ts.preProcessFile(fs.readFileSync(file, 'utf8'
 
 describe('conformance mocks are test-only', () => {
   it('have exactly these modules, importing only node built-ins, the contracts, the policy library and each other', () => {
-    expect(prod).toEqual(['mockGateway.ts', 'mockProviders.ts']);
-    for (const f of prod) for (const s of imports(path.join(DIR, f))) expect(`${f} -> ${s}`).toMatch(/ -> (node:(http|crypto|buffer|net)|\.\/mockProviders|\.\.\/contracts|\.\.\/policy)$/);
+    expect(prod).toEqual(['mockGateway.ts', 'mockProviders.ts', 'surfaceParams.ts']);
+    for (const f of prod) for (const s of imports(path.join(DIR, f))) expect(`${f} -> ${s}`).toMatch(/ -> (node:(http|crypto|buffer|net)|\.\/mockProviders|\.\/surfaceParams|\.\.\/contracts|\.\.\/policy)$/);
   });
   it('the text scan catches every import form: relative, @/ alias, bare baseUrl, template-literal and dynamic imports, require', () => {
     for (const planted of ["import { x } from '../platform/conformance/mockGateway';", "import x from '@/platform/conformance/mockProviders';", "import x from 'src/platform/conformance/mockGateway';",

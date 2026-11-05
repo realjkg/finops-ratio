@@ -1,7 +1,7 @@
 // Regression tests from challenger review round 2 of #183 (probes c1probe-r2 R1-R7; mutations M40, M41, M43).
 import { describe, expect, it } from 'vitest';
 import { validatePolicyDecision, type PolicyDecision } from '../contracts';
-import { accessModeFor, compileBundle, evaluate, unnamespacedTools, type Evaluation } from './index';
+import { accessModeFor, compileBundle, evaluate, failureEvaluation, unnamespacedTools, type Evaluation } from './index';
 import { bundle, card, ctx, ent, FLAGS, input, pol, rule } from './testing/fixtures';
 
 const valid = (e: Evaluation) => { for (const d of e.decisions) expect(validatePolicyDecision(d).ok).toBe(true); return e; };
@@ -46,6 +46,8 @@ describe('L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock);
     expect([accessModeFor(FLAGS.enforce), accessModeFor(FLAGS.monitor), accessModeFor(Object.create(FLAGS.enforce))]).toEqual(['enforce', 'monitor', 'off']);
     for (const over of [{ accessMode: 'monitor' }, { flags: {}, accessMode: 'enforce' }, { flags: { enabled: true }, accessMode: 'monitor' }]) expect([run(over).verdict, access(run(over))]).toEqual(['block', 'CONTEXT_INVALID']);
     expect([run({ flags: {} }, { ...ctx(), prompt: 'x' } as never).verdict, access(run({ flags: {} }, { ...ctx(), prompt: 'x' } as never))]).toEqual(['block', 'CONTEXT_INVALID']);
+    const f = valid(failureEvaluation({ ...input({ context: { ...ctx(), prompt: 'x' } as never }), flags: {} as never }, 'timeout', 1)); // M50: the failure path too
+    expect([f.verdict, access(f)]).toEqual(['block', 'CONTEXT_INVALID']);
   });
 });
 describe('L3 families, L4 placeholders, L5 compile', () => {
@@ -83,5 +85,5 @@ describe('#184 round 4: unidentified tools are never listable or allowed; unname
     const e = valid(evaluate(input({ accessMode, bundle: bundle({ policies: [] }), context: ctx({ tools: ['fn:search', 'unidentified:gw-req-1'] }) })));
     expect([e.verdict, brief(e.decisions[0])]).toEqual([verdict, [accessMode, enforced, 'block', '-', 'TOOL_UNIDENTIFIED']]);
   });
-  it('unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)', () => expect(unnamespacedTools(compileBundle(tools(['shell', 'fn:search', 'mcp:wiki', 'type:web_search', 'fn-h:0123456789abcdef', 'mcp_x'], 'in'))!)).toEqual(['shell', 'mcp_x']));
+  it('unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)', () => expect(unnamespacedTools(compileBundle(tools(['shell', 'fn:search', 'mcp:wiki', 'type:web_search', 'fn-h:0123456789abcdef', 'mcp_x', 'container:c-1', 'skill:pptx', 'prompt:p-1'], 'in'))!)).toEqual(['shell', 'mcp_x']));
 });
