@@ -2,7 +2,7 @@
 // mutations M12, M19, M20, M21). SYNTHETIC fixtures only.
 import { describe, expect, it } from 'vitest';
 import { validatePolicyDecision, type PolicyDecision } from '../contracts';
-import { accessModeFor, compileBundle, evaluate, failureEvaluation, sealEvaluation, type Evaluation } from './index';
+import { compileBundle, evaluate, failureEvaluation, sealEvaluation, type Evaluation } from './index';
 import { bundle, card, ctx, ent, input, NOW, pol, rule } from './testing/fixtures';
 
 const valid = (e: Evaluation) => { for (const d of e.decisions) expect(validatePolicyDecision(d).ok).toBe(true); return e; };
@@ -57,14 +57,6 @@ describe('M2 / L7: every verdict has a decision record; monitor records and allo
     const clock = Object.defineProperty({}, 'now', { get() { throw new Error('clock'); } });
     const e = valid(evaluate(input({ clock: clock as never })));
     expect({ verdict: e.verdict, at: e.decisions[0].evaluatedAt, codes: e.decisions[0].reasonCodes }).toEqual({ verdict: 'block', at: '1970-01-01T00:00:00Z', codes: ['CONTEXT_INVALID', 'CLOCK_INVALID'] });
-  });
-  it('the access mode is bound to the D7 flags by one helper; a mismatch is refused (enforce)', () => {
-    expect([{}, { enabled: true }, { enabled: true, policyMonitor: true }, { enabled: true, policyMonitor: true, enforcement: true }, { policyMonitor: true }].map(accessModeFor)).toEqual(['off', 'off', 'monitor', 'enforce', 'off']);
-    expect(evaluate({ ...input(), accessMode: undefined, flags: { enabled: true, policyMonitor: true } }).decisions[0].mode).toBe('monitor');
-    for (const flags of [{ enabled: true, enforcement: true, policyMonitor: true }, { enabled: false }]) {
-      const e = valid(evaluate({ ...input(), accessMode: 'monitor', flags }));
-      expect([e.verdict, e.decisions.map(brief)[0][0], e.decisions[0].reasonCodes[0]]).toEqual(['block', 'enforce', 'CONTEXT_INVALID']);
-    }
   });
 });
 

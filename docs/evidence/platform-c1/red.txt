@@ -58,3 +58,26 @@ Command: npx vitest run scripts/evidence --cache=false (collect-pr-evidence.mjs 
 AssertionError: collect-pr-evidence: port 3410 is in use (the Playwright suites need --port and --port+1); pass --port <free port>
 AssertionError: expected false to be true // Object.is equality
       Tests  2 failed | 47 passed (49)
+
+REVIEW ROUND 2 (challenger review of #183 at 3073bd8: M1, M2, L1-L5; decisions: supersession effective at now, refusal at least as strict,
+flags required and off = recorded allow). Tests committed before the fixes, on the merge of main (2785747).
+Command: npx vitest run src/platform/policy --cache=false
+     × an unreadable bundle is one denied decision under a placeholder id, in the access mode (enforce: verdict block)
+     × an unreadable bundle is one denied decision under a placeholder id, in the access mode (monitor: verdict allow)
+     × deny v1 now, v2 from Dec 1 (2026-10-02T12:00:00Z): model-z ENTITLEMENT_DENIED
+     × deny v1 now, v2 from Dec 1 (2026-11-30T23:59:59.999Z): model-z ENTITLEMENT_DENIED
+     × a future DLP policy version does not remove the current one; a future grant does not cause an outage
+     × monitor access + an enforce-mode policy for the phase: 1001 findings blocks, recorded CONTEXT_INVALID
+     × monitor access + an enforce-mode policy for the phase: 1 card + 257 tools blocks, recorded CONTEXT_INVALID
+     × monitor access + an enforce-mode policy for the phase: 257 teams blocks, recorded CONTEXT_INVALID
+     × only when every applicable policy is monitor (or none applies) does a monitor refusal record and allow
+     × off flags never block: one recorded POLICY_DISABLED allow, nothing enforced
+     × deny gpt-4 vs openai/gpt-4: denied true
+     × deny gpt-4 vs models/gpt-4: denied true
+     × deny gpt-4 vs ft:gpt-4:org::abc: denied true
+     × deny gpt-4 vs ft:gpt-4-turbo:org::abc: denied true
+     × deny gpt-4- vs gpt-4-turbo: denied true
+     × refusal placeholders cannot be forged: the reserved refused: prefix is refused in contexts and bundles
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  2 failed | 3 passed (5)
+      Tests  16 failed | 108 passed (124)

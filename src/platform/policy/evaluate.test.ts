@@ -138,7 +138,7 @@ describe('the failure table (ADR-0001 §3.3)', () => {
   });
   it.each([['enforce', 'block'], ['monitor', 'allow']] as const)('an unreadable bundle is one denied decision under a placeholder id, in the access mode (%s: verdict %s)', (accessMode, verdict) => {
     const e = valid(evaluate(input({ bundle: { ...bundle(), prompt: 'x' }, accessMode })));
-    expect(e.decisions.map((d) => [d.bundleId, d.mode, d.failure, d.outcome, d.reasonCodes])).toEqual([['unreadable-bundle', accessMode, 'policy_invalid', 'block', ['BUNDLE_INVALID']]]);
+    expect(e.decisions.map((d) => [d.bundleId, d.mode, d.failure, d.outcome, d.reasonCodes])).toEqual([['refused:unreadable-bundle', accessMode, 'policy_invalid', 'block', ['BUNDLE_INVALID']]]);
     expect(e.verdict).toBe(verdict);
   });
 });

@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { validatePolicyBundle, validatePolicyDecision, type DlpFinding, type Entitlement, type Policy, type PolicyCondition, type PolicyDecision, type PolicyRule } from '../contracts';
 import { evaluate, failureEvaluation, type EvaluationInput } from './evaluate';
 import type { RequestContext } from './context';
-import { bundle, ctx, ent, HUMAN, NOW, pol, ticking } from './testing/fixtures';
+import { bundle, ctx, ent, FLAGS, HUMAN, NOW, pol, ticking } from './testing/fixtures';
 
 const rng = (seed: number) => () => {
   seed = (seed + 0x6d2b79f5) | 0;
@@ -74,7 +74,7 @@ function scenario(seed: number) {
     ...(chance(r, 0.15) ? { notAfter: NOW } : {}), ...(chance(r, 0.05) ? { tenantId: 'tenant-other', policies: [], entitlements: [] } : {}) });
   const lastKnownGood = chance(r, 0.3) ? { ...b, version: 2, notAfter: '2026-10-08T00:00:00Z', tenantId: 'tenant-syn', lastKnownGoodApproved: chance(r, 0.6) } : undefined;
   const clock: ClockSpec = pick(r, ['none', 'none', 'throws', 1, 30000, 200000] as const);
-  const make = (): EvaluationInput => structuredClone({ bundle: b, ...(lastKnownGood ? { lastKnownGood } : {}), context: context(rng(seed + 1)), clock: { now: NOW }, accessMode: pick(rng(seed + 2), ['monitor', 'enforce'] as const) });
+  const make = (): EvaluationInput => structuredClone({ bundle: b, ...(lastKnownGood ? { lastKnownGood } : {}), context: context(rng(seed + 1)), clock: { now: NOW }, flags: FLAGS[pick(rng(seed + 2), ['monitor', 'enforce'] as const)] });
   return { b, lastKnownGood, make: () => ({ ...make(), clock: clockOf(clock) }), clock };
 }
 const deepFreeze = <T,>(x: T): T => { if (x && typeof x === 'object') { Object.values(x).forEach(deepFreeze); Object.freeze(x); } return x; };
@@ -125,7 +125,7 @@ describe('policy evaluation properties over 400 seeded random scenarios', () => 
       if (e.source !== 'bundle' || !deniedByOracle(i)) continue;
       checked++;
       expect(e.decisions[0], `seed ${s}`).toMatchObject({ decisionId: expect.stringMatching(/:access$/), outcome: 'block' });
-      if (i.accessMode === 'enforce') expect(e.verdict, `seed ${s}`).toBe('block');
+      if (i.flags.enforcement) expect(e.verdict, `seed ${s}`).toBe('block');
     }
     expect(checked).toBeGreaterThan(20);
   });
@@ -141,7 +141,7 @@ describe('policy evaluation properties over 400 seeded random scenarios', () => 
         expect(e.gap).toBe(e.decisions.some((d) => d.failureHandling === 'continued_with_gap'));
       }
       const i = sc.make();
-      if (i.accessMode === 'enforce') {
+      if (i.flags.enforcement) {
         expect(failureEvaluation(i, 'engine_error').verdict, `seed ${s}`).toBe('block');
         if (sc.clock === 'throws') expect(evaluate(sc.make()).verdict, `seed ${s}`).toBe('block');
       }
@@ -151,7 +151,7 @@ describe('policy evaluation properties over 400 seeded random scenarios', () => 
     const r = rng(42);
     const junk = () => pick(r, [null, 7, 'x', [], { kind: 'always' }, { ...ctx(), [`k${Math.floor(r() * 9)}`]: 1 }, undefined]);
     for (let n = 0; n < 300; n++) {
-      const e = evaluate({ bundle: chance(r, 0.5) ? junk() : bundle(), context: (chance(r, 0.5) ? junk() : ctx()) as never, clock: chance(r, 0.8) ? { now: NOW } : (junk() as never), accessMode: 'enforce' });
+      const e = evaluate({ bundle: chance(r, 0.5) ? junk() : bundle(), context: (chance(r, 0.5) ? junk() : ctx()) as never, clock: chance(r, 0.8) ? { now: NOW } : (junk() as never), flags: FLAGS.enforce });
       if (e.problems.length || e.source === 'none') expect(e.verdict).toBe('block');
       expect(e.decisions.length).toBeGreaterThan(0); // no verdict without a decision record
       for (const d of e.decisions) expect(validatePolicyDecision(d).ok).toBe(true);
