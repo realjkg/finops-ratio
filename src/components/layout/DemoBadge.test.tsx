@@ -43,12 +43,13 @@ describe('showsDemoBadge', () => {
   it('shows on every demo page', () => {
     for (const p of ['/', '/overview', '/workloads', '/connectors', '/frameworks', '/reports', '/demo', '/agent-workflows', '/workspace', '/outcomes',
       '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics', '/attribution', '/mission', '/hello']) {
-      expect(showsDemoBadge(p), p).toBe(true);
+      expect(showsDemoBadge(p, 'demo'), p).toBe(true);
+      expect(showsDemoBadge(p, 'engagement'), p).toBe(false);
     }
   });
 
   it('never shows on /simulation and its sub-routes, the engagement report, or error pages', () => {
-    for (const p of ['/simulation', '/simulation/', '/simulation/anything', '/engagement', '/_error', '/404', '/500']) expect(showsDemoBadge(p), p).toBe(false);
-    expect(showsDemoBadge('/simulations')).toBe(true); // a prefix match only on the path segment
+    for (const p of ['/simulation', '/simulation/', '/simulation/anything', '/engagement', '/_error', '/404', '/500']) expect(showsDemoBadge(p, 'demo'), p).toBe(false);
+    expect(showsDemoBadge('/simulations', 'demo')).toBe(true); // a prefix match only on the path segment
   });
 });

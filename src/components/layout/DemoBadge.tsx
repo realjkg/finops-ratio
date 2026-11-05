@@ -2,18 +2,12 @@
 // per-card "synthetic" or "sample" labels: the whole environment is a demo, so the data does not
 // need to say so on every card. It is named for assistive technology with what it means.
 //
-// Not shown on /simulation (the route and its heading already say "Simulation"), on the
-// engagement report (a customer instance, never a demo) or on error pages.
+// Where it shows is decided by src/lib/demoMode.ts: only in demo mode (never in engagement mode),
+// and not on /simulation (the route and its heading already say "Simulation") or error pages.
+import { DEMO_LABEL } from '@/lib/demoMode';
 
-export const DEMO_BADGE_LABEL = 'Demo environment — figures are illustrative';
-
-const NO_BADGE = new Set(['/engagement', '/_error', '/404', '/500']);
-
-/** True for every demo page that should carry the badge. */
-export function showsDemoBadge(pathname: string): boolean {
-  if (pathname === '/simulation' || pathname.startsWith('/simulation/')) return false;
-  return !NO_BADGE.has(pathname);
-}
+export const DEMO_BADGE_LABEL = DEMO_LABEL;
+export { showsDemoBadge } from '@/lib/demoMode';
 
 export function DemoBadge({ className = '' }: { className?: string }) {
   return (
