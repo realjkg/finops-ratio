@@ -162,7 +162,7 @@ describe('demo data labels in user-facing sources', () => {
   });
 
   it('the scanner catches the labels this change removed', () => {
-    for (const old of ['Synthetic data · No live connections', 'Sample workspace', 'Basis: demo assumption', 'Import sample', 'Example Cloud billing API', 'only the Static seed is shown', 'Offline sandbox — 6 seeded adapters', 'Imported API connections (synthetic)']) {
+    for (const old of ['Synthetic data · No live connections', 'Sample workspace', 'Basis: demo assumption', 'Import sample', 'Example Cloud billing API', 'only the Static seed is shown', 'Offline sandbox — 6 seeded adapters', 'Imported API connections (synthetic)', 'All sample data is simulated.', 'Verified sample claims are not real customer returns.', 'These samples are simulated.', 'Seed imported · next fixture available']) {
       expect(DEMO_LABEL_PHRASES.some((b) => b.pattern.test(old)), old).toBe(true);
     }
   });

@@ -20,7 +20,7 @@ test('all personas: import, investigate, approve, apply, reload, export and sign
   let s = await state(page);
   for (const source of ['AWS', 'AZURE', 'GCP']) {
     const prior = s.revision;
-    await page.getByRole('button', { name: `Import ${source} fixture`, exact: true }).click(); await saved(page, prior); s = await state(page);
+    await page.getByRole('button', { name: `Import ${source} dataset`, exact: true }).click(); await saved(page, prior); s = await state(page);
   }
   const cost = s.ledger.reduce((n, r) => n + r.cents, 0);
   expect(cost).toBe(s.workloads.reduce((n, w) => n + Math.round(w.costs.monthly_spend * 100), 0));

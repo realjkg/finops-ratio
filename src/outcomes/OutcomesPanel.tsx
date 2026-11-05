@@ -65,12 +65,11 @@ export function OutcomesPanel({ workloadId }: { workloadId: string }) {
         <h2 className="text-xl font-semibold">Outcome accountability</h2>
         <p className="mt-2 text-sm text-sub">
           {record.owner} · {record.ownerRole}. Observation:{" "}
-          {record.observation.start}–{record.observation.end}. All sample data
-          is simulated.
+          {record.observation.start}–{record.observation.end}.
         </p>
         <p className="mt-2 text-xs text-sub">
           Evidence status describes the claim’s maturity within this simulation.
-          Verified sample claims are not real customer returns.
+          Outcomes shown are illustrative, not real customer returns.
         </p>
       </header>
       {error && (

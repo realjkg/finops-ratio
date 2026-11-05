@@ -142,6 +142,8 @@ export const DEMO_LABEL_PHRASES: ReadonlyArray<{ pattern: RegExp; use: string }>
   { pattern: /\bExample (Cloud|Private Cloud|Datacenter|Compute)\b/, use: 'the fictional names of the FOCUS demo datasets' },
   { pattern: /\bStatic seed\b/, use: 'Offline sandbox' },
   { pattern: /\bDeterministic seed workloads\b/, use: 'the one /demo sentence' },
+  { pattern: /\bsample (data|claims?) (is|are) (simulated|not real)\b|\bAll sample data\b|\bVerified sample claims\b|\bThese samples are simulated\b/i, use: '"Outcomes shown are illustrative, not real customer returns."' },
+  { pattern: /\bSeed imported\b|\bnext fixture available\b|\bFixture imported\b|\bImport \$\{[^}]+\} fixture\b/, use: '"Dataset imported"' },
 ];
 
 // --- Cost source: modeled (bundled seed) vs recorded (simulation postings) ---

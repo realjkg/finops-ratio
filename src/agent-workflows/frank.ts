@@ -62,7 +62,7 @@ export function frankGuide(
     e.totalCostCents === null
       ? `Known cost is ${dollars(e.estimatedCostCents)}; the full cost is incomplete.`
       : `Full cost is ${dollars(e.totalCostCents)} (${e.costsMeasured ? "measured" : "estimated"}).`;
-  const owner = `${o.owner} owns ${o.metric}. The baseline is ${o.baseline.value} ${o.unit}; observed performance is ${o.observation.value} ${o.unit}, against a target of ${o.target} ${o.unit}. ${e.performanceReviewed ? `Performance evidence verified by ${o.planVerified!.by}.` : 'Performance evidence awaits independent review.'} These samples are simulated.`;
+  const owner = `${o.owner} owns ${o.metric}. The baseline is ${o.baseline.value} ${o.unit}; observed performance is ${o.observation.value} ${o.unit}, against a target of ${o.target} ${o.unit}. ${e.performanceReviewed ? `Performance evidence verified by ${o.planVerified!.by}.` : 'Performance evidence awaits independent review.'} These outcomes are illustrative, not real customer returns.`;
   const roleStep =
     actor.persona === "technical"
       ? "Your next step is to substantiate the comparison and cost inputs."
