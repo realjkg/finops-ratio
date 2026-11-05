@@ -1,0 +1,22 @@
+RED evidence, slice A1 (ADR-0001 §6, §12, §13, D7): connections registry, platform opt-in flags, draft 0020.
+Base 6c809af (main, #181). Tests committed first, in 5fe121b, before the modules and the draft SQL.
+Command: npx vitest run --cache=false src/platform/flags.test.ts src/engagement/config.test.ts \
+           src/connectors/managed/engagementSpec.test.ts src/ingest/platform   (at 5fe121b)
+ Test Files  5 failed (5)
+      Tests  2 failed | 62 passed (64)      (the other three files fail at import, before any test runs)
+ FAIL  src/platform/flags.test.ts               Error: Cannot find module './flags'
+ FAIL  src/engagement/config.test.ts            Error: Cannot find module '../platform/flags'
+ FAIL  src/ingest/platform/connections.test.ts  Error: Cannot find module '../../platform/flags'
+ FAIL  src/ingest/platform/draftMigration.test.ts  Error: Cannot find module './connections'
+ FAIL  src/connectors/managed/engagementSpec.test.ts > worker engagement-config check (parity with R1)
+       × accepts: platform: all flags explicitly off   AssertionError: R1 startup verdict: expected false to be true
+       × accepts: platform: enabled with no capability (R1 refused `platform` as an unknown top-level key)
+test:db (src/ingest/platform/connections.db.test.ts) at 5fe121b: fails at import (no ./connections, no draft SQL).
+Later test additions (not loosening): the privilege-model pin in connections.db.test.ts (GREEN commit 69b0ddd) and
+a stronger copy test (353bb57, kills mutation A1-M14).
+REVIEW ROUND (challenger on 17aba34: M1, L1-L6). Tests first, in 2d98472, against the code of cc844cc:
+ unit (flags, ingest/platform, R1 config, worker parity): Test Files 3 failed | 2 passed (5); Tests 15 failed | 253 passed
+ test:db connections.db.test.ts (local PostgreSQL 16.15): Tests 8 failed | 1 passed (9)
+ x declaration may not claim verification (M1) | x tenant-bound registry (L4) | x evidence references its observation,
+ stale after a degradation (L5) | x managed_ladder_step, observed_* columns, no verification column (L1, M1, L5)
+ x append-only triggers and RESTRICT key (L2) | x own keys only in the platform block (L3)
