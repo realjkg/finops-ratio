@@ -233,7 +233,7 @@ describe('src/ingest import boundary', () => {
     expect([...packages].filter((p) => p.startsWith('@aws-sdk/') || p === 'csv-parse' || p.startsWith('csv-parse/'))).toEqual([]);
   });
 
-  it('instrumentation.ts (Next startup hook) reaches only the pure costs config, the engagement config (and the model registry it validates against), the R2 identity directory (pure, node:crypto only) and Slice 0’s isTenantId: no runtime pg', () => {
+  it('instrumentation.ts (Next startup hook) reaches only the pure costs config, the engagement config (and the model registry it validates against, and the pure platform opt-in flags of ADR-0001 D7), the R2 identity directory (pure, node:crypto only) and Slice 0’s isTenantId: no runtime pg', () => {
     const instrumentation = path.join(REPO_ROOT, 'instrumentation.ts');
     expect(fs.existsSync(instrumentation)).toBe(true);
     const { files, packages } = importClosure(instrumentation);
@@ -247,6 +247,7 @@ describe('src/ingest import boundary', () => {
       'src/engagement/config.ts',
       'src/ingest/db/tenant.ts',
       'src/outcomes/types.ts',
+      'src/platform/flags.ts',
       'src/server/costs/config.ts',
       'src/types/index.ts',
     ]);

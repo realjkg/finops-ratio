@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 
 const COLLECTOR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'collect-pr-evidence.mjs');
+const REPO_MANIFEST = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'docs/evidence/platform/manifest.json');
+const PLATFORM_CHECK = 'platform capability tests (informational)';
 const made = [];
 afterAll(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true }); });
 
@@ -133,6 +135,29 @@ describe('collect-pr-evidence plan', () => {
     const withSmoke = plan(collect(dir, ['--base', base, '--head', head, '--pr', '1', '--plan-only', '--migration-smoke'], env));
     expect(withSmoke.informational[0].command).toMatch(/migrate --down 2/);
   });
+  it('platform capability evidence (ADR-0001 §14): N/A without a manifest; with one, a separate non-gating vitest JSON run of its implemented tests', () => {
+    const { dir, git, base, head } = repo();
+    const p = plan(collect(dir, ['--base', base, '--head', head, '--pr', '1', '--plan-only']));
+    expect(p.informational[0].name).toMatch(/^migrations smoke/);
+    expect(p.informational.find((g) => g.name === PLATFORM_CHECK).na).toBe('N/A: no docs/evidence/platform/manifest.json in this checkout');
+    const manifestPath = path.join(dir, 'docs/evidence/platform/manifest.json');
+    fs.mkdirSync(path.dirname(manifestPath), { recursive: true });
+    fs.copyFileSync(REPO_MANIFEST, manifestPath);
+    git('add', '-A'); git('commit', '-q', '-m', 'manifest');
+    const p2 = plan(collect(dir, ['--base', base, '--head', git('rev-parse', 'HEAD'), '--pr', '1', '--plan-only'], { AWS_SECRET_ACCESS_KEY: 'k', GITHUB_TOKEN: 'g' }));
+    const run = p2.informational.find((g) => g.name === PLATFORM_CHECK);
+    const files = [...new Set(JSON.parse(fs.readFileSync(REPO_MANIFEST, 'utf8')).capabilities.flatMap((c) => c.evidence).flatMap((e) => e.tests ?? []).map((t) => t.file))].sort();
+    // Test files are passed as absolute paths inside the checkout, so none can read as a vitest option (review M1).
+    const root = fs.realpathSync(dir);
+    expect(run.command).toBe(`npx vitest run --cache=false --reporter=json --outputFile=${path.join(root, 'docs/evidence/pr-1/logs/platform-vitest.json')} ${files.map((f) => path.join(root, f)).join(' ')}`);
+    expect(run.command.split(' ').slice(6).every((a) => a.startsWith(`${root}/`))).toBe(true);
+    for (const k of ['AWS_SECRET_ACCESS_KEY', 'GITHUB_TOKEN']) expect(run.envKeys).not.toContain(k);
+    expect(p2.gates.map((g) => g.name)).toEqual(p.gates.map((g) => g.name)); // no new gate: it never decides the charter
+    fs.writeFileSync(manifestPath, '{"schema":"x"}\n');
+    git('add', '-A'); git('commit', '-q', '-m', 'broken manifest');
+    const p3 = plan(collect(dir, ['--base', base, '--head', git('rev-parse', 'HEAD'), '--pr', '1', '--plan-only']));
+    expect(p3.informational.find((g) => g.name === PLATFORM_CHECK).na).toMatch(/^N\/A: manifest invalid \(\d+ problem\(s\)\)/);
+  });
 });
 
 // --- run phase, with shimmed gates --------------------------------------------------------------
@@ -145,7 +170,8 @@ function shimDir() {
   fs.writeFileSync(path.join(d, 'npx'), [
     '#!/bin/sh',
     'case "$1" in',
-    '  vitest) printf " Test Files  1 passed (1)\\n      Tests  3 passed (3)\\n";;',
+    '  vitest) for a in "$@"; do case "$a" in --outputFile=*) [ -f vitest-shim.json ] && cp vitest-shim.json "${a#--outputFile=}";; esac; done',
+    '    printf " Test Files  1 passed (1)\\n      Tests  3 passed (3)\\n";;',
     '  playwright) printf "  2 passed (1s)\\n";;',
     '  tsx) exec node --input-type=commonjs -e "$(cat "$2")";;',
     '  *) echo "npx $*";;',
@@ -205,6 +231,69 @@ describe('collect-pr-evidence run phase (shimmed gates)', () => {
     expect(git('worktree', 'list').split('\n')).toHaveLength(1);
     const md = fs.readFileSync(path.join(dir, 'docs/evidence/pr-180/evidence.md'), 'utf8');
     expect(md).toMatch(/Attests code SHA `[0-9a-f]{40}`/);
+  });
+
+  it('platform capability evidence is reported per capability from the vitest JSON; a failing test never changes the exit code or the charter', () => {
+    const { dir, git, base } = fixtureRepo(dataset('2.25'));
+    const m = JSON.parse(fs.readFileSync(REPO_MANIFEST, 'utf8'));
+    m.capabilities[0].evidence.push({ id: 'x-pass', covers: null, slice: 'W0', kind: 'test', description: 'passes', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't1' }] });
+    m.capabilities[3].evidence.push({ id: 'x-fail', covers: null, slice: 'W0', kind: 'test', description: 'fails', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't2' }] });
+    fs.mkdirSync(path.join(dir, 'docs/evidence/platform'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs/evidence/platform/manifest.json'), JSON.stringify(m, null, 2) + '\n');
+    const results = (status) => m.capabilities.flatMap((c) => c.evidence).flatMap((e) => e.tests ?? []).map((t) => ({ name: path.join(fs.realpathSync(dir), t.file), assertionResults: [{ ancestorTitles: t.suite.split(' > '), title: t.title, status: t.title === 't2' ? 'failed' : status }] }));
+    fs.writeFileSync(path.join(dir, 'vitest-shim.json'), JSON.stringify({ testResults: results('passed') }));
+    git('add', '-A'); git('commit', '-q', '-m', 'manifest');
+    const head = git('rev-parse', 'HEAD');
+    const r = runCollector(dir, ['--base', base, '--head', head, '--pr', '9']);
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const e = JSON.parse(fs.readFileSync(path.join(dir, 'docs/evidence/pr-9/evidence.json'), 'utf8'));
+    expect(e.platform.manifest).toBe('docs/evidence/platform/manifest.json');
+    expect(e.platform.run.available).toBe(true);
+    expect(e.platform.capabilities.map((c) => c.status)).toEqual(['PLANNED', 'NOT STARTED', 'NOT STARTED', 'NOT VALIDATED', 'NOT STARTED', 'NOT STARTED', 'NOT STARTED', 'NOT STARTED']);
+    expect(e.platform.capabilities[3].items.find((i) => i.id === 'x-fail').status).toBe('FAILED');
+    expect(e.charter.map((c) => c.item)).not.toContain(expect.stringMatching(/platform/i));
+    expect(e.gates.map((g) => g.name)).not.toContain(PLATFORM_CHECK);
+    expect(e.informational.find((g) => g.name === PLATFORM_CHECK).logSha256).toMatch(/^[0-9a-f]{64}$/);
+    const md = fs.readFileSync(path.join(dir, 'docs/evidence/pr-9/evidence.md'), 'utf8');
+    expect(md).toMatch(/^\| 4 \| Track token costs \| 1\.1 \| .* \| \*\*NOT VALIDATED\*\* \|/m);
+    expect(md).not.toMatch(/Platform capability evidence[\s\S]*\*\*PASS\*\*[\s\S]*## Known gaps/);
+  });
+
+  it('a stale platform report left in the logs directory is never read: without a fresh report the capabilities are NOT RUN (review L3, M11)', () => {
+    const { dir, git, base } = fixtureRepo(dataset('2.25'));
+    fs.mkdirSync(path.join(dir, 'docs/evidence/platform'), { recursive: true });
+    fs.copyFileSync(REPO_MANIFEST, path.join(dir, 'docs/evidence/platform/manifest.json'));
+    git('add', '-A'); git('commit', '-q', '-m', 'manifest, no shim report');
+    const head = git('rev-parse', 'HEAD');
+    const tests = JSON.parse(fs.readFileSync(REPO_MANIFEST, 'utf8')).capabilities.flatMap((c) => c.evidence).flatMap((e) => e.tests ?? []);
+    const stale = { testResults: tests.map((t) => ({ name: path.join(fs.realpathSync(dir), t.file), assertionResults: [{ ancestorTitles: t.suite.split(' > '), title: t.title, status: 'passed' }] })) };
+    fs.mkdirSync(path.join(dir, 'docs/evidence/pr-11/logs'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs/evidence/pr-11/logs/platform-vitest.json'), JSON.stringify(stale)); // gitignored
+    const r = runCollector(dir, ['--base', base, '--head', head, '--pr', '11']);
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const e = JSON.parse(fs.readFileSync(path.join(dir, 'docs/evidence/pr-11/evidence.json'), 'utf8'));
+    expect(e.platform.run).toEqual({ available: false, reason: 'NOT RUN: the targeted vitest run wrote no JSON report' });
+    expect(e.platform.capabilities.map((c) => c.status)).toEqual(['NOT RUN', 'NOT RUN', 'NOT RUN', 'NOT RUN', 'NOT STARTED', 'NOT RUN', 'NOT STARTED', 'NOT STARTED']);
+  });
+
+  it('an invalid manifest is reported in the platform section only: charter item 3 and the known gaps are unchanged (review L5)', () => {
+    const run = (manifestText, pr) => {
+      const { dir, git, base } = fixtureRepo(dataset('2.25'));
+      if (manifestText !== null) {
+        fs.mkdirSync(path.join(dir, 'docs/evidence/platform'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'docs/evidence/platform/manifest.json'), manifestText);
+        git('add', '-A'); git('commit', '-q', '-m', 'manifest');
+      }
+      const r = runCollector(dir, ['--base', base, '--head', git('rev-parse', 'HEAD'), '--pr', String(pr)]);
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      return { e: JSON.parse(fs.readFileSync(path.join(dir, `docs/evidence/pr-${pr}/evidence.json`), 'utf8')), md: fs.readFileSync(path.join(dir, `docs/evidence/pr-${pr}/evidence.md`), 'utf8') };
+    };
+    const none = run(null, 12);
+    const bad = run('{"schema":"x"}\n', 13);
+    expect(bad.e.knownGaps).toEqual(none.e.knownGaps);
+    expect(bad.e.charter.find((c) => c.id === 3)).toEqual(none.e.charter.find((c) => c.id === 3));
+    expect(bad.e.platform.problems.length).toBeGreaterThan(0);
+    expect(bad.md).toMatch(/Manifest invalid \(not evaluated\): /);
   });
 
   it('rollback is FAIL when the reverse-applied tree differs from the merge-base tree, even with every gate green', () => {

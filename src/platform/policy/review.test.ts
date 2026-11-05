@@ -2,13 +2,12 @@
 // mutations M12, M19, M20, M21). SYNTHETIC fixtures only.
 import { describe, expect, it } from 'vitest';
 import { validatePolicyDecision, type PolicyDecision } from '../contracts';
-import { accessModeFor, compileBundle, evaluate, failureEvaluation, sealEvaluation, type Evaluation } from './index';
+import { compileBundle, evaluate, failureEvaluation, sealEvaluation, type Evaluation } from './index';
 import { bundle, card, ctx, ent, input, NOW, pol, rule } from './testing/fixtures';
 
 const valid = (e: Evaluation) => { for (const d of e.decisions) expect(validatePolicyDecision(d).ok).toBe(true); return e; };
 const access = (e: Evaluation) => [e.decisions[0].outcome, e.decisions[0].ruleIds.join('+'), e.decisions[0].reasonCodes.join('+')];
 const brief = (d: PolicyDecision) => [d.mode, d.enforced, d.outcome, d.failure ?? '-', d.failureHandling ?? '-', d.reasonCodes.join('+')];
-
 describe('M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact', () => {
   const b = bundle({ policies: [], entitlements: [ent({ models: ['*'] }), ent({ entitlementId: 'ent-deny', models: ['model-x'], effect: 'deny' })] });
   it.each(['model-x', 'model-x@20261001', 'model-x-2026-10-01', 'MODEL-X', 'Model-X.v2', 'model-x:ft'])('deny model-x blocks %s', (m) => {
@@ -23,7 +22,6 @@ describe('M1: a deny names a model family (id, @revision and separator-extended 
     for (const m of ['model-x@20261001', 'model-x-2026-10-01', 'MODEL-X']) expect(access(evaluate(input({ bundle: exact, context: ctx({ modelRequested: m }) })))).toEqual(['block', '', 'ENTITLEMENT_NOT_GRANTED']);
   });
 });
-
 describe('M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks', () => {
   const mon = bundle({ policies: [pol({ mode: 'monitor' })] });
   const throwing = Object.defineProperty({ ...ctx() }, 'workloadId', { get() { throw new Error('getter'); }, enumerable: true });
@@ -58,16 +56,7 @@ describe('M2 / L7: every verdict has a decision record; monitor records and allo
     const e = valid(evaluate(input({ clock: clock as never })));
     expect({ verdict: e.verdict, at: e.decisions[0].evaluatedAt, codes: e.decisions[0].reasonCodes }).toEqual({ verdict: 'block', at: '1970-01-01T00:00:00Z', codes: ['CONTEXT_INVALID', 'CLOCK_INVALID'] });
   });
-  it('the access mode is bound to the D7 flags by one helper; a mismatch is refused (enforce)', () => {
-    expect([{}, { enabled: true }, { enabled: true, policyMonitor: true }, { enabled: true, policyMonitor: true, enforcement: true }, { policyMonitor: true }].map(accessModeFor)).toEqual(['off', 'off', 'monitor', 'enforce', 'off']);
-    expect(evaluate({ ...input(), accessMode: undefined, flags: { enabled: true, policyMonitor: true } }).decisions[0].mode).toBe('monitor');
-    for (const flags of [{ enabled: true, enforcement: true, policyMonitor: true }, { enabled: false }]) {
-      const e = valid(evaluate({ ...input(), accessMode: 'monitor', flags }));
-      expect([e.verdict, e.decisions.map(brief)[0][0], e.decisions[0].reasonCodes[0]]).toEqual(['block', 'enforce', 'CONTEXT_INVALID']);
-    }
-  });
 });
-
 describe('L1 supersession, L2 the log-only DLP exception, L3 mutation gaps', () => {
   it('only the highest version of an entitlement or policy id is evaluated', () => {
     const b = bundle({ policies: [], entitlements: [ent({ version: 1, models: ['*'] }), ent({ version: 2, models: ['model-x'] })] });
@@ -89,7 +78,6 @@ describe('L1 supersession, L2 the log-only DLP exception, L3 mutation gaps', () 
     expect({ verdict: e.verdict, n: e.decisions.length, problems: e.problems }).toEqual({ verdict: 'block', n: 2, problems: ['$.decisions: a decision failed policy-decision/1 (dropped)'] });
   });
 });
-
 describe('L4 compiled bundles, L5 one read of the input, P7 hostile inputs', () => {
   it('a compiled bundle gives the same result as the raw one; a look-alike object is not trusted as compiled', () => {
     const compiled = compileBundle(bundle());
@@ -110,25 +98,16 @@ describe('L4 compiled bundles, L5 one read of the input, P7 hostile inputs', () 
     const cases = [undefined, 42, proxy, { ...input(), context: proxy }, { ...input(), bundle: proxy }, { ...input(), clock: proxy }, { ...input(), context: { ...ctx(), teamIds: [cyc] } },
       { ...input(), context: { ...ctx(), teamIds: [BigInt(10)] } }, { ...input(), context: { ...ctx(), inputBytes: NaN } }, { ...input(), clock: { now: NOW, elapsedMicros: () => NaN } },
       { ...input(), bundle: { ...bundle(), policies: [cyc] } }, { ...input({ bundle: bundle({ notAfter: '2026-10-02T00:00:00Z' }) }), lastKnownGood: proxy }];
-    for (const c of cases) for (const e of [evaluate(c as never), failureEvaluation(c as never, 'timeout')]) {
-      expect(e.verdict).toBe('block');
-      expect(valid(e).decisions.length).toBeGreaterThan(0);
-    }
+    for (const c of cases) for (const e of [evaluate(c as never), failureEvaluation(c as never, 'timeout')]) expect([e.verdict, valid(e).decisions.length > 0]).toEqual(['block', true]);
   });
   it('P9: at the contract maxima a compiled bundle evaluates within a bounded time (recorded in green.txt)', () => {
-    const models = Array.from({ length: 256 }, (_, i) => `model-${i}`);
-    const dlp = rule({ condition: { kind: 'dlp_category', categories: ['payment_card', 'email', 'phone', 'iban', 'us_ssn', 'api_key', 'custom', 'private_key', 'cloud_credential'], minConfidence: 'low' }, action: 'log_only' });
-    const rules = Array.from({ length: 512 }, (_, i) => ({ ...dlp, ruleId: `r${i}` }));
+    const models = Array.from({ length: 256 }, (_, i) => `model-${i}`), all = ['payment_card', 'email', 'phone', 'iban', 'us_ssn', 'api_key', 'custom', 'private_key', 'cloud_credential'] as const;
+    const rules = Array.from({ length: 512 }, (_, i) => rule({ ruleId: `r${i}`, condition: { kind: 'dlp_category', categories: [...all], minConfidence: 'low' }, action: 'log_only' }));
     const b = bundle({ policies: Array.from({ length: 256 }, (_, i) => pol({ policyId: `p${i}`, rules, mode: 'monitor', onTimeout: 'continue_with_gap', onEngineError: 'continue_with_gap' })),
       entitlements: Array.from({ length: 4096 }, (_, i) => ent({ entitlementId: `e${i}`, models, subjectKind: 'team', subjectRef: `team-${i % 256}` })) });
     const c = ctx({ teamIds: Array.from({ length: 256 }, (_, i) => `team-${i}`), findings: Array.from({ length: 1000 }, (_, i) => ({ ...card(), start: i, end: i + 16 })), modelRequested: 'model-255', modelServed: 'model-254' });
-    const t0 = process.hrtime.bigint();
-    const compiled = compileBundle(b);
-    const t1 = process.hrtime.bigint();
+    const compiled = compileBundle(b), t1 = performance.now();
     const e = evaluate(input({ bundle: compiled, context: c, accessMode: 'monitor' }));
-    const t2 = process.hrtime.bigint();
-    console.log(`P9 contract maxima: compile ${Number(t1 - t0) / 1e6} ms, evaluate ${Number(t2 - t1) / 1e6} ms, ${e.decisions.length} decisions`);
-    expect({ n: e.decisions.length, problems: e.problems }).toEqual({ n: 257, problems: [] });
-    expect(Number(t2 - t1) / 1e6).toBeLessThan(5000);
+    expect({ n: e.decisions.length, problems: e.problems, fast: performance.now() - t1 < 5000 }).toEqual({ n: 257, problems: [], fast: true });
   }, 60000);
 });

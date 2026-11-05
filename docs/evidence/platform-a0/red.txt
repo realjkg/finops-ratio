@@ -1,0 +1,20 @@
+RED evidence, slice A0 (ADR-0001 §13/§14): platform capability evidence manifest and collector section.
+Base 6c809af (main, #181). Tests committed first, in 61193a6, before the module, the manifest and the collector change.
+Command: npx vitest run --cache=false scripts/evidence   (at 61193a6)
+ Test Files  2 failed | 2 passed (4)
+      Tests  2 failed | 48 passed (50)
+ FAIL  scripts/evidence/platformEvidence.test.mjs [ scripts/evidence/platformEvidence.test.mjs ]
+Error: Cannot find module './platformEvidence.mjs' imported from scripts/evidence/platformEvidence.test.mjs
+ FAIL  scripts/evidence/collectPrEvidence.test.mjs > collect-pr-evidence plan > platform capability evidence (ADR-0001 §14): N/A without a manifest; with one, a separate non-gating vitest JSON run of its implemented tests
+TypeError: Cannot read properties of undefined (reading 'na')      (the collector has no platform check yet)
+ FAIL  scripts/evidence/collectPrEvidence.test.mjs > collect-pr-evidence run phase (shimmed gates) > platform capability evidence is reported per capability from the vitest JSON; a failing test never changes the exit code or the charter
+Error: ENOENT: no such file or directory, open 'docs/evidence/platform/manifest.json'
+Note: one assertion was narrowed in the GREEN commit, not loosened: "no enterprise/supported/connected wording" scanned
+the whole record, including the owner's own text ("in supported scenarios", cap 5); it now scans the computed statuses
+and details only, which is what the rule is about.
+REVIEW ROUND (challenger on 8ed8781: M1, L1-L3, L5). Tests first, in 8db382a, at the code of 2161173:
+ npx vitest run --cache=false scripts/evidence -> Test Files 2 failed | 2 passed (4); Tests 8 failed | 65 passed (73)
+ x §14 pin per capability | x option-like/hidden test paths refused | x free text without status words (L1)
+ x declared status is a cap (L2) | x malformed vitest JSON skipped | x Markdown escaping (L1)
+ x collector passes absolute paths (M1) | x invalid manifest leaves charter/gaps unchanged (L5)
+ The M2 (mixed attempts FAILED) and M11 (stale report) tests pass at RED: they pin behavior that had no test.

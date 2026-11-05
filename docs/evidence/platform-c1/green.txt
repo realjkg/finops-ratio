@@ -41,84 +41,48 @@ problem path), now written as a prefix slice. Added guard test (passes before an
   ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > names a refused context key under $.context (each problem path is re-rooted once)
   Tests  75 passed (75)
 
+
 REVIEW ROUND 1 (challenger review of #183 at 13009d6). Same tests as the round-1 RED section of red.txt; fixes added.
 Command: npx vitest run src/platform/policy --cache=false --reporter=verbose (review.test.ts lines below)
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x@20261001
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x-2026-10-01
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks MODEL-X
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks Model-X.v2
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > deny model-x blocks model-x:ft
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > re-checks a dated served id against the family de...
-  ✓ M1: a deny names a model family (id, @revision and separator-extended ids, case-folded); grants stay exact > does not deny another model that only shares a pr...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (duplicate tools) is recorded as a denied engine_...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (257 teams) is recorded as a denied engine_error ...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (1001 findings) is recorded as a denied engine_er...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a 129-character requestRef) is recorded as a den...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a symbol key) is recorded as a denied engine_err...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a throwing getter) is recorded as a denied engin...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (a proxy) is recorded as a denied engine_error wi...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a refused context (null) is recorded as a denied engine_error with ...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a missing model is MODEL_UNKNOWN: blocked in enforce, recorded and ...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > an unreadable bundle and a failed evaluation follow the access mode...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > a clock that throws is recorded under the epoch with CLOCK_INVALID,...
-  ✓ M2 / L7: every verdict has a decision record; monitor records and allows, enforce blocks > the access mode is bound to the D7 flags by one helper; a mismatch ...
-  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > only the highest version of an entitlement or policy id is evaluated
-  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > kept contract behavior: a log-only DLP policy with DLP unavailable denies in enforce mode (...
-  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > a team grant matches only the listed team (M12)
-  ✓ L1 supersession, L2 the log-only DLP exception, L3 mutation gaps > a dropped (contract-invalid) decision fails the evaluation closed (M20)
-  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > a compiled bundle gives the same result as the raw one; a look-alike object is not trusted ...
-  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > reads each input getter once (a strict copy is validated and evaluated)
-  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > hostile inputs never throw, never allow in enforce mode, and always record a decision
-  ✓ L4 compiled bundles, L5 one read of the input, P7 hostile inputs > P9: at the contract maxima a compiled bundle evaluates within a bounded time (recorded in g...
+  (28 review.test.ts tests listed at commit 11008a1; condensed in round 2, reproducible with the command above)
   Test Files  4 passed (4)
   Tests  104 passed (104)
 P9 at the contract maxima (256 policies x 512 rules, 4096 entitlements x 256 models, 1000 findings, 256 teams), 3 runs, load ~5:
   compileBundle 1072-1209 ms (once per bundle); evaluate 821-921 ms (257 decisions); raw (uncompiled) bundle 1.7-2.5 s.
-
 Mutation check, round 1 (one at a time, npx vitest run src/platform/policy): reviewer set R-M1..R-M25 adapted to the new code, N1..N18 new.
-  KILLED   R-M1 deny-wins reversed (allow beats deny)
-  KILLED   R-M2 wildcard deny ignored
-  KILLED   R-M3 served-model recheck dropped
-  KILLED   R-M4 LKG accepted without approval
-  KILLED   R-M5 LKG accepted when itself expired
-  KILLED   R-M6 verdict counts monitor decisions
-  SURVIVED R-M7 log_only controls act
-  KILLED   R-M8 per-policy timeout never fires
-  KILLED   R-M9 now == notAfter treated valid
-  KILLED   R-M10 not-yet-valid check dropped
-  KILLED   R-M11 bundle tenant check dropped
-  KILLED   R-M12 team subject matches any team
-  KILLED   R-M13 entitlement provider ignored
-  KILLED   R-M14 DLP unavailable ignored
-  KILLED   R-M15 entitlements unavailable ignored
-  KILLED   R-M16 unreadable bundle always enforce (round-1 decision reversed)
-  KILLED   R-M17 minConfidence off by one
-  KILLED   R-M18 effectiveTo inclusive
-  KILLED   R-M19 engine error fails open via the outer catch
-  KILLED   R-M20 dropped decisions do not change the verdict
-  KILLED   R-M21 failureEvaluation access continues in monitor
-  SURVIVED R-M22 user subject ignores actorType
-  KILLED   R-M24 model not_in only checks the requested model
-  KILLED   R-M25 unknown context keys accepted
-  KILLED   N1 deny matched exactly (no family)
-  KILLED   N2 deny not case-folded
-  KILLED   N3 deny family without a separator (prefix match)
-  KILLED   N4 grants use family matching (fail open)
-  KILLED   N5 refused input not recorded
-  KILLED   N6 refusal always enforced (monitor blocks)
-  KILLED   N7 flags mismatch ignored
-  KILLED   N8 flags 'off' accepted as enforce
-  KILLED   N9 supersession removed
-  KILLED   N10 MODEL_UNKNOWN granted by a wildcard
-  KILLED   N11 input not copied (getters re-read)
-  KILLED   N12 symbol keys accepted
-  KILLED   N13 look-alike object trusted as compiled
-  KILLED   N14 clock failure not marked
-  KILLED   N15 first matched rule wins
-  KILLED   N16 workload scope ignored
-  KILLED   N17 redact classed as log-only
-  KILLED   N18 content key accepted in the request context (shape)
+  killed: R-M1, R-M2, R-M3, R-M4, R-M5, R-M6, R-M8, R-M9, R-M10, R-M11, R-M12, R-M13, R-M14, R-M15, R-M16, R-M17, R-M18, R-M19, R-M20, R-M21, R-M24, R-M25, N1, N2, N3, N4, N5, N6, N7, N8, N9, N10, N11, N12, N13, N14, N15, N16, N17, N18
   40/42 killed. Survivors are equivalent mutants: R-M7 (a log-only class has only allow actions and default allow, so the
   override is redundant by construction; removed in this round) and R-M22 (validated user/service refs are ps1:/svc: on both sides,
   so actorRef equality implies the actor type; the explicit check is kept as defense in depth).
+
+REVIEW ROUND 2 (challenger review of #183 at 3073bd8). Same tests as the round-2 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the unknown-phase refusal now uses a policy for another phase (mutation R2-4 survived first);
+existing tests moved from accessMode to the required D7 flags (FLAGS.enforce / FLAGS.monitor fixtures), same assertions.
+Command: npx vitest run src/platform/policy --cache=false --reporter=verbose (review2.test.ts lines)
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > deny v1 now, v2 from Dec 1 (2026-10-02T12:00:00Z): model-z ENTITLEMENT_DENIED
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > deny v1 now, v2 from Dec 1 (2026-11-30T23:59:59.999Z): model-z ENTITLEMENT_DENIED
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > deny v1 now, v2 from Dec 1 (2026-12-01T00:00:00Z): model-z ENTITLEMENT_DENIED
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > a future DLP policy version does not remove the current one; a future grant does not caus...
+  ✓ M2: a refusal is at least as strict as the normal path > monitor access + an enforce-mode policy for the phase: 1001 findings blocks, recorded CONTEXT_IN...
+  ✓ M2: a refusal is at least as strict as the normal path > monitor access + an enforce-mode policy for the phase: 1 card + 257 tools blocks, recorded CONTE...
+  ✓ M2: a refusal is at least as strict as the normal path > monitor access + an enforce-mode policy for the phase: 257 teams blocks, recorded CONTEXT_INVALID
+  ✓ M2: a refusal is at least as strict as the normal path > only when every applicable policy is monitor (or none applies) does a monitor refusal record and...
+  ✓ L1/L2: flags are required and bound through capabilityOn; off is a recorded allow > off flags never block: one recorded POLICY_DISABLED allow, nothing en...
+  ✓ L1/L2: flags are required and bound through capabilityOn; off is a recorded allow > a flags/accessMode mismatch or junk flags are refused (enforce with t...
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs openai/gpt-4: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs models/gpt-4: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs ft:gpt-4:org::abc: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs ft:gpt-4-turbo:org::abc: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4- vs gpt-4-turbo: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs gpt-4.1: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs gpt-4o: denied false
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs gpt-40: denied false
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs openai/gpt-4o: denied false
+  ✓ L3 families, L4 placeholders, L5 compile > refusal placeholders cannot be forged: the reserved refused: prefix is refused in contexts and bundles
+  ✓ L3 families, L4 placeholders, L5 compile > a compiled bundle is frozen and independent of the raw input, which stays mutable
+  Test Files  5 passed (5)
+  Tests  124 passed (124)
+Mutation check, round 2 (one at a time): reviewer set rv183b-mut-c1 (39, anchors adapted to the new code) + R2-1..R2-14 new: 53/53 killed
+  (R2-4 after the strengthened test). Killed: rv-M1, rv-M2, rv-M3, rv-M4, rv-M5, rv-M6, rv-M8, rv-M9, rv-M10, rv-M11, rv-M12, rv-M13, rv-M14, rv-M15, rv-M17, rv-M18, rv-M19, rv-M20, rv-M21, rv-M24
+  rv-M26, rv-M27, rv-M28, rv-M29, rv-M30, rv-M31, rv-M32, rv-M33, rv-M34, rv-M35, rv-M36, rv-M37, rv-M38, rv-M39, rv-M40, rv-M41, rv-M42, rv-M43, rv-M44, R2-1
+  R2-2, R2-3, R2-5, R2-6, R2-7, R2-8, R2-9, R2-10, R2-11, R2-12, R2-13, R2-14, R2-4.
