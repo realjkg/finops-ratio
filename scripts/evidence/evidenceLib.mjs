@@ -38,7 +38,13 @@ export function parseArgs(argv) {
 /** Passed through to gates unchanged; everything else in the caller's environment is dropped. */
 export const ENV_ALLOWLIST = ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TMPDIR', 'TMP', 'TEMP', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM', 'CI',
   'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'no_proxy', 'NODE_EXTRA_CA_CERTS', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
-  'PLAYWRIGHT_BROWSERS_PATH', 'XDG_CACHE_HOME', 'NVM_DIR', 'NVM_BIN', 'VOLTA_HOME', 'FNM_DIR'];
+  'ALL_PROXY', 'all_proxy', 'PLAYWRIGHT_BROWSERS_PATH', 'XDG_CACHE_HOME', 'NVM_DIR', 'NVM_BIN', 'VOLTA_HOME', 'FNM_DIR'];
+/**
+ * npm settings a corporate Mac may need (registry, CA, proxy, TLS). Credentials (_authToken, _auth, password)
+ * are never passed. NODE_OPTIONS is deliberately NOT passed: it can preload arbitrary code (--require/--import)
+ * or change runtime behavior for every gate, and nothing here needs it.
+ */
+const NPM_CONFIG = /^npm_config_(registry|cafile|ca|proxy|https_proxy|https-proxy|strict_ssl|strict-ssl|noproxy|no_proxy|no-proxy)$/i;
 /** Explicit inputs, renamed for the repo's tests. RATIO_EVIDENCE_SCRATCH_DATABASE_URL is mapped only into migration steps. */
 export const MAPPED_ENV = { RATIO_EVIDENCE_TEST_DATABASE_URL: 'RATIO_TEST_DATABASE_URL', RATIO_EVIDENCE_S3_ENDPOINT: 'RATIO_TEST_S3_ENDPOINT', RATIO_EVIDENCE_PG_DUMP: 'RATIO_PG_DUMP', RATIO_EVIDENCE_PSQL: 'RATIO_PSQL' };
 
@@ -50,6 +56,7 @@ export const MAPPED_ENV = { RATIO_EVIDENCE_TEST_DATABASE_URL: 'RATIO_TEST_DATABA
 export function gateEnv(env, extra = {}) {
   const out = { NEXT_TELEMETRY_DISABLED: '1' };
   for (const k of ENV_ALLOWLIST) if (env[k] !== undefined) out[k] = env[k];
+  for (const [k, v] of Object.entries(env)) if (NPM_CONFIG.test(k) && v !== undefined) out[k] = v;
   for (const [from, to] of Object.entries(MAPPED_ENV)) if (env[from]) out[to] = env[from];
   return { ...out, ...extra };
 }
@@ -68,14 +75,18 @@ const LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
  * caller is not a production environment (RATIO_ENV or NODE_ENV). Returns { ok } or { ok: false, reason }.
  */
 export function migrationTarget(env) {
-  const url = env.RATIO_EVIDENCE_SCRATCH_DATABASE_URL;
+  const url = (env.RATIO_EVIDENCE_SCRATCH_DATABASE_URL ?? '').trim();
   if (!url) return { ok: false, reason: 'no scratch database (RATIO_EVIDENCE_SCRATCH_DATABASE_URL unset)' };
-  for (const k of ['RATIO_ENV', 'NODE_ENV']) if (/^prod(uction)?$/i.test(env[k] ?? '')) return { ok: false, reason: `refused: ${k}=${env[k]} (migration checks never run in a production environment)` };
+  for (const k of ['RATIO_ENV', 'NODE_ENV']) if (/^prod(uction)?$/i.test((env[k] ?? '').trim())) return { ok: false, reason: `refused: ${k}=${env[k]} (migration checks never run in a production environment)` };
   let u;
   try { u = new URL(url); } catch { return { ok: false, reason: 'refused: RATIO_EVIDENCE_SCRATCH_DATABASE_URL is not a URL' }; }
   if (!/^postgres(ql)?:$/.test(u.protocol)) return { ok: false, reason: 'refused: the scratch database URL is not postgres://' };
   if (!LOCAL_HOSTS.has(u.hostname)) return { ok: false, reason: `refused: scratch database host ${u.hostname} is not 127.0.0.1/localhost` };
-  const db = decodeURIComponent(u.pathname.replace(/^\//, ''));
+  // Connection parameters in the query string override the URL's host/port/database (pg-connection-string).
+  const overriding = [...u.searchParams.keys()].filter((k) => /^(host|hostaddr|port|dbname|database|service|user|options)$/i.test(k.trim()));
+  if (overriding.length) return { ok: false, reason: `refused: the scratch database URL sets ${overriding.join(', ')} in its query string` };
+  let db;
+  try { db = decodeURIComponent(u.pathname.replace(/^\//, '')); } catch { return { ok: false, reason: 'refused: the scratch database name is not valid percent-encoding' }; }
   if (!/^ratio_evidence_[a-z0-9_]+$/.test(db)) return { ok: false, reason: `refused: scratch database name "${db}" does not match ^ratio_evidence_[a-z0-9_]+$` };
   return { ok: true, url, db };
 }
@@ -97,7 +108,16 @@ export function browserPlan(env, managedPath, exists) {
 // --- redaction ---------------------------------------------------------------------------------
 
 const SECRET_NAME = /(PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|CREDENTIAL|_KEY$|^KEY$|API_?KEY|PRIVATE)/i;
-/** Values to redact: secret-named variables (any length), and passwords inside URL-shaped values (user:pass@ or ?password=). */
+/**
+ * A value worth redacting: at least 8 characters and not a number or a boolean-like word. Shorter or
+ * structural values (MAX_THINKING_TOKENS=12345, TOKEN_REFRESH_ENABLED=1 or true) would otherwise corrupt
+ * numbers and SHAs everywhere in the evidence.
+ */
+export function isRedactable(v) {
+  const s = String(v ?? '');
+  return s.length >= 8 && !/^[+-]?\d+(\.\d+)?$/.test(s) && !/^(true|false|yes|no|on|off|null|undefined)$/i.test(s);
+}
+/** Values to redact: secret-named variables, and passwords inside URL-shaped values (user:pass@ or ?password=). */
 export function secretsFromEnv(env) {
   const out = new Set();
   for (const [k, v] of Object.entries(env)) {
@@ -106,20 +126,38 @@ export function secretsFromEnv(env) {
     if (/:\/\//.test(v)) {
       try {
         const u = new URL(v);
-        if (u.password) { out.add(u.password); out.add(decodeURIComponent(u.password)); }
+        if (u.password) { out.add(u.password); try { out.add(decodeURIComponent(u.password)); } catch { /* not decodable */ } }
         for (const [qk, qv] of u.searchParams) if (/pass|secret|token|key/i.test(qk) && qv) { out.add(qv); out.add(encodeURIComponent(qv)); }
       } catch { /* not a URL */ }
     }
   }
-  return [...out].filter(Boolean).sort((a, b) => b.length - a.length);
+  return [...out].filter(isRedactable).sort((a, b) => b.length - a.length);
 }
-/** Replaces every form a secret can take in output: raw, JSON-escaped and URL-encoded. */
+const jsonInner = (s) => JSON.stringify(s).slice(1, -1);
+/** Replaces every form a secret can take in text: raw, JSON-escaped (once and twice) and URL-encoded. */
 export function redact(text, secrets) {
   let t = String(text);
   for (const s of secrets) {
-    for (const form of new Set([s, JSON.stringify(s).slice(1, -1), encodeURIComponent(s)])) if (form) t = t.split(form).join('[redacted]');
+    for (const form of new Set([s, jsonInner(s), jsonInner(jsonInner(s)), encodeURIComponent(s)])) if (form) t = t.split(form).join('[redacted]');
   }
   return t;
+}
+/** Field-by-field redaction of a value BEFORE it is serialized: only strings change; numbers, booleans and keys never do. */
+export function redactDeep(value, secrets) {
+  if (typeof value === 'string') return redact(value, secrets);
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v, secrets));
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactDeep(v, secrets)]));
+  return value;
+}
+/** The structural fields redaction must never touch; a difference means the evidence would be corrupt. */
+export function integrityProblems(original, redacted, serialized) {
+  const problems = [];
+  try { JSON.parse(serialized); } catch (e) { problems.push(`evidence.json is not valid JSON after redaction: ${e.message}`); }
+  for (const p of ['pr', 'head.sha', 'head.tree', 'base.sha', 'base.tree', 'mergeBase.sha', 'mergeBase.tree']) {
+    const get = (o) => p.split('.').reduce((x, k) => x?.[k], o);
+    if (get(original) !== get(redacted)) problems.push(`redaction changed ${p}`);
+  }
+  return problems;
 }
 
 // --- parsers and statuses ----------------------------------------------------------------------
@@ -279,6 +317,34 @@ export function fixtureRows(path, text) {
   if (p.endsWith('.csv')) return parseCsv(text);
   return null;
 }
+/**
+ * The synthetic FOCUS export (fixtures/focus-1.0-synthetic/<variant>/.../BILLING_PERIOD=YYYY-MM/...csv.gz):
+ * per variant and billing period, the row count and exact BilledCost total over ALL of that period's files,
+ * in the shape of its control-totals.json.
+ */
+export function syntheticExportTotals(files) {
+  const acc = {};
+  for (const { path: p, text } of files) {
+    const m = /focus-1\.0-synthetic\/([^/]+)\/.*BILLING_PERIOD=(\d{4}-\d{2})\//.exec(p);
+    if (!m) continue;
+    const key = `${m[2]}-01`;
+    const t = ((acc[m[1]] ??= {})[key] ??= { rows: 0, billed: [] });
+    for (const r of parseCsv(text)) { t.rows++; if (r.BilledCost !== '') t.billed.push(r.BilledCost); }
+  }
+  return Object.fromEntries(Object.entries(acc).map(([v, ps]) => [v, Object.fromEntries(Object.entries(ps).map(([k, t]) => [k, { rowCount: t.rows, billedTotal: formatDecimal(sumDecimals(t.billed)) }]))]));
+}
+/** Differences between recomputed synthetic export totals and control-totals.json (empty when they agree). */
+export function compareControlTotals(computed, stated) {
+  const out = [];
+  for (const [v, ps] of Object.entries(stated)) for (const [k, s] of Object.entries(ps)) {
+    const c = computed[v]?.[k];
+    if (!c) out.push(`${v} ${k}: no files`);
+    else if (c.rowCount !== s.rowCount || !decimalsEqual(c.billedTotal, s.billedTotal)) out.push(`${v} ${k}: recomputed ${c.rowCount} rows / ${c.billedTotal}, stated ${s.rowCount} / ${s.billedTotal}`);
+  }
+  for (const [v, ps] of Object.entries(computed)) for (const k of Object.keys(ps)) if (!stated[v]?.[k]) out.push(`${v} ${k}: not in control-totals.json`);
+  return out;
+}
+
 /** Stated control totals in a demo dataset's meta. */
 export function statedTotals(path, text) {
   if (!path.endsWith('.json')) return null;
@@ -325,6 +391,7 @@ export function renderEvidenceMd(e) {
     for (const f of e.fixtures.files) {
       L.push(`| \`${cell(f.path)}\` | \`${(f.baseSha256 ?? '—').slice(0, 12)}\` | \`${(f.headSha256 ?? '—').slice(0, 12)}\` | ${f.baseRows ?? '—'} → ${f.headRows ?? '—'} | ${cell(f.headTotals ? totalsText(f.headTotals) : f.tabular === false ? 'not tabular (hash only)' : '—')} | ${f.matchesStated ?? '—'} | ${f.totalsUnchanged ?? '—'} | ${cell(f.error ?? '')} |`);
     }
+    if (e.fixtures.controlTotals) L.push('', `Synthetic export control totals (${cell(e.fixtures.controlTotals.file)}): **${e.fixtures.controlTotals.status}**${e.fixtures.controlTotals.problems.length ? ` — ${cell(e.fixtures.controlTotals.problems.join('; '))}` : ` (${cell(e.fixtures.controlTotals.summary)})`}.`);
     L.push('', `Determinism: ${e.fixtures.determinism.map((d) => `\`${cell(d.command)}\`: **${d.status}**${d.detail ? ` (${cell(d.detail)})` : ''}`).join('; ') || 'no generator applies'}.`);
   }
   L.push('', '## Rollback in test', '', e.rollback.procedure, '', `Result: **${e.rollback.status}**. ${e.rollback.detail}`, '');
