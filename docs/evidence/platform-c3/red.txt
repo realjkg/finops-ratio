@@ -66,3 +66,24 @@ Command: npx vitest run src/platform/conformance --cache=false
 ⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
  Test Files  2 failed | 2 passed (4)
       Tests  16 failed | 82 passed (98)
+
+REVIEW ROUND 3 (challenger review of #184 at 67201ec: M1, L1-L4; L1 decision: unknown content-block types and binary-ish typeless parts are uninspectable).
+Tests committed before the fixes, on 662ef85 (merge of #183 6b81bfe). Tool policies in the tests now name function tools fn:<name> (L2).
+Test infrastructure in this commit: the mock provider gains an 'extra' option (fields merged into a non-streamed response).
+Command: npx vitest run src/platform/conformance --cache=false
+     × a tool without name or type
+     × a name that is not an id (_lookup), allowed as fn:_lookup
+     × a function named mcp:deepwiki (no collision with mcp:deepwiki)
+     × a nameless, typeless tool although unidentified-tool is listed
+     × parallel tool calls search + search
+     × a messages block of unknown type with base64 data is uninspectable: DLP unavailable
+     × a messages image_base64 block is uninspectable: DLP unavailable
+     × a chat input_pdf part is uninspectable: DLP unavailable
+     × a typeless chat part with image_url is uninspectable: DLP unavailable
+     × a content object (not array) with image_url is uninspectable: DLP unavailable
+     × JSON-schema fields in tool definitions are data, not content blocks; 10,001 token ids are one segment
+     × number findings carry their real location: tool_use input numbers are tool_arguments; response numbers are output (N46)
+     × a disallowed tool is blocked before dispatch
+⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  2 failed | 2 passed (4)
+      Tests  13 failed | 98 passed (111)

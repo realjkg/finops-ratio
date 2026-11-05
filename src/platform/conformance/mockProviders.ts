@@ -19,6 +19,8 @@ export interface MockProviderOptions {
   /** End the stream cleanly but without its terminal event (a truncated response). */
   omitTerminal?: boolean;
   status?: number;
+  /** Extra top-level fields merged into a non-streamed response (e.g. numbers to inspect). */
+  extra?: Record<string, unknown>;
 }
 export interface MockProvider { url: string; calls: { path: string; bytes: number }[]; close(): Promise<void> }
 
@@ -58,7 +60,7 @@ export async function startMockProvider(o: MockProviderOptions): Promise<MockPro
     try { body = JSON.parse(raw.toString('utf8')); } catch { /* answered below as a bad request */ }
     const model = o.serveModel ?? body.model ?? 'model-unknown';
     if (o.status && o.status !== 200) { res.writeHead(o.status, { 'content-type': 'application/json', 'x-mock-origin': CONFORMANCE_MARKER }); res.end('{"error":{"type":"synthetic"}}'); return; }
-    if (!body.stream) { res.writeHead(200, { 'content-type': 'application/json', 'x-mock-origin': CONFORMANCE_MARKER }); res.end(JSON.stringify(whole(o, req.url ?? '', model))); return; }
+    if (!body.stream) { res.writeHead(200, { 'content-type': 'application/json', 'x-mock-origin': CONFORMANCE_MARKER }); res.end(JSON.stringify({ ...(whole(o, req.url ?? '', model) as object), ...o.extra })); return; }
     res.writeHead(200, { 'content-type': 'text/event-stream', 'x-mock-origin': CONFORMANCE_MARKER });
     let sent = 0;
     const all = events(o, model);

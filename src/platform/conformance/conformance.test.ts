@@ -13,7 +13,7 @@ const PROMPT = 'SYNTHETIC prompt text';
 const ALLOWED = ['provider-a:openai_chat', 'provider-a:openai_completions', 'provider-a:openai_responses', 'provider-b:anthropic_messages'];
 const dlp = rule({ ruleId: 'r-card', reasonCode: 'DLP_PAYMENT_CARD' });
 const inputPolicy = pol({ policyId: 'pol-in', rules: [dlp, rule({ ruleId: 'r-surface', condition: { kind: 'destination', providers: ALLOWED, match: 'not_in' }, reasonCode: 'SURFACE_NOT_ALLOWED' }),
-  rule({ ruleId: 'r-tool', condition: { kind: 'tool', tools: ['shell'], match: 'in' }, reasonCode: 'TOOL_NOT_ALLOWED' })] });
+  rule({ ruleId: 'r-tool', condition: { kind: 'tool', tools: ['fn:shell'], match: 'in' }, reasonCode: 'TOOL_NOT_ALLOWED' })] });
 const out = (phase: Policy['phase'], release: Policy['release'], over: Partial<Policy> = {}) => pol({ policyId: `pol-${phase}`, phase, release, rules: [dlp], ...over });
 const conformanceBundle = (stream: Partial<Policy> = {}, over: Partial<PolicyBundle> = {}) => bundle({
   policies: [inputPolicy, out('pre_response', 'buffer_full'), out('stream_chunk', 'buffer_window', stream)],

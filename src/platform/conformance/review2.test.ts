@@ -45,7 +45,7 @@ describe('M1: object keys and non-string scalars are inspected', () => {
 });
 
 describe('M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist', () => {
-  const allow = bundle({ entitlements: ENTS, policies: [pol({ policyId: 'pol-tools', rules: [rule({ ruleId: 'r-tools', condition: { kind: 'tool', tools: ['search', 'type:web_search_preview', 'mcp:wiki', 'tool:_lookup'], match: 'not_in' }, reasonCode: 'TOOL_NOT_ALLOWED' })] })] });
+  const allow = bundle({ entitlements: ENTS, policies: [pol({ policyId: 'pol-tools', rules: [rule({ ruleId: 'r-tools', condition: { kind: 'tool', tools: ['fn:search', 'type:web_search_preview', 'mcp:wiki', 'fn:_lookup', 'unidentified-tool'], match: 'not_in' }, reasonCode: 'TOOL_NOT_ALLOWED' })] })] });
   it.each([
     ['code_interpreter (no name)', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'code_interpreter', container: { type: 'auto' } }] }, 403],
     ['an mcp server not allowed', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'mcp', server_label: 'deepwiki', server_url: 'https://mcp.example.invalid' }] }, 403],
@@ -53,7 +53,7 @@ describe('M2 / L1: tools identified by name, else by type; unidentifiable tools 
     ['web_search_preview, allowed by type', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'web_search_preview' }] }, 200],
     ['a tool without name or type', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ container: {} }] }, 403],
     ['a name that is not an id (_shell), not allowed', '/v1/chat/completions', chat('q', { tools: [{ type: 'function', function: { name: '_shell' } }] }), 403],
-    ['a name that is not an id (_lookup), allowed by its normalized id', '/v1/chat/completions', chat('q', { tools: [{ type: 'function', function: { name: '_lookup' } }] }), 200],
+    ['a name that is not an id (_lookup), allowed as fn:_lookup', '/v1/chat/completions', chat('q', { tools: [{ type: 'function', function: { name: '_lookup' } }] }), 200],
   ])('%s', async (_n, path, body, status) => {
     const r = await go(path, body, { bundle: allow });
     expect({ status: r.status, codes: r.codes }).toEqual({ status, codes: status === 403 ? ['TOOL_NOT_ALLOWED'] : [] });
@@ -89,5 +89,33 @@ describe('L2-L4: media types, carried findings, oversized responses, detector sp
   });
   it('a detector span below 2 is refused at creation (a 1-character span would carry the whole stream)', () => {
     expect(() => gw({ maxDetectorSpan: 1 })).toThrow(RangeError);
+  });
+});
+describe('round 3: tool identities, content-block positions, numbers', () => {
+  const allow = bundle({ entitlements: ENTS, policies: [pol({ policyId: 'pol-tools', rules: [rule({ ruleId: 'r-tools', condition: { kind: 'tool', tools: ['fn:search', 'mcp:deepwiki', 'unidentified-tool'], match: 'not_in' }, reasonCode: 'TOOL_NOT_ALLOWED' })] })] });
+  const call = (...names: string[]) => ({ model: 'model-x', messages: [{ role: 'assistant', content: null, tool_calls: names.map((name, i) => ({ id: `t${i}`, type: 'function', function: { name, arguments: '{}' } })) }] });
+  it.each([
+    ['an mcp tool with a decoy name', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'mcp', name: 'search', server_label: 'evil', server_url: 'https://mcp.example.invalid' }] }, 403],
+    ['code_interpreter with a decoy name', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'code_interpreter', name: 'search' }] }, 403],
+    ['a function named mcp:deepwiki (no collision with mcp:deepwiki)', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'function', name: 'mcp:deepwiki' }] }, 403],
+    ['a nameless, typeless tool although unidentified-tool is listed', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ container: {} }] }, 403],
+    ['parallel tool calls search + shell', '/v1/chat/completions', call('search', 'shell'), 403], ['parallel tool calls search + search', '/v1/chat/completions', call('search', 'search'), 200],
+  ])('%s', async (_n, path, body, status) => expect((await go(path, body, { bundle: allow })).status).toBe(status));
+  it.each([
+    ['a messages block of unknown type with base64 data', { model: 'model-c', messages: [{ role: 'user', content: [{ type: 'pdf', source: { data: 'QUJD' } }] }] }, '/v1/messages'],
+    ['a messages image_base64 block', { model: 'model-c', messages: [{ role: 'user', content: [{ type: 'image_base64', data: 'QUJD' }] }] }, '/v1/messages'],
+    ['a chat input_pdf part', chat([{ type: 'input_pdf', file_data: 'QUJD' }]), '/v1/chat/completions'], ['a typeless chat part with image_url', chat([{ image_url: { url: 'data:image/png;base64,QUJD' } }]), '/v1/chat/completions'],
+    ['a content object (not array) with image_url', chat({ image_url: { url: 'x' } }), '/v1/chat/completions'],
+  ])('%s is uninspectable: DLP unavailable', async (_n, body, path) => expect(await go(path, body)).toMatchObject({ ...blocked, codes: ['DLP_UNAVAILABLE'] }));
+  it('JSON-schema fields in tool definitions are data, not content blocks; 10,001 token ids are one segment', async () => {
+    expect((await go('/v1/messages', { model: 'model-c', tools: [{ name: 'search', input_schema: { type: 'object', properties: { type: { type: 'string' } } } }], messages: [{ role: 'user', content: 'q' }] })).status).toBe(200);
+    expect((await go('/v1/completions', { model: 'model-x', prompt: Array.from({ length: 10001 }, (_, i) => i) }, { maxInspectBytes: 1e6 })).status).toBe(200);
+  });
+  it('number findings carry their real location: tool_use input numbers are tool_arguments; response numbers are output (N46)', async () => {
+    const r = await go('/v1/messages', { model: 'model-c', messages: [{ role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'pay', input: { card: Number(PAN) } }] }] });
+    expect({ status: r.status, at: r.r.decisions.flatMap((d) => d.findings.map((f) => f.location)) }).toEqual({ status: 403, at: ['tool_arguments'] });
+    const p = await provider({ flavor: 'openai', reply: ['ok'], extra: { meta: { card: Number(PAN) } } });
+    const o = await go('/v1/chat/completions', chat('q'), { bundle: bundle({ entitlements: ENTS, policies: [card('pre_response', { release: 'buffer_full' })] }), providers: { 'provider-a': { flavor: 'openai', url: p.url } } });
+    expect({ status: o.status, at: o.r.decisions.flatMap((d) => d.findings.map((f) => f.location)) }).toEqual({ status: 403, at: ['output'] });
   });
 });
