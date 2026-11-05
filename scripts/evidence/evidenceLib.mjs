@@ -1,4 +1,5 @@
 import { URL } from 'node:url';
+import { renderPlatformEvidenceMd } from './platformEvidence.mjs';
 // Pure helpers for collect-pr-evidence.mjs: CLI parsing, the gate environment allowlist, migration
 // target safety, output parsers, gate / charter status rules, exact-decimal fixture totals (BigInt, any
 // scale, independent of app code), redaction and the evidence.md renderer. No I/O here, so it is tested.
@@ -355,7 +356,7 @@ export function statedTotals(path, text) {
 // --- report ------------------------------------------------------------------------------------
 
 /** A Markdown table cell: backslashes first, then pipes, then newlines (no partial escaping). */
-export const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+export const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n|\r/g, ' ');
 /** A fenced block that its content cannot close: the fence is longer than any backtick run inside. */
 export function fence(text) {
   const longest = Math.max(2, ...[...String(text).matchAll(/`+/g)].map((m) => m[0].length));
@@ -373,7 +374,7 @@ export function renderEvidenceMd(e) {
   L.push(`Attests code SHA \`${e.head.sha}\` (tree \`${e.head.tree}\`) against merge-base \`${e.mergeBase.sha}\` (tree \`${e.mergeBase.tree}\`); requested base \`${e.base.ref}\` = \`${e.base.sha}\`.`);
   if (e.base.sha !== e.mergeBase.sha) L.push('', `Note: the requested base is not the merge-base; every diff, fixture, migration and rollback check uses the merge-base \`${e.mergeBase.sha}\`.`);
   L.push(`Generated ${e.generatedAt} by \`${e.command}\`. Node ${e.env.node}, npm ${e.env.npm}, ${e.env.os}.`);
-  if (e.collector) L.push(`Collector: commit \`${e.collector.commit ?? 'not a git checkout'}\`, script sha256 \`${e.collector.script.slice(0, 16)}…\`, lib sha256 \`${e.collector.lib.slice(0, 16)}…\`.`);
+  if (e.collector) L.push(`Collector: commit \`${e.collector.commit ?? 'not a git checkout'}\`, script sha256 \`${e.collector.script.slice(0, 16)}…\`, lib sha256 \`${e.collector.lib.slice(0, 16)}…\`${e.collector.platformLib ? `, platform lib sha256 \`${e.collector.platformLib.slice(0, 16)}…\`` : ''}.`);
   if (e.evidenceCommitNote) L.push('', e.evidenceCommitNote);
   L.push('', '## Charter', '', '| # | Item | Status | Evidence |', '|---|---|---|---|');
   for (const c of e.charter) L.push(`| ${c.id} | ${cell(c.item)} | **${c.status}** | ${cell(c.evidence)} |`);
@@ -396,9 +397,11 @@ export function renderEvidenceMd(e) {
   }
   L.push('', '## Rollback in test', '', e.rollback.procedure, '', `Result: **${e.rollback.status}**. ${e.rollback.detail}`, '');
   L.push('Production rollback: ' + e.rollback.production, '');
+  if (e.platform) L.push(renderPlatformEvidenceMd(e.platform));
   L.push('## Known gaps', '');
   for (const k of e.knownGaps.length ? e.knownGaps : ['None recorded.']) L.push(`- ${k}`);
   L.push('', '## Gate log tails', '');
   for (const g of [...e.gates, ...(e.informational ?? [])].filter((x) => x.tail)) L.push(`<details><summary>${cell(g.name)} (last 40 lines)</summary>`, '', fence(g.tail), '', '</details>', '');
-  return L.join('\n') + '\n';
+  // Exactly one final newline, so a committed evidence.md passes `git diff --check`.
+  return L.join('\n').replace(/\n+$/, '') + '\n';
 }

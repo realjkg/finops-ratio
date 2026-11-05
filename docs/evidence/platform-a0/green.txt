@@ -1,0 +1,48 @@
+GREEN evidence, slice A0. Gates at 1748b50 on base 6c809af, sequential, fresh clone after npm ci (Node v22.23.4).
+1 lint (npm run lint): exit 0
+2 typecheck (npx tsc --noEmit): exit 0
+3 worker typecheck (npx tsc -p tsconfig.worker.json --noEmit): exit 0
+4 full vitest (npx vitest run --cache=false): Test Files  310 passed (310); Tests  5194 passed (5194)
+5 build (npm run build): exit 0 (git status clean afterwards)
+6 check:bundle: {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]}
+7 evidence tooling (npx vitest run --cache=false scripts/evidence): Test Files 4 passed (4); Tests 65 passed (65)
+8 git diff --check origin/main...HEAD: clean
+9 real targeted run: npx vitest run --cache=false --reporter=json --outputFile=<f> <the 5 manifest test files>: exit 0;
+  rendered statuses: cap 1 PLANNED, 2 NOT STARTED, 3 NOT STARTED, 4 PLANNED, 5-8 NOT STARTED (5 W0 items PASSED, all others planned)
+Mutations (each applied alone in a separate worktree, targeted suite run, restored with git checkout; git status clean after):
+ A0-M1 a failing test is not FAILED: KILLED (1) a missing, failing or skipped test makes its capability NOT VALIDATED
+ A0-M2 a missing test counts as passed: KILLED (1) a missing, failing or skipped test makes its capability NOT VALIDATED
+ A0-M3 a skipped test counts as passed: KILLED (1) a missing, failing or skipped test makes its capability NOT VALIDATED
+ A0-M4 no results still reaches the declared status or the ceiling: KILLED (2) without test results, implemented items are NOT RUN ...
+ A0-M5 planned evidence ignored (capability reaches the ceiling early): KILLED (4) without test results, implemented items are NOT RUN ...
+ A0-M6 manifest may declare 'validated': KILLED (1) a capability may only be planned, not started or in progress ...
+ A0-M7 live verification status unchecked: KILLED (1) a capability may only be planned, not started or in progress ...
+ A0-M8 suite path ignored (only the innermost describe): KILLED (3) keys each result by repository-relative file, suite path ...
+ A0-M9 results from files outside the checkout accepted: KILLED (1) keys each result by repository-relative file, suite path ...
+ A0-M10 a planned item may name tests: KILLED (1) an implemented item names real test files; a planned item names none ...
+ A0-M11 test file path may escape the repository: KILLED (1) an implemented item names real test files ...
+ A0-M12 collector run without the JSON reporter: KILLED (1) platform capability evidence (ADR-0001 §14): N/A without a manifest ...
+ A0-M13 evidence.md omits the platform section: KILLED (2) evidence.md carries the section when the collector recorded it ...
+ A0-M14 manifest: owner cell reworded (cap 1): KILLED (2) is valid and maps capabilities 1-8, in order, to the owner's evidence cell verbatim
+ A0-M15 manifest: cap 5 claims planned: KILLED (2) names each capability's release and current status ...
+ A0-M16 manifest: an implemented test title that does not exist: KILLED (1) every implemented evidence test exists ...
+ A0-M17 invalid manifest still evaluated in the collector: KILLED (1) platform capability evidence (ADR-0001 §14): N/A without a manifest ...
+ 17/17 KILLED.
+Status wording: no capability is above its declared status ("planned" / "not started"); the computed ceiling is
+"implemented and pre-release validated; live verification scheduled"; nothing in the section is ever PASS.
+ROUND 2 (CodeQL on ec778bb: 2 high "Incomplete string escaping" in platformEvidence.test.mjs lines 61-62, the
+quote-only escaping of test names). Fix: manifest test names must not contain a quote, backtick or backslash (asserted),
+so they are matched literally with no escaping. Targeted: npx vitest run --cache=false scripts/evidence -> 4 files,
+65 tests passed; A0-M14 and A0-M16 re-run on the fixed test: KILLED (2), KILLED (1). Full gates for this head:
+docs/evidence/pr-182/evidence.md (collector).
+ROUND 3 (git diff --check on the evidence commit 35365aa: "new blank line at EOF" in the generated evidence.md, a
+pre-existing renderer trait also present in the merged docs/evidence/pr-179/evidence.md). Test first (RED commit), then
+renderEvidenceMd trims trailing newlines to exactly one. scripts/evidence: 4 files, 66 tests passed. The pr-182
+evidence is regenerated for the new code head.
+REVIEW ROUND GREEN (6eac832): scripts/evidence 4 files, 73 tests passed. Real targeted run with absolute paths (5
+files, incl. the templated rate-card/1 corpus test): exit 0; caps 1 and 4 PLANNED, 2, 3, 5-8 NOT STARTED.
+Mutations (each alone, targeted suite, restored; git status clean after): 13/13 KILLED
+ R1 '-' may start a segment | R2 relative file names passed | R3 status words allowed | R4 control chars allowed
+ R5 emphasis not escaped | R6 declared status not a cap | R7 malformed index entries trusted | R8 invalid manifest gap
+ R9 = reviewer M2 (FAILED only if all attempts fail) | R10 = reviewer M11 (stale report kept) | R11 node_modules paths
+ R12 a §14 fragment uncovered | R13 the rate-card W0 test title missing. Full gates: docs/evidence/pr-182 (collector).
