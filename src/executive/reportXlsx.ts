@@ -9,6 +9,7 @@ import { COST_CATEGORIES } from '@/outcomes/types';
 import { monetaryBenefit } from '@/outcomes/model';
 import { reportHeaders, type CostSource } from '@/lib/vocabulary';
 import { buildReportModel, type ReportRow, type ReportModel } from './reportModel';
+import { demoExportLine } from '@/lib/demoMode';
 
 // Exact, user-approved column order. Exported so tests assert the header row. The cost and budget
 // headers come from the shared cost vocabulary and follow the data source: modeled (sample
@@ -55,7 +56,8 @@ function autoWidths(records: ReportRecord[], cols: Columns): number[] {
   });
 }
 
-export async function buildReportWorkbook(now: Date = new Date(), model: ReportModel = buildReportModel(now)): Promise<Buffer> {
+/** `demoLine`: the demo marker (review M1), the badge wording in demo mode and null outside it. */
+export async function buildReportWorkbook(now: Date = new Date(), model: ReportModel = buildReportModel(now), demoLine: string | null = demoExportLine(process.env)): Promise<Buffer> {
   const { rows } = model;
   const cols = reportColumns(model.costSource);
   const records = rows.map((r) => toRecord(r, cols));
@@ -76,6 +78,13 @@ export async function buildReportWorkbook(now: Date = new Date(), model: ReportM
     width: widths[i],
   }));
   sheet.addRows(records);
+  if (demoLine) {
+    // One quiet line, outside the approved columns: a print footer on the table and a one-cell About sheet.
+    sheet.headerFooter = { oddFooter: `&L${demoLine}` };
+    const about = book.addWorksheet('About');
+    about.getCell('A1').value = demoLine;
+    about.getColumn(1).width = demoLine.length + 4;
+  }
   if (model.periodLabel.startsWith('SIMULATED')) {
     const notes = book.addWorksheet('Context');
     notes.addRows([['Report period', model.periodLabel], ['Generated', model.generatedAt], ['Savings', 'Projected opportunity, not realized savings']]);
