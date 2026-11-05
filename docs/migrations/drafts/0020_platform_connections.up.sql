@@ -1,26 +1,19 @@
 -- ratio:phase expand
--- DRAFT 0020_platform_connections (ADR-0001 §12, slice A1). NOT a migration yet: the ledger
--- (docs/migrations/ledger.json) reserves 0020 for A1, and its guard (src/ingest/db/migrationLedger.test.ts, option a)
--- refuses any 0020+ migration while 0005-0019 are still reserved. Until the orchestrator merges or releases them, this
--- file is applied only to throwaway test databases (src/ingest/platform/connections.db.test.ts). Promotion is a
--- separate PR: move both files to src/ingest/db/migrations, mark 0020 merged in the ledger, add the generated
--- foundation manifest and the reviewed privileges (src/ingest/db/privilegeModel.ts).
---
---   * ratio.platform_connections: one row per (tenant, connection). The connector-declaration/1 document (which
---     never claims verification: that is derived from evidence), the latest M0a managed state
---     (src/connectors/managed/health.ts ConnectorState) with its observation time, the latest degraded or failed
---     observation, and managed_ladder_step: the step LADDER_FROM_MANAGED_STATE maps the state to (configured,
---     authorized, retrieved, validated, reconciled; none for not-configured, degraded, failed, simulated). That step
---     is M0a's claim, NOT evidence-gated. A reader never sees it directly: a future read API exposes only the
---     evidence-gated step (owner default: a definer-rights view computing it from platform_evidence_refs recorded
---     after last_degraded_at), as src/ingest/platform/connections.ts does.
---   * ratio.platform_evidence_refs: append-only references to the evidence behind a step (kind, locator, sha256)
---     and the observation they support (observed_at, observed_state). UPDATE, DELETE and TRUNCATE are refused for
---     every role by triggers; the foreign key restricts deleting or renaming a connection that has evidence.
---
--- Invariants of 0001 kept: every row has tenant_id uuid NOT NULL and a schema_version; every foreign key includes
--- tenant_id; RLS is enabled and forced with the reviewed tenant_isolation shape; text and JSON refuse secret-looking
--- values. The runner wraps a migration in one transaction (no BEGIN/COMMIT here).
+-- DRAFT 0020_platform_connections (ADR-0001 §12, slice A1). NOT a migration yet: the ledger reserves 0020 for A1 and
+-- its guard (src/ingest/db/migrationLedger.test.ts, option a) refuses any 0020+ while 0005-0019 are reserved, so this
+-- file is applied only to throwaway test databases (src/ingest/platform/connections.db.test.ts). Promotion (a separate
+-- PR): move both files to src/ingest/db/migrations, mark 0020 merged, add the foundation manifest and the reviewed
+-- grants and triggers (src/ingest/db/privilegeModel.ts).
+--   * ratio.platform_connections: one row per (tenant, connection): the connector-declaration/1 document (it never
+--     claims verification; that is derived from evidence), the latest M0a state (ConnectorState) and its observation
+--     time, the latest degraded or failed observation, and managed_ladder_step, the step LADDER_FROM_MANAGED_STATE maps
+--     the state to (none off the ladder). That step is M0a's claim, NOT evidence-gated: a reader never sees it; a
+--     future read API exposes only the evidence-gated step (owner default: a definer-rights view over the evidence
+--     recorded after last_degraded_at), as src/ingest/platform/connections.ts computes it.
+--   * ratio.platform_evidence_refs: append-only references to the evidence behind a step and the observation it
+--     supports. UPDATE, DELETE and TRUNCATE are refused for every role; the key restricts deleting a connection.
+-- 0001 invariants kept: tenant_id and schema_version on every row, tenant_id in every foreign key, RLS enabled and
+-- forced (tenant_isolation), no secret-looking text or JSON. The runner wraps a migration in one transaction.
 
 SET LOCAL ROLE ratio_owner;
 
