@@ -6,9 +6,10 @@
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { buildSync } from 'esbuild';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
-import { PLATFORM_CONTRACT_MARKERS } from '../../../scripts/check-next-bundle.mjs';
+import { CLIENT_FORBIDDEN, PLATFORM_CONTRACT_MARKERS } from '../../../scripts/check-next-bundle.mjs';
 import * as contracts from './index';
 
 type Validate = ((v: unknown) => { ok: boolean; problems?: string[] }) & { desc: string };
@@ -21,18 +22,18 @@ const BY_VERSION: Record<contracts.SchemaVersion, Validate> = {
 };
 
 const PINS: Record<contracts.SchemaVersion, string> = {
-  'ai-usage-event/1': '3afa3be67c6d056d2d07b8a264da33171de0a2ec7db0a2a78f7d02aeccdd3bbd',
-  'ai-financial-record/1': '8bc9cfe372f5ef34e05be2f236ac0230366a8bfaf77e4aacf683fd9a785c435f',
-  'rate-card/1': 'ae0d28f654d054c6189c6804b5cb976b2e84cfd2f093f9b895fd068f451042ea',
-  'allocation/1': '3ba6b3049952f35c4f0655329c401d66c3263d7e2f607e2650a087dabadcd597',
+  'ai-usage-event/1': '9ce1d72a562741ed31f050e631539aab8a488e194b3b06ca2113f8a46910489c',
+  'ai-financial-record/1': '34ac598676ffe4b3ee5f95d905da04c8bbec52be694e4256407741d3a3849636',
+  'rate-card/1': 'a074c1d117a366f2565fc0a23691979535587e509bae2b449354059f2ea6bb2e',
+  'allocation/1': '2278a725fd08d6f6719dabde8d21ae37b4a02a39081e04a7f9c68460ffe83158',
   'activity-event/1': '8e8b0017fa42d09fb0f336e931600dea26651c525f5e28f1dbccbd1753e5259e',
   'eligibility-snapshot/1': '5f95a98372bf91834f7f9c4df0c6a7630d250630764ac0a20eed767cd3b74ab1',
   'adoption-definition/1': 'c055abd748cb6ceb0795b8d31a12b2496726fd05a59a5d87613a84d67bb6202b',
   'entitlement/1': '820095061f145835f69a358c258df35f94115d6762f57e713341fdb68ad2046f',
-  'policy/1': 'a550b7f62ec1baf76e334a19e6c9caf6097e58850fc9aa24cee241e4f5fc97d3',
-  'policy-bundle/1': 'e7329aeddac29233b1d724cd82e60a453c592e9f555f0e4ed89709ab77ac653d',
-  'policy-decision/1': 'b9c1ae17e95cbb6012d6cb4ce6c9a631e976c6a108d46d0b65173ca217ecc882',
-  'gateway-request/1': '77130eb63fae851c08254fe777ac3ee371a8e394f6254969dd67f0d6a112f9b4',
+  'policy/1': 'b5786a35c927ec0e6a33fe6c9ad1ba4147460b1a380b78491d2179ffe90632ea',
+  'policy-bundle/1': '8acedd8ed44c31422f954b1f007dc6772f3c54e6f4f871f802243cfce2306f39',
+  'policy-decision/1': '669edad36a0b0316b182636f26e30f00c82c2804e55c136adb15cfd5404c8ae3',
+  'gateway-request/1': '337d8e8636da18cf3f204f771d8780c76ab49f70ec8addc372f25ecdccc12dec',
   'connector-declaration/1': 'b0af3acc1d4b188b53d757e91da1c88bed89c6b5e0127a70ace64ecc6c72339d',
 };
 
@@ -92,14 +93,27 @@ function taint(imports: Map<string, string[]>, seeds: Iterable<string>): Set<str
 
 describe('platform contracts boundary', () => {
   it('has exactly these modules, importing only each other and the pure decimal helper', () => {
-    expect(prod.sort()).toEqual(['adoption.ts', 'connector.ts', 'economics.ts', 'index.ts', 'iso4217.ts', 'policy.ts', 'validate.ts', 'versions.ts']);
-    for (const f of prod) for (const s of specs(path.join(DIR, f))) expect(`${f} -> ${s}`).toMatch(/ -> \.\/(validate|versions|economics|adoption|policy|connector|iso4217)$| -> \.\.\/\.\.\/finops\/semantic\/decimal$/);
+    expect(prod.sort()).toEqual(['adoption.ts', 'connector.ts', 'economics.ts', 'index.ts', 'iso4217.ts', 'origin.ts', 'policy.ts', 'validate.ts', 'versions.ts']);
+    for (const f of prod) for (const s of specs(path.join(DIR, f))) expect(`${f} -> ${s}`).toMatch(/ -> \.\/(validate|versions|economics|adoption|policy|connector|iso4217|origin)$| -> \.\.\/\.\.\/finops\/semantic\/decimal$/);
   });
   it('uses no I/O, clock, network, environment, dynamic code or float on money', () => {
     const banned = [/\bparseFloat\b/, /\bNumber\(/, /\.toFixed\(/, /Math\.(round|floor|ceil)/, /\bDate\b/, /\bfetch\(/, /\beval\(/, /new Function/, /process\./, /require\(/, /\bimport\(/, /from '(pg|fs|net|http|https|crypto)'/];
     for (const f of prod) {
       const text = fs.readFileSync(path.join(DIR, f), 'utf8');
       for (const re of banned) expect(re.test(text), `${f} matches ${re}`).toBe(false);
+    }
+  });
+  it('plant test: a minified, tree-shaken client bundle of the ISO list, a rule, a validator or the versions carries a client-forbidden marker', () => {
+    const entries: Record<string, string> = {
+      iso4217: "import { ISO_4217 } from './iso4217'; console.log(ISO_4217.has('USD'));",
+      rule: "import { C } from './validate'; console.log(C.money);",
+      validator: "import { validateEntitlement } from './index'; console.log(validateEntitlement({}).ok);",
+      versions: "import { SCHEMA_VERSIONS } from './versions'; console.log(SCHEMA_VERSIONS.length);",
+    };
+    for (const [name, contents] of Object.entries(entries)) {
+      const out = buildSync({ stdin: { contents, resolveDir: DIR, loader: 'ts' }, bundle: true, minify: true, treeShaking: true, write: false, platform: 'browser', format: 'esm' });
+      const text = out.outputFiles[0].text;
+      expect(CLIENT_FORBIDDEN.some((m: string) => text.includes(m)), `${name} bundle has a client-forbidden marker`).toBe(true);
     }
   });
   it('the taint closure follows re-export chains', () => {

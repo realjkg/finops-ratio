@@ -147,8 +147,9 @@ All contracts are in `src/platform/contracts/`; each validator is strict (an unk
 reports `"<path>: <rule>"` without ever echoing a value. Shared value rules: token counts are canonical integer
 strings (whole tokens; no `+`, leading zeros or `-0`); money and quantities are canonical decimal strings (§9);
 currencies come from an embedded ISO 4217 list (`iso4217.ts`, with its source and date); generic identifiers never
-contain `@`, so no email address can be an id; model ids may carry one `@` revision (`model@20260901`) but never an
-email shape; a human is only ever a `ps1:` pseudonym, a service a `svc:` id, an agent an `agt:` id.
+contain `@`, so no email address can be an id; model ids may end in one short `@` revision that has a digit and no
+`/`, `:` or letter label after a dot (`model@20260901`, `gpt-4o@2024-08-06`, `claude@v1.5`; never
+`jane@corp.example1` or `jane.doe@localhost`); a human is only ever a `ps1:` pseudonym, a service a `svc:` id, an agent an `agt:` id.
 
 ### 4.1 Economics (Stream A)
 
@@ -207,7 +208,7 @@ productivity or value.
 | `entitlement/1` | Tenant/team/user/workload/service × provider × models, effective-dated | `*` stands alone; models unique; a user subject is a `ps1:` pseudonym, a service subject a `svc:` id; deny entitlements win and the gateway checks the requested **and** the served model (evaluation rules for Stream C) |
 | `policy/1` | Versioned policy for one phase (`pre_request`, `pre_response`, `stream_chunk`) | Closed set of deterministic conditions; actions allow/block/redact/require-approval/log-only; mode monitor/enforce; per-policy timeout and failure handling, fail-closed for enforcing policies; output policies must buffer |
 | `policy-bundle/1` | What Ratio distributes to a gateway | Single tenant; `notAfter` after `issuedAt`; `contentSha256`; **required** ed25519 signature (88 base64 characters; verified from slice C2); unique policy and entitlement id/version; last-known-good approval flag |
-| `policy-decision/1` | One evaluation | Outcome, `enforced` (true exactly in enforce mode), `controlClass` (`hard`/`log_only`), rule ids, reason codes, failure and its handling per §3.3 (incl. `last_known_good` with the bundle digest and reason), offsets-only findings, latency in microseconds; **no content** |
+| `policy-decision/1` | One evaluation | Outcome, `enforced` (true exactly in enforce mode), `controlClass` (`hard`/`log_only`; a log-only control only allows unless a failure is denied; checked against the bundle at ingestion in C5), rule ids, reason codes, failure and its handling per §3.3 (incl. `last_known_good` with the bundle digest and reason), offsets-only findings, latency in microseconds; **no content** |
 | `DlpFinding` | One detector hit | Category, detector id and version, confidence, location, start/end offsets in the normalized text, normalization steps; **never the matched text** |
 | `gateway-request/1` | One request seen by a gateway | Sizes and **keyed** digests (`hm1:`) only; an output digest needs its size; a request not dispatched has no output, served model, usage event or release; link to its usage event |
 
@@ -222,10 +223,13 @@ productivity or value.
 - `schemaVersion` is `<name>/<major>`. Any change to what a validator accepts (a key, its optionality, an enum or a
   rule) is a new major.
 - **Pin** (`schemaPin.test.ts`): sha256 of each validator's canonical description: the structure, enums and the id
-  and version of every predicate and cross-field rule (`currency@2`, `failure-table@1`). Problem labels are NOT part
+  and version of every predicate and cross-field rule (`failure-table@1`, `model@2`). The currency rule id embeds the
+  ISO 4217 list date and the first 8 hex digits of the list's sha256 (`currency:iso4217@2026-01-09e88295`), and a test
+  pins the full list hash, so adding or removing any code changes the pins and forces a contract version decision.
+  Problem labels are NOT part
   of it, so rewording a label needs no new major. Changing a predicate's behavior means bumping its rule version,
   which changes the pin.
-- **Golden corpus** (`src/platform/contracts/corpus/<name>.<major>.json`, 210 hand-reviewed SYNTHETIC cases): each
+- **Golden corpus** (`src/platform/contracts/corpus/<name>.<major>.json`, 208 hand-reviewed SYNTHETIC cases): each
   case records whether it is accepted and at which problem paths it is rejected. A behavior change that keeps the
   rule id (e.g. widening the currency rule) fails here even when the pin does not move. Corpus edits are reviewed as
   contract changes.
@@ -252,8 +256,10 @@ pages/api/v1/platform/**     read APIs, behind the existing route wrapper and au
 
 Rules: contracts and the policy library are pure and importable from app, worker and a gateway plugin; nothing under
 `src/platform/` reaches client code. The authority is `check:bundle` rule 7 on a production build: all 13 schema
-version strings and the `ratio-platform-contracts` origin marker that every validator check carries are
-client-forbidden, so any bundled contract module fails the build check. Before a build, `schemaPin.test.ts` scans
+version strings and the `ratio-platform-contracts` origin marker (carried by every validator check and by the ISO
+4217 set) are client-forbidden. A plant test bundles the ISO list, a rule, a validator and the version list alone
+with esbuild (minified, tree-shaken) and finds a forbidden marker in each. Limit: a lone pure predicate (e.g.
+`isMoney`) carries no marker and no contract data, so it would not be caught. Before a build, `schemaPin.test.ts` scans
 the source import graph transitively (re-exports included) and refuses a path from a client-side module (pages
 outside `pages/api`, any `.tsx`, `src/components`, `src/store`); that scan is a heuristic, not the guarantee; the policy library
 never imports a server, database or network module (boundary test, as `src/finops/semantic/boundary.test.ts` does);
@@ -348,7 +354,8 @@ assessment document is a Stream C deliverable):
   are kept because they carry the source's scale (`9.9000`), so equality and dedup compare values exactly (BigInt),
   never strings. Token counts are canonical integer strings.
 - Currencies are validated against the embedded ISO 4217 list (active codes as of 2026-01 plus codes withdrawn since
-  2023 that still appear on historical invoices); adding a code is a contract change.
+  2023 that still appear on historical invoices); adding or removing a code changes the pinned list hash and is a
+  contract change.
 - Never sum across currencies or across financial kinds; each total is per currency and per basis.
 - N/A is not 0: a missing amount, rate, usage, denominator or allocation is shown as N/A with a reason code.
 - Display rounding happens once, at render, half-even, to the currency's minor unit, with the exact value available
@@ -478,7 +485,7 @@ contracts. C5 (decision storage) needs A1. C7 (A2A) needs C1 and B1. The north-s
 | C2 | Bundle build, canonical digest, ed25519 signing and verification (Node `crypto`, no new dependency); last-known-good; migration 0029 | Tampered, replayed, expired bundles refused; approved last-known-good honored only within validity |
 | C3 | Mock providers (OpenAI-compatible and Anthropic-compatible request shapes) and the mock gateway; conformance suite for pre-dispatch blocking, timeouts, oversized inputs, alternate surfaces | A blocked request is never dispatched (mock provider receives zero calls); fail-closed on timeout and engine error |
 | C4 | DLP detectors (card numbers with Luhn, US SSN validity rules, IBAN mod-97, cloud/API key patterns, private key blocks, email, phone, custom regex/dictionaries) with normalization; streaming windows; tool payloads | Seeded sensitive-data fixtures are blocked before the mock provider sees them; encoded variants caught; findings carry offsets only |
-| C5 | Decision and request record ingestion from a gateway (monitor-only), coverage figures; migration 0030 | Monitor decisions never enforced; gaps visible when telemetry is missing |
+| C5 | Decision and request record ingestion from a gateway (monitor-only), coverage figures; **cross-check each decision's `controlClass` against the bundle policy it names** (the contract alone cannot know whether a policy is log-only; review round 3, L4); migration 0030 | Monitor decisions never enforced; gaps visible when telemetry is missing; a decision whose `controlClass` disagrees with its bundle policy is rejected at ingestion |
 | C6 | Gateway integration design for the pilot pick (ext_proc or custom guardrail plugin), bypass assessment document; 2.0: blocking for one workload, budget reservations (migration 0031), partial-failure handling | Bypass table assessed; outage, streaming and partial-failure tests at the conformance level; live tests in the pilot |
 | C7 | Read-only A2A (1.3) over the same authorized capability services: the reserved `agent` principal of `authz.ts` becomes a provisioned, tenant-bound principal with its own grants; messages and tool results pass the same policies | External-client authorization tests (claimed identity ignored); artifact isolation between tenants and engagements |
 

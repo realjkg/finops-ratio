@@ -49,6 +49,10 @@ describe('PolicyDecision: the failure table (ADR-0001 §3.3)', () => {
     }
     expect(problems(validatePolicyDecision(failed('policy_expired', 'last_known_good')))).toEqual(['$.lastKnownGood: present exactly when a last-known-good bundle was used']);
   });
+  it('a log-only control only allows, unless a failure denies', () => {
+    expect(problems(validatePolicyDecision({ ...decision(), controlClass: 'log_only' }))).toEqual(['$.outcome: a log-only control only allows, unless a failure is denied']);
+    expect(validatePolicyDecision(failed('dlp_unavailable', 'denied', { controlClass: 'log_only' })).ok).toBe(true);
+  });
   it('enforced is true exactly in enforce mode', () => {
     expect(problems(validatePolicyDecision({ ...decision(), enforced: false }))).toEqual(['$.enforced: true exactly in enforce mode']);
     expect(problems(validatePolicyDecision({ ...decision(), mode: 'monitor' }))).toEqual(['$.enforced: true exactly in enforce mode']);

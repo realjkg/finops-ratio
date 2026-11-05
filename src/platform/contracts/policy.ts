@@ -170,7 +170,11 @@ export const validatePolicyDecision = validator<PolicyDecision>(obj({
   failure: opt(oneOf(FAILURES)), failureHandling: opt(oneOf(['denied', 'continued_with_gap', 'last_known_good'])),
   lastKnownGood: opt(obj({ contentSha256: req(C.sha256), reason: req(oneOf(['policy_expired', 'policy_invalid'])) })), findings: req(arr(FINDING, 0, 1000)),
   latencyMicros: req(C.count), evaluatedAt: req(C.instant),
-} satisfies { [K in keyof Required<PolicyDecision>]: unknown }), { 'decision-rules@1': decisionRules, 'failure-table@1': failureTable });
+} satisfies { [K in keyof Required<PolicyDecision>]: unknown }), { 'decision-rules@1': decisionRules, 'failure-table@1': failureTable, 'log-only-allows@1': logOnlyAllows });
+
+function logOnlyAllows(d: PolicyDecision, p: string[]) {
+  if (d.controlClass === 'log_only' && d.outcome !== 'allow' && d.failureHandling !== 'denied') p.push('$.outcome: a log-only control only allows, unless a failure is denied');
+}
 
 function decisionRules(d: PolicyDecision, p: string[]) {
   d.findings.forEach((f, i) => findingRules(f, p, `$.findings[${i}]`));

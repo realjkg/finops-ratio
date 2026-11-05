@@ -59,3 +59,16 @@ FAIL  src/platform/contracts/validate.test.ts [ src/platform/contracts/validate.
 × the repository ledger matches the migrations directory
 × timeouts and engine errors continue only for log-only controls, or in monitor mode
 × token counts are canonical whole-token strings
+
+ROUND 3 (re-review of 01afa88: L1-L7). New tests and corpus cases run before the fixes, in the same commit.
+Command: npx vitest run src/platform src/ingest/db/migrationLedger.test.ts scripts/check-next-bundle.test.mjs --cache=false (contracts at 01afa88)
+Test Files  3 failed | 5 passed (8)
+Tests  8 failed | 93 passed (101)
+× a log-only control only allows, unless a failure denies
+× entitlement/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× gateway-request/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× has exactly these modules, importing only each other and the pure decimal helper
+× model ids may carry one short @ revision with a digit, never an address-like suffix
+× plant test: a minified, tree-shaken client bundle of the ISO list, a rule, a validator or the versions carries a client-forbidden marker
+× policy-decision/1: every corpus case is accepted or rejected exactly as reviewed, at the reviewed paths
+× the ISO 4217 list is pinned: any added or removed code changes the hash, the currency rule id and so the schema pins

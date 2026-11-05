@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { ISO_4217 } from './iso4217';
+import crypto from 'crypto';
+import { ISO_4217, ISO_4217_SHA256 } from './iso4217';
 import {
   arr, byKind, C, instantBefore, isContentDigest, isDuration, isId, isIsoDate, isIsoInstant, isModelId, isMoney, isPseudonymousRef, isQuantity, isTokenCount,
   obj, opt, req, rule, set, sumsExactly, validator,
@@ -57,17 +58,25 @@ describe('identifiers, people and content', () => {
     expect(isId('wl-support-bot')).toBe(true);
     for (const bad of ['jane@example.com', 'a@b', '%40x', 'with space']) expect(isId(bad)).toBe(false);
   });
-  it('model ids may carry one @ revision but never an email-shaped value', () => {
-    for (const ok of ['model-x', 'model-x@20260901', 'vendor/model-x:2']) expect(isModelId(ok)).toBe(true);
-    for (const bad of ['jane@corp.example', 'a@b@c', 'x@mail.co']) expect(isModelId(bad)).toBe(false);
+  it('model ids may carry one short @ revision with a digit, never an address-like suffix', () => {
+    for (const ok of ['model-x', 'model-x@20260901', 'vendor/model-x:2', 'm@2026', 'gpt-4o@2024-08-06', 'claude@v1.5', 'm@001']) expect(isModelId(ok), ok).toBe(true);
+    for (const bad of ['jane@corp.example', 'a@b@c', 'x@mail.co', 'jane@corp.example1', 'jane.doe@localhost', 'jane@corp.example/x', 'jane@corp.example:1', 'jane@corp', 'm@', 'm@2026/x', 'm@2026:1'])
+      expect(isModelId(bad), bad).toBe(false);
   });
   it('content digests are keyed (hm1), not plain sha256', () => {
     expect(isContentDigest(`hm1:k1:${hex}`)).toBe(true);
     expect(isContentDigest(hex)).toBe(false);
   });
   it('currencies come from the embedded ISO 4217 list', () => {
-    for (const ok of ['USD', 'EUR', 'JPY', 'XCG', 'HRK']) expect(ISO_4217.has(ok)).toBe(true);
-    for (const bad of ['XQQ', 'USDT', 'usd', 'XXX', 'XAU', 'BOV']) expect(ISO_4217.has(bad)).toBe(false);
+    for (const ok of ['USD', 'EUR', 'JPY', 'XCG', 'HRK', 'ZWG']) expect(ISO_4217.has(ok)).toBe(true);
+    for (const bad of ['XQQ', 'USDT', 'usd', 'XXX', 'XAU', 'BOV', 'XTS', 'CNH']) expect(ISO_4217.has(bad)).toBe(false);
+  });
+  it('the ISO 4217 list is pinned: any added or removed code changes the hash, the currency rule id and so the schema pins', () => {
+    const LIST_PIN = '09e8829532222a8569e977689b8443c004dfbf7c52b75a64198d1633c68fb8a9';
+    const actual = crypto.createHash('sha256').update([...ISO_4217].sort().join(' ')).digest('hex');
+    expect(actual).toBe(LIST_PIN);
+    expect(ISO_4217_SHA256).toBe(actual);
+    expect(C.currency.desc).toBe(`currency:iso4217@2026-01-${actual.slice(0, 8)}`);
   });
 });
 

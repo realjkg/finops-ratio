@@ -3,11 +3,11 @@
 // value, so a rejected record cannot echo an identifier or content into a log. Objects are strict: an unknown key is a
 // problem, which keeps raw prompt or response text from riding along in a contract that has no field for it.
 import { isZeroDecimal, subDecimal, sumDecimal } from '../../finops/semantic/decimal';
-import { ISO_4217 } from './iso4217';
+import { ISO_4217, ISO_4217_SHA256 } from './iso4217';
+import { CONTRACTS_ORIGIN } from './origin';
 
 export type Problems = string[];
-/** Marker carried by every check; check:bundle refuses it in client files. */
-export const CONTRACTS_ORIGIN = 'ratio-platform-contracts';
+export { CONTRACTS_ORIGIN };
 /**
  * `desc` is the canonical description the schema pin hashes: structure, enums and rule ids (`name@version`). Problem
  * text is not part of it, so rewording a label needs no new schema version; changing what a rule accepts needs a new
@@ -90,9 +90,16 @@ export const isTokenCount = (v: unknown): v is string => typeof v === 'string' &
 export const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
 /** Opaque identifiers: no spaces, no control characters, no '@' (so no email address can be an id), bounded. */
 export const isId = (v: unknown): v is string => typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,191}$/.test(v);
-/** Model ids may carry an '@' revision (e.g. `model@20260901`) but never an email-shaped value. */
-export const isModelId = (v: unknown): v is string =>
-  typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,191}$/.test(v) && !/@[^@]*\.[A-Za-z]{2,}$/.test(v) && v.split('@').length <= 2;
+/**
+ * Model ids may end in one short '@' revision (`model@20260901`, `gpt-4o@2024-08-06`, `claude@v1.5`): the revision has
+ * a digit, no '/' or ':', and no dot-separated label with a letter after the first, so `jane@corp.example1`,
+ * `jane.doe@localhost` and `jane@corp.example:1` are refused.
+ */
+export const isModelId = (v: unknown): v is string => {
+  if (typeof v !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}(@[0-9A-Za-z][0-9A-Za-z._-]{0,31})?$/.test(v)) return false;
+  const rev = v.split('@')[1];
+  return rev === undefined || (/\d/.test(rev) && !rev.split('.').slice(1).some((label) => /[A-Za-z]/.test(label)));
+};
 export const isReasonCode = (v: unknown): v is string => typeof v === 'string' && /^[A-Z][A-Z0-9_]{0,63}$/.test(v);
 export const isSha256Hex = (v: unknown): v is string => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v);
 /** Human actor: keyed HMAC-SHA256 under the tenant's pseudonymization key `keyId` (rotation = new keyId). */
@@ -113,11 +120,12 @@ export const C = {
   count: rule('count@1', 'non-negative safe integer', isCount),
   positive: rule('positive@1', 'positive safe integer', (v) => isCount(v) && v > 0),
   id: rule('id@2', 'identifier', isId),
-  model: rule('model@1', 'model identifier', isModelId),
+  model: rule('model@2', 'model identifier', isModelId),
   reason: rule('reason@1', 'reason code', isReasonCode),
   sha256: rule('sha256@1', 'sha256 hex', isSha256Hex),
   digest: rule('digest@1', 'keyed content digest hm1:<keyId>:<hex>', isContentDigest),
-  currency: rule('currency@2', 'ISO 4217 currency code', (v) => typeof v === 'string' && ISO_4217.has(v)),
+  /** The rule id carries the list's date and hash, so any change to the list changes every pin that uses it. */
+  currency: rule(`currency:iso4217@2026-01-${ISO_4217_SHA256.slice(0, 8)}`, 'ISO 4217 currency code', (v) => typeof v === 'string' && ISO_4217.has(v)),
   duration: rule('duration@2', 'positive ISO 8601 duration', isDuration),
   bool: rule('bool@1', 'boolean', (v) => typeof v === 'boolean'),
 };
