@@ -82,3 +82,31 @@ Mutation check, round 2 (one at a time, same command): reviewer set rv183b-mut-c
   R2-5, R2-6, R2-7, R2-8, R2-9, R2-10, R2-11, R2-4.
   Not killed: rv-N13 is an equivalent mutant (with no route the provider is "unrouted", which has no target, so the 404 branch is
   reached either way); R2-12 (booleans as text) was removed from the code instead: booleans and null carry no text.
+
+REVIEW ROUND 3 (challenger review of #184 at 67201ec). Same tests as the round-3 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): three cases added after mutation survivors (a function with two names; a name that is not an id
+even with the fn: prefix; a media object outside a content-block position).
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (round-3 lines)
+  ✓ an mcp tool with a decoy name
+  ✓ code_interpreter with a decoy name
+  ✓ a function named mcp:deepwiki (no collision with mcp:deepwiki)
+  ✓ a nameless, typeless tool although unidentified-tool is listed
+  ✓ a function with two names (function.name search, name shell)
+  ✓ a function name that is not an id even with the prefix ("search x")
+  ✓ parallel tool calls search + shell
+  ✓ parallel tool calls search + search
+  ✓ a messages block of unknown type with base64 data is uninspectable: DLP unavailable
+  ✓ a messages image_base64 block is uninspectable: DLP unavailable
+  ✓ a chat input_pdf part is uninspectable: DLP unavailable
+  ✓ a typeless chat part with image_url is uninspectable: DLP unavailable
+  ✓ a content object (not array) with image_url is uninspectable: DLP unavailable
+  ✓ a media object outside a content-block position (any case) is also uninspectable
+  ✓ JSON-schema fields in tool definitions are data, not content blocks; 10,001 token ids are one segment
+  ✓ number findings carry their real location: tool_use input numbers are tool_arguments; response numbers are output (N46)
+  Test Files  5 passed (5)
+  Tests  147 passed (147)
+Mutation check, round 3 (one at a time, same command): reviewer set rv183c-mut-c3 (46, nine anchors adapted) + R3-1..R3-10 new: 55/56
+  killed (rv-N25, rv-N41, rv-N42, R3-3 after the added cases). Killed: rv-N1, rv-N2, rv-N2b, rv-N3, rv-N4, rv-N5, rv-N6, rv-N7, rv-N8, rv-N9, rv-N10, rv-N11, rv-N12, rv-N15, rv-N16, rv-N17
+  rv-N18, rv-N19, rv-N20, rv-N21, rv-N22, rv-N23, rv-N24, rv-N25, rv-N26, rv-N27, rv-N28, rv-N29, rv-N30, rv-N31, rv-N32, rv-N33, rv-N34, rv-N35
+  rv-N36, rv-N37, rv-N38, rv-N39, rv-N40, rv-N41, rv-N42, rv-N43, rv-N44, rv-N45, rv-N46, R3-1, R3-2, R3-3, R3-4, R3-5, R3-6, R3-7, R3-8, R3-9, R3-10
+  Not killed: rv-N13, equivalent (no route means provider "unrouted", which has no target; the 404 branch is reached either way).

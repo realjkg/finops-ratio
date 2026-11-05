@@ -52,43 +52,53 @@ const MEDIA = /^(input_)?(image|audio|video|file|document)(_url|_file)?$/i;
 interface Seg { location: Location; text: string }
 interface Parsed { model?: string; stream: boolean; segs: Seg[]; tools: string[]; opaque: boolean }
 
-/** Number literals of a JSON text outside strings, as written (no float rounding of long numbers). */
-function numberTokens(raw: string): string[] {
-  const out: string[] = [], num = /-?\d[\d.eE+-]*/y;
-  for (let i = 0, inString = false; i < raw.length; i++) {
-    const ch = raw[i];
-    if (inString) { if (ch === '\\') i++; else if (ch === '"') inString = false; continue; }
-    if (ch === '"') { inString = true; continue; }
-    num.lastIndex = i;
-    const m = (ch === '-' || (ch >= '0' && ch <= '9')) && num.exec(raw);
-    if (m) { out.push(m[0]); i += m[0].length - 1; }
-  }
-  return out;
-}
-/** A tool id a policy can name: the id itself, else `tool:<name>`, else a digest; nameless tools by type or mcp server. */
-const safeId = (n: string) => (isId(n) ? n : isId(`tool:${n}`) ? `tool:${n}` : `tool-h:${crypto.createHash('sha256').update(n).digest('hex').slice(0, 16)}`);
-const toolId = (t: J) => {
-  const n = t?.function?.name ?? t?.name;
-  return typeof n === 'string' ? safeId(n) : t?.type === 'mcp' && typeof t.server_label === 'string' ? safeId(`mcp:${t.server_label}`)
-    : typeof t?.type === 'string' ? safeId(`type:${t.type}`) : 'unidentified-tool'; // never on an allowlist
+/** A JSON number as written (JSON.parse source text access), so long numbers keep every digit. */
+class Num { constructor(readonly src: string) {} }
+const parse = (text: string): J => JSON.parse(text, (_k, v, ctx?: { source?: string }) => (typeof v === 'number' ? new Num(ctx?.source ?? String(v)) : v));
+const ident = (kind: string, n: string) => (isId(`${kind}:${n}`) ? `${kind}:${n}` : `${kind}-h:${crypto.createHash('sha256').update(n).digest('hex').slice(0, 16)}`);
+/**
+ * Every identity of a tool, namespaced so none collides: function tools (type function or none, and named calls) by
+ * `fn:<name>` (all names given), mcp tools by `mcp:<server_label>`, other typed tools by `type:<type>` (a name there is
+ * not an identity). With no identity, `unidentified:<requestRef>`, which no policy can list.
+ */
+const toolIds = (t: J, unidentified: string): string[] => {
+  const type = typeof t?.type === 'string' && !['function', 'tool_use', 'function_call'].includes(t.type) ? t.type : undefined;
+  if (type === 'mcp') return [typeof t.server_label === 'string' ? ident('mcp', t.server_label) : unidentified];
+  if (type) return [ident('type', type)];
+  const names = [t?.function?.name, t?.name].filter((n): n is string => typeof n === 'string');
+  return names.length ? names.map((n) => ident('fn', n)) : [unidentified];
 };
 /**
- * Every key and scalar of the JSON is content (unknown keys included; numbers as written), with bounded depth and
- * segments and bounded nested-JSON decoding (deeper JSON-in-strings is inspected as text; decoding more is slice C4).
+ * Content-block positions (chat and Responses message `content`, Messages `content`, `system` and tool_result `content`):
+ * a block of an unknown type, or a typeless part with binary-ish fields, is uninspectable. Elsewhere (e.g. JSON schemas in
+ * tool definitions) objects are data and are walked.
  */
-function inspect(root: J, base: Location, raw: string): Parsed {
+const TEXT_BLOCKS = new Set(['text', 'input_text', 'output_text', 'refusal', 'thinking', 'tool_use', 'tool_result', 'function_call', 'function_call_output']);
+const BINARY = ['image_url', 'image', 'input_audio', 'audio', 'file', 'file_data', 'source', 'data'];
+const inspectable = (b: J) => !b || typeof b !== 'object' || Array.isArray(b) || b instanceof Num || (typeof b.type === 'string' ? TEXT_BLOCKS.has(b.type) : !BINARY.some((k) => k in b));
+/**
+ * Every key and scalar of the JSON is content (unknown keys included; numbers as written, an all-number array such as
+ * token ids as one segment), with bounded depth and segments and bounded nested-JSON decoding (deeper JSON-in-strings,
+ * exponent-form or split digits are slice C4).
+ */
+function inspect(root: J, base: Location, unidentified: string): Parsed {
   const out: Parsed = { stream: root?.stream === true, segs: [], tools: [], opaque: false, model: isModelId(root?.model) ? root.model : undefined };
   const add = (location: Location, text: string) => out.segs.push({ location, text });
-  const tool = (t: J) => { const id = toolId(t); if (!out.tools.includes(id)) out.tools.push(id); };
+  const tool = (t: J) => { for (const id of toolIds(t, unidentified)) if (!out.tools.includes(id)) out.tools.push(id); };
   const walk = (v: J, loc: Location, depth: number, nested: number): void => {
     if (depth > MAX_DEPTH || out.segs.length > MAX_SEGMENTS) { out.opaque = true; return; }
     if (typeof v === 'string') {
-      if (nested < NESTED_JSON && /^\s*[[{]/.test(v)) { try { const j = JSON.parse(v); numberTokens(v).forEach((n) => add(loc, n)); return walk(j, loc, depth + 1, nested + 1); } catch { /* not JSON: text */ } }
+      if (nested < NESTED_JSON && /^\s*[[{]/.test(v)) { try { return walk(parse(v), loc, depth + 1, nested + 1); } catch { /* not JSON: text */ } }
       add(loc, v);
       return;
     }
-    if (Array.isArray(v)) { for (const x of v) walk(x, loc, depth + 1, nested); return; }
-    if (!v || typeof v !== 'object') return; // numbers: from the raw text as written; booleans and null carry no text
+    if (v instanceof Num) { add(loc, v.src); return; }
+    if (Array.isArray(v)) {
+      if (v.length > 1 && v.every((x) => x instanceof Num)) { add(loc, v.map((x: Num) => x.src).join(' ')); return; }
+      for (const x of v) walk(x, loc, depth + 1, nested);
+      return;
+    }
+    if (!v || typeof v !== 'object') return; // booleans and null carry no text
     if (typeof v.type === 'string' && MEDIA.test(v.type)) { out.opaque = true; return; }
     const here: Location = v.role === 'system' || v.role === 'developer' ? 'system' : v.role === 'tool' || v.type === 'tool_result' || v.type === 'function_call_output' ? 'tool_result' : loc;
     if (v.role === undefined && (v.type === 'tool_use' || v.type === 'function_call' || 'arguments' in v || (v.type === 'function' && v.function))) tool(v);
@@ -96,11 +106,12 @@ function inspect(root: J, base: Location, raw: string): Parsed {
       add(here, k);
       if (k === 'model' && depth === 0) continue;
       if ((k === 'tools' || k === 'functions') && Array.isArray(x)) for (const t of x) tool(t);
+      const blocks = (k === 'content' && (v.role !== undefined || v.type === 'tool_result' || v.type === 'message')) || (k === 'system' && depth === 0);
+      if (blocks && !(Array.isArray(x) ? x : [x]).every(inspectable)) out.opaque = true;
       const l: Location = k === 'system' || k === 'instructions' ? 'system' : k === 'arguments' || k === 'partial_json' || (k === 'input' && v.type === 'tool_use') ? 'tool_arguments' : here;
       walk(x, l, depth + 1, nested);
     }
   };
-  numberTokens(raw).forEach((n) => add(base, n));
   walk(root, base, 0, 0);
   return out;
 }
@@ -191,7 +202,7 @@ export function createMockGateway(o: GatewayOptions) {
     const provider = (route && Object.keys(o.providers).find((k) => o.providers[k].flavor === route.flavor)) || 'unrouted';
     let parsed: Parsed = { stream: false, segs: [], tools: [], opaque: true };
     const oversized = raw.length > o.maxInspectBytes; // bytes, not characters
-    if (!oversized) { try { const text = raw.toString('utf8'); parsed = inspect(JSON.parse(text), 'input', text); } catch { /* opaque: fails closed below */ } }
+    if (!oversized) { try { parsed = inspect(parse(raw.toString('utf8')), 'input', `unidentified:${requestRef}`); } catch { /* opaque: fails closed below */ } }
     const decisions: PolicyDecision[] = [];
     const base = { tenantId: id.tenantId, requestRef, workloadId: id.workloadId, teamIds: id.teamIds, actorType: id.actorType, actorRef: id.actorRef, provider,
       destination: `${provider}:${route?.dest ?? 'unknown'}`, modelRequested: parsed.model, inputBytes: raw.length };
@@ -217,9 +228,9 @@ export function createMockGateway(o: GatewayOptions) {
 
     if (!parsed.stream) { // Pre-release (§3.2 step 6): nothing leaves before the output decision.
       let j: J, body: Buffer, bodyText: string;
-      try { body = await readAll(res); bodyText = body.toString('utf8'); j = JSON.parse(bodyText); } catch { return finish(502, [], 'dispatched', 'none'); }
+      try { body = await readAll(res); bodyText = body.toString('utf8'); j = parse(bodyText); } catch { return finish(502, [], 'dispatched', 'none'); }
       const big = body.length > o.maxInspectBytes;
-      const out: Parsed = big ? { stream: false, segs: [], tools: [], opaque: true, model: isModelId(j?.model) ? j.model : undefined } : inspect(j, 'output', bodyText);
+      const out: Parsed = big ? { stream: false, segs: [], tools: [], opaque: true, model: isModelId(j?.model) ? j.model : undefined } : inspect(j, 'output', `unidentified:${requestRef}`);
       const text = outputText(route.dest, j);
       const ok = await run({ ...base, phase: 'pre_response', modelServed: out.model, tools: out.tools, findings: findings(out.segs), ...dlpGap(out.opaque) });
       return ok ? finish(200, [text], 'dispatched', 'full', { text, model: out.model }) : finish(403, [], 'dispatched', 'none', { text, model: out.model });

@@ -99,6 +99,8 @@ describe('round 3: tool identities, content-block positions, numbers', () => {
     ['code_interpreter with a decoy name', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'code_interpreter', name: 'search' }] }, 403],
     ['a function named mcp:deepwiki (no collision with mcp:deepwiki)', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'function', name: 'mcp:deepwiki' }] }, 403],
     ['a nameless, typeless tool although unidentified-tool is listed', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ container: {} }] }, 403],
+    ['a function with two names (function.name search, name shell)', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'function', name: 'shell', function: { name: 'search' } }] }, 403],
+    ['a function name that is not an id even with the prefix ("search x")', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ type: 'function', name: 'search x' }] }, 403],
     ['parallel tool calls search + shell', '/v1/chat/completions', call('search', 'shell'), 403], ['parallel tool calls search + search', '/v1/chat/completions', call('search', 'search'), 200],
   ])('%s', async (_n, path, body, status) => expect((await go(path, body, { bundle: allow })).status).toBe(status));
   it.each([
@@ -107,6 +109,9 @@ describe('round 3: tool identities, content-block positions, numbers', () => {
     ['a chat input_pdf part', chat([{ type: 'input_pdf', file_data: 'QUJD' }]), '/v1/chat/completions'], ['a typeless chat part with image_url', chat([{ image_url: { url: 'data:image/png;base64,QUJD' } }]), '/v1/chat/completions'],
     ['a content object (not array) with image_url', chat({ image_url: { url: 'x' } }), '/v1/chat/completions'],
   ])('%s is uninspectable: DLP unavailable', async (_n, body, path) => expect(await go(path, body)).toMatchObject({ ...blocked, codes: ['DLP_UNAVAILABLE'] }));
+  it('a media object outside a content-block position (any case) is also uninspectable', async () => {
+    expect(await go('/v1/chat/completions', chat('q', { metadata: { attachment: { type: 'Image', data: 'QUJD' } } }))).toMatchObject({ ...blocked, codes: ['DLP_UNAVAILABLE'] });
+  });
   it('JSON-schema fields in tool definitions are data, not content blocks; 10,001 token ids are one segment', async () => {
     expect((await go('/v1/messages', { model: 'model-c', tools: [{ name: 'search', input_schema: { type: 'object', properties: { type: { type: 'string' } } } }], messages: [{ role: 'user', content: 'q' }] })).status).toBe(200);
     expect((await go('/v1/completions', { model: 'model-x', prompt: Array.from({ length: 10001 }, (_, i) => i) }, { maxInspectBytes: 1e6 })).status).toBe(200);
