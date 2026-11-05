@@ -1,7 +1,7 @@
 // Pure parts of the merge-evidence collector: parsers, status classification (NOT RUN never renders as
 // PASS), BigInt fixture totals and the evidence.md renderer.
 import { describe, expect, it } from 'vitest';
-import { STATUS, classifyGate, fixtureRows, formatUnits, gatesItemStatus, parseCsv, parsePlaywrightTotals, parseUnits, parseVitestTotals, renderEvidenceMd, statedTotals, totalsByCurrency } from './evidenceLib.mjs';
+import { STATUS, cell, classifyGate, fixtureRows, formatUnits, gatesItemStatus, parseCsv, parsePlaywrightTotals, parseUnits, parseVitestTotals, renderEvidenceMd, statedTotals, totalsByCurrency } from './evidenceLib.mjs';
 
 describe('parseVitestTotals', () => {
   it('reads a clean run, with ANSI colors', () => {
@@ -63,6 +63,14 @@ describe('fixture totals (BigInt, independent of app code)', () => {
     expect(statedTotals('a.json', json)).toEqual({ USD: { rows: 1 } });
     expect(parseCsv('a,b\r\n"x, ""y""",2\n')).toEqual([{ a: 'x, "y"', b: '2' }]);
     expect(fixtureRows('a.md', 'x')).toBeNull();
+  });
+});
+
+describe('cell (Markdown table escaping)', () => {
+  it('escapes backslashes before pipes, so a trailing backslash cannot unescape a pipe', () => {
+    expect(cell('a\\|b\nc')).toBe('a\\\\\\|b c');
+    expect(cell('x\\')).toBe('x\\\\');
+    expect(cell(null)).toBe('');
   });
 });
 

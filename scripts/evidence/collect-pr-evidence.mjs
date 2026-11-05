@@ -46,11 +46,21 @@ const ev = {
 };
 
 // --- b. gates ------------------------------------------------------------------------------
-function run(name, command, { cwd = ROOT, env = {}, logName = name, parse = null } = {}) {
+/**
+ * Runs one gate: argv steps run in order with no shell (nothing is interpolated into a command line),
+ * stopping at the first non-zero exit; all output goes to one log.
+ */
+function run(name, steps, { cwd = ROOT, env = {}, logName = name, parse = null } = {}) {
+  const argvs = Array.isArray(steps[0]) ? steps : [steps];
+  const command = argvs.map((a) => a.join(' ')).join(' && ');
   const log = path.join(LOGS, `${logName.replace(/[^\w.-]+/g, '_')}.log`);
   const fd = fs.openSync(log, 'w');
   const start = new Date();
-  const r = spawnSync('bash', ['-c', command], { cwd, env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', ...env }, stdio: ['ignore', fd, fd] });
+  let r = { status: 0 };
+  for (const [bin, ...rest] of argvs) {
+    r = spawnSync(bin, rest, { cwd, env: { ...process.env, NEXT_TELEMETRY_DISABLED: '1', ...env }, stdio: ['ignore', fd, fd], shell: false });
+    if (r.status !== 0) break;
+  }
   fs.closeSync(fd);
   const end = new Date();
   const text = fs.readFileSync(log);
@@ -75,25 +85,25 @@ const notRun = (name, command, reason, { na = false } = {}) => {
 const dbUrl = process.env.RATIO_TEST_DATABASE_URL;
 const chromium = process.env.RATIO_CHROMIUM_PATH ?? ['/opt/pw-browsers/chromium-1243/chrome-linux64/chrome'].find((p) => fs.existsSync(p));
 const port = args.port ?? '3410';
-ev.gates.push(run('npm ci', 'npm ci'));
-ev.gates.push(run('lint', 'npm run lint'));
-ev.gates.push(run('typecheck (app)', 'npx tsc --noEmit'));
-ev.gates.push(run('typecheck (worker)', 'npx tsc -p tsconfig.worker.json --noEmit'));
-ev.gates.push(run('unit tests (vitest)', 'npx vitest run --cache=false', { parse: parseVitestTotals }));
-ev.gates.push(dbUrl ? run('integration tests (Postgres)', 'npm run test:db', { parse: parseVitestTotals })
+ev.gates.push(run('npm ci', ['npm', 'ci']));
+ev.gates.push(run('lint', ['npm', 'run', 'lint']));
+ev.gates.push(run('typecheck (app)', ['npx', 'tsc', '--noEmit']));
+ev.gates.push(run('typecheck (worker)', ['npx', 'tsc', '-p', 'tsconfig.worker.json', '--noEmit']));
+ev.gates.push(run('unit tests (vitest)', ['npx', 'vitest', 'run', '--cache=false'], { parse: parseVitestTotals }));
+ev.gates.push(dbUrl ? run('integration tests (Postgres)', ['npm', 'run', 'test:db'], { parse: parseVitestTotals })
   : notRun('integration tests (Postgres)', 'npm run test:db', 'NOT RUN: no database in this environment (RATIO_TEST_DATABASE_URL unset)'));
 const migrations = git('diff', '--name-only', baseSha, headSha, '--', 'src/ingest/db/migrations').split('\n').filter(Boolean);
 if (!migrations.length) ev.gates.push(notRun('migrations up/down/up', '(none)', 'N/A: no migrations changed', { na: true }));
 else if (dbUrl && process.env.DATABASE_URL) {
   const n = new Set(migrations.map((f) => path.basename(f).split('_')[0])).size;
-  ev.gates.push(run('migrations up/down/up', `npm run -s db:migrate && npm run -s worker -- migrate --down ${n} && npm run -s worker -- migrate`));
+  ev.gates.push(run('migrations up/down/up', [['npm', 'run', '-s', 'db:migrate'], ['npm', 'run', '-s', 'worker', '--', 'migrate', '--down', String(n)], ['npm', 'run', '-s', 'worker', '--', 'migrate']]));
 } else ev.gates.push(notRun('migrations up/down/up', 'npm run db:migrate; worker migrate --down N; worker migrate', `NOT RUN: ${migrations.length} migration file(s) changed and no database is available`));
-ev.gates.push(run('build', 'npm run build'));
-ev.gates.push(run('bundle check', 'npm run check:bundle'));
+ev.gates.push(run('build', ['npm', 'run', 'build']));
+ev.gates.push(run('bundle check', ['npm', 'run', 'check:bundle']));
 if (chromium) {
   const pw = { RATIO_CHROMIUM_PATH: chromium, RATIO_TEST_PORT: port };
-  ev.gates.push(run('Playwright simulation suite', 'npx playwright test --config playwright.simulation.config.ts', { env: pw, parse: parsePlaywrightTotals }));
-  ev.gates.push(run('Playwright engagement report spec', 'npx playwright test --config playwright.engagement.config.ts',
+  ev.gates.push(run('Playwright simulation suite', ['npx', 'playwright', 'test', '--config', 'playwright.simulation.config.ts'], { env: pw, parse: parsePlaywrightTotals }));
+  ev.gates.push(run('Playwright engagement report spec', ['npx', 'playwright', 'test', '--config', 'playwright.engagement.config.ts'],
     { env: { RATIO_CHROMIUM_PATH: chromium, RATIO_TEST_NEXT_DIR: `.next-simulation-${port}`, RATIO_ENGAGEMENT_TEST_PORT: String(Number(port) + 1) }, parse: parsePlaywrightTotals }));
 } else {
   ev.gates.push(notRun('Playwright simulation suite', 'npx playwright test --config playwright.simulation.config.ts', 'NOT RUN: no Chromium found (set RATIO_CHROMIUM_PATH)'));
@@ -105,8 +115,8 @@ if (git('status', '--porcelain', '--', 'next-env.d.ts')) { git('checkout', '--',
 // --- c. fixture provenance -----------------------------------------------------------------
 const FIXTURE_DIRS = ['fixtures', 'src/demo/apiDatasets/data'];
 const GENERATORS = [
-  { dir: 'src/demo/apiDatasets/data/', command: 'npx tsx scripts/generate-demo-datasets.ts' },
-  { dir: 'fixtures/focus-1.0-synthetic/', command: 'npx tsx scripts/generate-focus-fixture.ts' },
+  { dir: 'src/demo/apiDatasets/data/', argv: ['npx', 'tsx', 'scripts/generate-demo-datasets.ts'] },
+  { dir: 'fixtures/focus-1.0-synthetic/', argv: ['npx', 'tsx', 'scripts/generate-focus-fixture.ts'] },
 ];
 const changedFixtures = git('diff', '--name-only', baseSha, headSha, '--', ...FIXTURE_DIRS).split('\n').filter(Boolean);
 let provenanceOk = true;
@@ -132,9 +142,11 @@ for (const p of changedFixtures) {
   ev.fixtures.files.push(f);
 }
 for (const g of GENERATORS.filter((x) => changedFixtures.some((p) => p.startsWith(x.dir)))) {
-  const r = run(`determinism: ${g.command}`, `${g.command} && git diff --exit-code -- ${g.dir} && test -z "$(git status --porcelain -- ${g.dir})"`, { logName: `determinism-${g.dir}` });
-  ev.fixtures.determinism.push({ command: g.command, status: r.status, logSha256: r.logSha256 });
-  if (r.status !== STATUS.PASS) { provenanceOk = false; git('checkout', '--', g.dir); git('clean', '-fdq', '--', g.dir); }
+  const r = run(`determinism: ${g.argv.join(' ')}`, [g.argv, ['git', 'diff', '--exit-code', '--', g.dir]], { logName: `determinism-${g.dir}` });
+  const untracked = git('status', '--porcelain', '--', g.dir);
+  const status = r.status === STATUS.PASS && !untracked ? STATUS.PASS : STATUS.FAIL;
+  ev.fixtures.determinism.push({ command: `${r.command} && test -z "$(git status --porcelain -- ${g.dir})"`, status, logSha256: r.logSha256 });
+  if (status !== STATUS.PASS) { provenanceOk = false; git('checkout', '--', g.dir); git('clean', '-fdq', '--', g.dir); }
 }
 
 // --- d. rollback in test -------------------------------------------------------------------
@@ -148,17 +160,18 @@ ev.rollback.procedure = [
 ev.rollback.production = `after merge, \`git revert -m 1 <merge sha>\` (merge commit) or \`git revert <squash sha>\` (squash), or reverse-apply \`git diff ${baseSha} ${headSha}\` with \`git apply -R\`; no data, schema or config migration needs undoing${migrations.length ? ' EXCEPT the changed migrations, which need their down migration' : ''}.`;
 try {
   if (fs.existsSync(WT)) git('worktree', 'remove', '--force', WT);
-  git('worktree', 'add', '--detach', WT, headSha);
+  git('worktree', 'add', '--quiet', '--detach', WT, headSha);
   execFileSync('git', ['apply', '-R', '--binary', patch], { cwd: WT });
   execFileSync('git', ['add', '-A'], { cwd: WT });
   const tree = execFileSync('git', ['write-tree'], { cwd: WT, encoding: 'utf8' }).trim();
   const sameLock = git('rev-parse', `${baseSha}:package-lock.json`) === git('rev-parse', `${headSha}:package-lock.json`);
-  const deps = sameLock ? `ln -s ${JSON.stringify(path.join(ROOT, 'node_modules'))} node_modules` : 'npm ci';
+  // Same lockfile at base and head: reuse the installed node_modules through a symlink; otherwise install.
+  if (sameLock) fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(WT, 'node_modules'), 'dir');
   const gates = [
-    run('rollback: dependencies', deps, { cwd: WT, logName: 'rollback-deps' }),
-    run('rollback: lint', 'npm run lint', { cwd: WT, logName: 'rollback-lint' }),
-    run('rollback: typecheck', 'npx tsc --noEmit && npx tsc -p tsconfig.worker.json --noEmit', { cwd: WT, logName: 'rollback-typecheck' }),
-    run('rollback: unit tests', 'npx vitest run --cache=false', { cwd: WT, logName: 'rollback-vitest', parse: parseVitestTotals }),
+    run('rollback: dependencies', sameLock ? ['ls', 'node_modules/.bin/vitest'] : ['npm', 'ci'], { cwd: WT, logName: 'rollback-deps' }),
+    run('rollback: lint', ['npm', 'run', 'lint'], { cwd: WT, logName: 'rollback-lint' }),
+    run('rollback: typecheck', [['npx', 'tsc', '--noEmit'], ['npx', 'tsc', '-p', 'tsconfig.worker.json', '--noEmit']], { cwd: WT, logName: 'rollback-typecheck' }),
+    run('rollback: unit tests', ['npx', 'vitest', 'run', '--cache=false'], { cwd: WT, logName: 'rollback-vitest', parse: parseVitestTotals }),
   ];
   const treeOk = tree === ev.base.tree;
   ev.rollback.treeAfterReverse = tree;

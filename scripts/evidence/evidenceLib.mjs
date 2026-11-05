@@ -129,7 +129,8 @@ export function statedTotals(path, text) {
 
 // --- report ---------------------------------------------------------------------------------
 
-const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+/** A Markdown table cell: backslashes first, then pipes, then newlines (no partial escaping). */
+export const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
 export function renderEvidenceMd(e) {
   const L = [];
