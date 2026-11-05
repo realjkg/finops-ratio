@@ -49,3 +49,12 @@ Command: npx vitest run src/platform/policy --cache=false (evaluate.ts/context.t
 ⎯⎯⎯⎯⎯⎯ Failed Tests 30 ⎯⎯⎯⎯⎯⎯⎯
  Test Files  3 failed | 1 passed (4)
       Tests  30 failed | 74 passed (104)
+
+EVIDENCE TOOLING (review round 1: L6 EOF blank line; coordinator: fixed port 3410 collides between concurrent evidence runs). Tests first.
+Command: npx vitest run scripts/evidence --cache=false (collect-pr-evidence.mjs and evidenceLib.mjs at 13009d6)
+     × shows NOT RUN and PENDING as such, the merge-base note, fixture errors and N/A totals
+     × picks a free port pair by default, so a busy 3410 (another evidence run) does not refuse; an explicit busy --port still does
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: collect-pr-evidence: port 3410 is in use (the Playwright suites need --port and --port+1); pass --port <free port>
+AssertionError: expected false to be true // Object.is equality
+      Tests  2 failed | 47 passed (49)
