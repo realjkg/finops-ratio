@@ -134,7 +134,10 @@ describe('collect-pr-evidence plan', () => {
     const p2 = plan(collect(dir, ['--base', base, '--head', git('rev-parse', 'HEAD'), '--pr', '1', '--plan-only'], { AWS_SECRET_ACCESS_KEY: 'k', GITHUB_TOKEN: 'g' }));
     const run = p2.informational.find((g) => g.name === PLATFORM_CHECK);
     const files = [...new Set(JSON.parse(fs.readFileSync(REPO_MANIFEST, 'utf8')).capabilities.flatMap((c) => c.evidence).flatMap((e) => e.tests ?? []).map((t) => t.file))].sort();
-    expect(run.command).toBe(`npx vitest run --cache=false --reporter=json --outputFile=${path.join(fs.realpathSync(dir), 'docs/evidence/pr-1/logs/platform-vitest.json')} ${files.join(' ')}`);
+    // Test files are passed as absolute paths inside the checkout, so none can read as a vitest option (review M1).
+    const root = fs.realpathSync(dir);
+    expect(run.command).toBe(`npx vitest run --cache=false --reporter=json --outputFile=${path.join(root, 'docs/evidence/pr-1/logs/platform-vitest.json')} ${files.map((f) => path.join(root, f)).join(' ')}`);
+    expect(run.command.split(' ').slice(5).every((a) => a.startsWith(`${root}/`))).toBe(true);
     for (const k of ['AWS_SECRET_ACCESS_KEY', 'GITHUB_TOKEN']) expect(run.envKeys).not.toContain(k);
     expect(p2.gates.map((g) => g.name)).toEqual(p.gates.map((g) => g.name)); // no new gate: it never decides the charter
     fs.writeFileSync(manifestPath, '{"schema":"x"}\n');
@@ -241,6 +244,43 @@ describe('collect-pr-evidence run phase (shimmed gates)', () => {
     const md = fs.readFileSync(path.join(dir, 'docs/evidence/pr-9/evidence.md'), 'utf8');
     expect(md).toMatch(/^\| 4 \| Track token costs \| 1\.1 \| .* \| \*\*NOT VALIDATED\*\* \|/m);
     expect(md).not.toMatch(/Platform capability evidence[\s\S]*\*\*PASS\*\*[\s\S]*## Known gaps/);
+  });
+
+  it('a stale platform report left in the logs directory is never read: without a fresh report the capabilities are NOT RUN (review L3, M11)', () => {
+    const { dir, git, base } = fixtureRepo(dataset('2.25'));
+    fs.mkdirSync(path.join(dir, 'docs/evidence/platform'), { recursive: true });
+    fs.copyFileSync(REPO_MANIFEST, path.join(dir, 'docs/evidence/platform/manifest.json'));
+    git('add', '-A'); git('commit', '-q', '-m', 'manifest, no shim report');
+    const head = git('rev-parse', 'HEAD');
+    const tests = JSON.parse(fs.readFileSync(REPO_MANIFEST, 'utf8')).capabilities.flatMap((c) => c.evidence).flatMap((e) => e.tests ?? []);
+    const stale = { testResults: tests.map((t) => ({ name: path.join(fs.realpathSync(dir), t.file), assertionResults: [{ ancestorTitles: t.suite.split(' > '), title: t.title, status: 'passed' }] })) };
+    fs.mkdirSync(path.join(dir, 'docs/evidence/pr-11/logs'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'docs/evidence/pr-11/logs/platform-vitest.json'), JSON.stringify(stale)); // gitignored
+    const r = runCollector(dir, ['--base', base, '--head', head, '--pr', '11']);
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    const e = JSON.parse(fs.readFileSync(path.join(dir, 'docs/evidence/pr-11/evidence.json'), 'utf8'));
+    expect(e.platform.run).toEqual({ available: false, reason: 'NOT RUN: the targeted vitest run wrote no JSON report' });
+    expect(e.platform.capabilities.map((c) => c.status)).toEqual(['NOT RUN', 'NOT RUN', 'NOT RUN', 'NOT RUN', 'NOT STARTED', 'NOT RUN', 'NOT STARTED', 'NOT STARTED']);
+  });
+
+  it('an invalid manifest is reported in the platform section only: charter item 3 and the known gaps are unchanged (review L5)', () => {
+    const run = (manifestText, pr) => {
+      const { dir, git, base } = fixtureRepo(dataset('2.25'));
+      if (manifestText !== null) {
+        fs.mkdirSync(path.join(dir, 'docs/evidence/platform'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'docs/evidence/platform/manifest.json'), manifestText);
+        git('add', '-A'); git('commit', '-q', '-m', 'manifest');
+      }
+      const r = runCollector(dir, ['--base', base, '--head', git('rev-parse', 'HEAD'), '--pr', String(pr)]);
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      return { e: JSON.parse(fs.readFileSync(path.join(dir, `docs/evidence/pr-${pr}/evidence.json`), 'utf8')), md: fs.readFileSync(path.join(dir, `docs/evidence/pr-${pr}/evidence.md`), 'utf8') };
+    };
+    const none = run(null, 12);
+    const bad = run('{"schema":"x"}\n', 13);
+    expect(bad.e.knownGaps).toEqual(none.e.knownGaps);
+    expect(bad.e.charter.find((c) => c.id === 3)).toEqual(none.e.charter.find((c) => c.id === 3));
+    expect(bad.e.platform.problems.length).toBeGreaterThan(0);
+    expect(bad.md).toMatch(/Manifest invalid \(not evaluated\): /);
   });
 
   it('rollback is FAIL when the reverse-applied tree differs from the merge-base tree, even with every gate green', () => {

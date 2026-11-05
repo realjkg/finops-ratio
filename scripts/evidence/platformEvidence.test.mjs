@@ -9,6 +9,7 @@ import { renderEvidenceMd, STATUS } from './evidenceLib.mjs';
 import {
   CAP, ITEM, PLATFORM_MANIFEST, STATUS_CEILING, capabilityEvidence, indexVitestJson, manifestProblems, manifestTestFiles, renderPlatformEvidenceMd,
 } from './platformEvidence.mjs';
+import { SCHEMA_VERSIONS } from '../../src/platform/contracts/versions';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const read = (p) => fs.readFileSync(path.join(ROOT, p), 'utf8');
@@ -21,11 +22,18 @@ function ownerCells() {
   return rows.map((m) => ({ id: Number(m[1]), name: m[2].trim(), evidenceRequired: m[4].trim() }));
 }
 
+/** ADR-0001 §14: | Cap | Owner's cell | Pre-release tests and fixtures | Report | Live |, split into its fragments. */
+function adr14() {
+  const sec = read('docs/adr/ADR-0001-ai-usage-and-gateway-platform.md').split('## 14. Evidence plan per capability')[1].split('## 15.')[0];
+  return Object.fromEntries([...sec.matchAll(/^\| ([1-8]) \| [^|]+ \| ([^|]+) \|/gm)].map((m) => [Number(m[1]), m[2].trim().split('; ')]));
+}
+
 /** A manifest whose capability 1 and 4 each have one implemented test, for the status rules. */
 function small() {
   const m = clone(manifest());
   m.capabilities.forEach((c) => { c.evidence = [{ id: `c${c.id}-planned`, slice: 'A2', kind: 'test', description: 'later', status: 'planned' }]; });
   m.capabilities[0].evidence.push({ id: 'c1-impl', slice: 'W0', kind: 'test', description: 'now', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't1' }] });
+  m.capabilities[3].status = 'in progress';
   m.capabilities[3].evidence = [{ id: 'c4-impl', slice: 'W0', kind: 'test', description: 'now', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't2' }, { file: 'src/b.test.ts', suite: 'S > inner', title: 't3' }] }];
   return m;
 }
@@ -60,10 +68,23 @@ describe('the repository evidence manifest', () => {
       const src = read(t.file);
       // Names are matched literally, so they may not contain a quote, a backtick or a backslash (no escaping needed).
       for (const name of [t.title, ...t.suite.split(' > ')]) expect(name, `${t.file}: ${name}`).not.toMatch(/['"`\\]/);
-      expect(src, `${t.file}: ${t.title}`).toContain(`it('${t.title}'`);
+      // Literal, or the golden-corpus template it(`${v}: …`) for one supported schema version.
+      const [ver, ...rest] = t.title.split(': ');
+      const templated = SCHEMA_VERSIONS.includes(ver) && src.includes(`it(\`\${v}: ${rest.join(': ')}\``);
+      expect(src.includes(`it('${t.title}'`) || templated, `${t.file}: ${t.title}`).toBe(true);
       for (const s of t.suite.split(' > ')) expect(src, `${t.file}: ${s}`).toContain(`describe('${s}'`);
     }
     expect(manifestTestFiles(manifest())).toEqual([...new Set(tests.map((t) => t.file))].sort());
+  });
+  it('pins the ADR-0001 §14 pre-release evidence per capability: every fragment is covered, nothing else is claimed', () => {
+    const cells = adr14();
+    expect(Object.keys(cells).map(Number)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    for (const c of manifest().capabilities) {
+      const covers = c.evidence.map((e) => e.covers).filter((x) => x !== null);
+      expect([...new Set(covers)].sort(), `cap ${c.id}`).toEqual([...cells[c.id]].sort());
+      // "(this PR)" fragments are the wave-0 contract tests: implemented now, on slice W0; everything else is planned.
+      for (const e of c.evidence.filter((x) => x.covers !== null)) expect([e.covers, e.status, e.slice === 'W0'], e.id).toEqual([e.covers, e.covers.endsWith('(this PR)') ? 'implemented' : 'planned', e.covers.endsWith('(this PR)')]);
+    }
   });
 });
 
@@ -89,13 +110,24 @@ describe('manifest rules', () => {
     const item = (m) => m.capabilities[0].evidence[0];
     expect(problem((m) => { Object.assign(item(m), { status: 'implemented' }); delete item(m).tests; })).toEqual(['capabilities[0].evidence[0].tests: an implemented item names at least one test']);
     expect(problem((m) => { Object.assign(item(m), { status: 'planned', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't' }] }); })).toEqual(['capabilities[0].evidence[0].tests: a planned item names no test yet']);
-    for (const file of ['../etc/a.test.ts', '/abs/a.test.ts', 'src/a.ts', 'src/a b.test.ts']) {
-      expect(problem((m) => { Object.assign(item(m), { status: 'implemented', tests: [{ file, suite: 'S', title: 't' }] }); }), file).toEqual(['capabilities[0].evidence[0].tests[0].file: a repository-relative *.test.{ts,tsx,mjs} path']);
+    // Option-like and hidden paths too (review M1): '--update.test.ts' would make vitest rewrite snapshots.
+    for (const file of ['../etc/a.test.ts', '/abs/a.test.ts', 'src/a.ts', 'src/a b.test.ts', '-u.test.ts', '--update.test.ts', '--watch.test.ts', '-w.test.ts',
+      '--root.test.ts', '--config=x.test.ts', 'src/x/-u.test.ts', '.test.ts', './.test.ts', 'src//a.test.ts', 'src/./a.test.ts', 'node_modules/x/a.test.ts', '.git/hooks/a.test.mjs', 'src/a.test.ts/']) {
+      expect(problem((m) => { Object.assign(item(m), { status: 'implemented', tests: [{ file, suite: 'S', title: 't' }] }); }), file).toEqual(['capabilities[0].evidence[0].tests[0].file: a repository-relative *.test.{ts,tsx,mjs} path whose segments start with a letter, digit or underscore']);
     }
     expect(problem((m) => { Object.assign(item(m), { status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: '', title: 't' }] }); })).toEqual(['capabilities[0].evidence[0].tests[0].suite: non-empty text']);
     expect(problem((m) => { m.capabilities[1].evidence[0].id = item(m).id; })).toEqual(['capabilities[1].evidence[0].id: duplicate item id']);
     expect(problem((m) => { item(m).status = 'done'; })).toEqual(['capabilities[0].evidence[0].status: one of planned|implemented']);
     expect(problem((m) => { item(m).kind = 'vibe'; })).toEqual(['capabilities[0].evidence[0].kind: one of test|fixture|report|document']);
+  });
+  it('free text carries no line breaks, control characters or status words, so it can never read as a result (review L1)', () => {
+    for (const bad of ['**PASS**', 'PASS', 'PASSED', 'NOT VALIDATED', 'PRE-RELEASE VALIDATED', 'LIVE VERIFIED', 'Enterprise Supported', 'enterprise-supported', 'a\r\n## Charter', 'x\ty', '__bold__']) {
+      expect(problem((m) => { m.capabilities[1].evidence[0].description = bad; }), bad).toEqual(['capabilities[1].evidence[0].description: plain text without line breaks, control characters, emphasis markers or status words']);
+      expect(problem((m) => { m.capabilities[0].evidence[0].tests[0].title = bad; }), bad).toEqual(['capabilities[0].evidence[0].tests[0].title: plain text without line breaks, control characters, emphasis markers or status words']);
+    }
+    expect(problem((m) => { m.capabilities[4].name = 'Inspect prompts — ENTERPRISE SUPPORTED'; })).toEqual(['capabilities[4].name: plain text without line breaks, control characters, emphasis markers or status words']);
+    // The owner's own wording stays valid ("in supported scenarios", "passed", lower case).
+    expect(problem((m) => { m.capabilities[0].evidence[0].description = 'checks run in supported scenarios and passed'; })).toEqual([]);
   });
   it('a non-object manifest is one problem, not a crash', () => {
     expect(manifestProblems(null)).toEqual(['manifest: must be a JSON object']);
@@ -142,7 +174,9 @@ describe('capability status rules', () => {
       expect([skipped.status, skipped.items[0].status], s).toEqual([CAP.NOT_VALIDATED, ITEM.SKIPPED]);
     }
     const dup = run({ ...ok, 'src/a.test.ts': [[['S'], 't1', 'passed'], [['S'], 't2', 'passed'], [['S'], 't2', 'failed']] })[4];
-    expect(dup.status).toBe(CAP.NOT_VALIDATED);
+    expect([dup.status, dup.items[0].status, dup.items[0].tests[0].status]).toEqual([CAP.NOT_VALIDATED, ITEM.FAILED, ITEM.FAILED]); // one failing attempt is FAILED (review L3, M2)
+    const mixed = run({ ...ok, 'src/a.test.ts': [[['S'], 't1', 'passed'], [['S'], 't2', 'skipped'], [['S'], 't2', 'failed']] })[4];
+    expect(mixed.items[0].tests[0].status).toBe(ITEM.FAILED);
     const wrongSuite = run({ ...ok, 'src/b.test.ts': [[['S'], 't3', 'passed']] })[4];
     expect(wrongSuite.status).toBe(CAP.NOT_VALIDATED);
     expect(run({ ...ok, 'src/a.test.ts': [[['S'], 't1', 'failed'], [['S'], 't2', 'passed']] })[1].status).toBe(CAP.NOT_VALIDATED);
@@ -157,6 +191,23 @@ describe('capability status rules', () => {
     const computed = JSON.stringify(p.capabilities.map((x) => [x.status, x.detail, x.items.map((i) => [i.status, (i.tests ?? []).map((t) => t.status)])]));
     expect(computed).not.toMatch(/"PASS"|enterprise|supported|live verified|connected/i);
     expect(p.ceiling).toBe(STATUS_CEILING);
+  });
+  it('the declared status is a cap: complete, passing evidence reaches the ceiling only when the manifest says "in progress" (review L2)', () => {
+    const m = small();
+    m.capabilities[3].status = 'planned';
+    const all = vitestJson({ 'src/a.test.ts': [[['S'], 't1', 'passed'], [['S'], 't2', 'passed']], 'src/b.test.ts': [[['S', 'inner'], 't3', 'passed']] });
+    expect(byId(capabilityEvidence(m, indexVitestJson(all, ['/repo'])))[4].status).toBe(CAP.PLANNED);
+    m.capabilities[3].status = 'not started';
+    expect(byId(capabilityEvidence(m, indexVitestJson(all, ['/repo'])))[4].status).toBe(CAP.NOT_STARTED);
+    m.capabilities[3].status = 'in progress';
+    expect(byId(capabilityEvidence(m, indexVitestJson(all, ['/repo'])))[4].status).toBe(CAP.PRE_RELEASE);
+  });
+  it('a malformed vitest report is indexed defensively: odd entries are skipped, never a crash', () => {
+    for (const j of [{ testResults: [null] }, { testResults: [{ name: '/repo/a.test.ts', assertionResults: [null] }] }, { testResults: 'x' }, { testResults: [{ name: {}, assertionResults: [] }] },
+      { testResults: [{ name: '/repo/src/a.test.ts', assertionResults: [{ ancestorTitles: 'S', title: 't', status: 'passed' }, { ancestorTitles: ['S'], title: { toString: () => 't' }, status: 'passed' }, { ancestorTitles: ['S'], title: 't', status: 7 }] }] }]) {
+      expect(() => indexVitestJson(j, ['/repo']), JSON.stringify(j)).not.toThrow();
+      expect(indexVitestJson(j, ['/repo']).size, JSON.stringify(j)).toBe(0);
+    }
   });
   it('the repository manifest today: no capability is above its declared status', () => {
     const files = manifestTestFiles(manifest());
@@ -177,6 +228,14 @@ describe('report section', () => {
     expect(md).toMatch(/^\| 2 \| Measure adoption \| 1\.2 \| .* \| \*\*NOT STARTED\*\* \|/m);
     expect(md).not.toMatch(/\*\*PASS\*\*/);
     expect(md).toContain('`c4-impl` (W0): NOT RUN');
+  });
+  it('untrusted text is escaped: a crafted name or title cannot render bold, a heading, a table row or a raw tag (review L1)', () => {
+    const m = small();
+    m.capabilities[1].name = 'a*b*c_d_ <b>x</b> [l](u) `c` | e & f';
+    const md = renderPlatformEvidenceMd({ manifest: PLATFORM_MANIFEST, ...capabilityEvidence(m, null, 'r') });
+    const row = md.split('\n').find((l) => l.startsWith('| 2 |'));
+    expect(row).toContain('a\\*b\\*c\\_d\\_ \\<b\\>x\\</b\\> \\[l\\](u) \\`c\\` \\| e \\& f');
+    expect(row.split(' | ').length).toBe(7);
   });
   it('an invalid or absent manifest is reported as such', () => {
     expect(renderPlatformEvidenceMd({ manifest: PLATFORM_MANIFEST, problems: ['schema: x'], capabilities: [] })).toContain('Manifest invalid (not evaluated): schema: x');
