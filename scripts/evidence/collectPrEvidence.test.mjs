@@ -137,7 +137,7 @@ describe('collect-pr-evidence plan', () => {
     // Test files are passed as absolute paths inside the checkout, so none can read as a vitest option (review M1).
     const root = fs.realpathSync(dir);
     expect(run.command).toBe(`npx vitest run --cache=false --reporter=json --outputFile=${path.join(root, 'docs/evidence/pr-1/logs/platform-vitest.json')} ${files.map((f) => path.join(root, f)).join(' ')}`);
-    expect(run.command.split(' ').slice(5).every((a) => a.startsWith(`${root}/`))).toBe(true);
+    expect(run.command.split(' ').slice(6).every((a) => a.startsWith(`${root}/`))).toBe(true);
     for (const k of ['AWS_SECRET_ACCESS_KEY', 'GITHUB_TOKEN']) expect(run.envKeys).not.toContain(k);
     expect(p2.gates.map((g) => g.name)).toEqual(p.gates.map((g) => g.name)); // no new gate: it never decides the charter
     fs.writeFileSync(manifestPath, '{"schema":"x"}\n');
@@ -223,8 +223,8 @@ describe('collect-pr-evidence run phase (shimmed gates)', () => {
   it('platform capability evidence is reported per capability from the vitest JSON; a failing test never changes the exit code or the charter', () => {
     const { dir, git, base } = fixtureRepo(dataset('2.25'));
     const m = JSON.parse(fs.readFileSync(REPO_MANIFEST, 'utf8'));
-    m.capabilities[0].evidence.push({ id: 'x-pass', slice: 'W0', kind: 'test', description: 'passes', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't1' }] });
-    m.capabilities[3].evidence.push({ id: 'x-fail', slice: 'W0', kind: 'test', description: 'fails', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't2' }] });
+    m.capabilities[0].evidence.push({ id: 'x-pass', covers: null, slice: 'W0', kind: 'test', description: 'passes', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't1' }] });
+    m.capabilities[3].evidence.push({ id: 'x-fail', covers: null, slice: 'W0', kind: 'test', description: 'fails', status: 'implemented', tests: [{ file: 'src/a.test.ts', suite: 'S', title: 't2' }] });
     fs.mkdirSync(path.join(dir, 'docs/evidence/platform'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'docs/evidence/platform/manifest.json'), JSON.stringify(m, null, 2) + '\n');
     const results = (status) => m.capabilities.flatMap((c) => c.evidence).flatMap((e) => e.tests ?? []).map((t) => ({ name: path.join(fs.realpathSync(dir), t.file), assertionResults: [{ ancestorTitles: t.suite.split(' > '), title: t.title, status: t.title === 't2' ? 'failed' : status }] }));

@@ -141,7 +141,8 @@ const PLATFORM_CHECK = 'platform capability tests (informational)';
 informational.push(!platformManifest && !platformProblems.length ? { name: PLATFORM_CHECK, command: '(none)', na: `N/A: no ${PLATFORM_MANIFEST} in this checkout` }
   : platformProblems.length ? { name: PLATFORM_CHECK, command: '(none)', na: `N/A: manifest invalid (${platformProblems.length} problem(s))` }
     : !platformFiles.length ? { name: PLATFORM_CHECK, command: '(none)', na: 'N/A: no implemented evidence test in the manifest' }
-      : { name: PLATFORM_CHECK, steps: [['npx', 'vitest', 'run', '--cache=false', '--reporter=json', `--outputFile=${PLATFORM_JSON}`, ...platformFiles]], env: base });
+      // Absolute paths inside the checkout: a file name can never read as a vitest option (the manifest refuses them too).
+      : { name: PLATFORM_CHECK, steps: [['npx', 'vitest', 'run', '--cache=false', '--reporter=json', `--outputFile=${PLATFORM_JSON}`, ...platformFiles.map((f) => path.join(ROOT, f))]], env: base });
 if (browser.env) ev.env.browser = browser.source;
 if (PLAN_ONLY) {
   const show = (g) => ({ name: g.name, command: g.command ?? g.steps.map((a) => a.join(' ')).join(' && '), envKeys: g.env ? Object.keys(g.env).sort() : null, skip: g.skip ?? null, na: g.na ?? null, db: g.db ?? null });
@@ -271,7 +272,7 @@ for (const g of informational) ev.informational.push(g.steps ? await run(g) : no
   } else if (platformFiles.length) reason = 'NOT RUN: the targeted vitest run wrote no JSON report';
   ev.platform = { manifest: platformManifest || platformProblems.length ? PLATFORM_MANIFEST : null, problems: platformProblems, capabilities: [],
     ...(platformManifest && !platformProblems.length ? capabilityEvidence(platformManifest, index, index ? null : reason) : {}) };
-  if (platformProblems.length) ev.knownGaps.push(`Platform capability evidence not evaluated: ${PLATFORM_MANIFEST} is invalid (${platformProblems.slice(0, 5).join('; ')}).`);
+  // An invalid manifest is reported in the platform section only, so the charter and the known gaps stay unchanged.
 }
 if (git('status', '--porcelain', '--', 'next-env.d.ts')) { git('checkout', '--', 'next-env.d.ts'); ev.knownGaps.push('next-env.d.ts was rewritten by the Playwright build (its distDir) and restored from HEAD after the run.'); }
 

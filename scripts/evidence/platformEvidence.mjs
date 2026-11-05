@@ -12,7 +12,17 @@ export const ITEM = Object.freeze({ PLANNED: 'PLANNED', NOT_RUN: 'NOT RUN', MISS
 const DECLARED = ['not started', 'planned', 'in progress'];
 const RELEASES = ['1.1', '1.2', '1.3', '1.3/2.0', '2.0'];
 const KINDS = ['test', 'fixture', 'report', 'document'];
-const TEST_FILE = /^(?!\/)(?!.*\.\.)[A-Za-z0-9_./-]+\.test\.(ts|tsx|mjs)$/;
+// Every segment starts with a letter, digit or underscore: no '-' (a vitest option such as --update), no '.' (hidden,
+// '.', '..'), no empty segment; no node_modules. The collector also passes these as absolute paths.
+const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
+const isTestFile = (f) => typeof f === 'string' && f.length <= 200 && /\.test\.(ts|tsx|mjs)$/.test(f)
+  && f.split('/').every((seg) => SEGMENT.test(seg) && seg !== 'node_modules');
+// Free text: no line breaks or control characters, no emphasis markers, no status vocabulary (so it can never read as
+// a result); the owner's own wording ("supported scenarios", lower-case "passed") stays valid.
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/;
+const STATUS_UPPER = /\b(PASS|PASSED|FAIL|FAILED|NOT RUN|NOT VALIDATED|PRE-RELEASE VALIDATED|LIVE VERIFIED)\b/;
+const plainText = (v) => typeof v === 'string' && v.trim() !== '' && !CONTROL.test(v) && !STATUS_UPPER.test(v) && !/\*\*|__|enterprise[\s-]*supported/i.test(v);
 const isObj = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const text = (v) => typeof v === 'string' && v.trim() !== '';
 
@@ -21,7 +31,10 @@ export function manifestProblems(m) {
   if (!isObj(m)) return ['manifest: must be a JSON object'];
   const p = [];
   const keys = (o, at, allowed) => { for (const k of Object.keys(o)) if (!allowed.includes(k)) p.push(`${at}${at ? '.' : ''}${k}: unknown key`); };
-  const need = (o, at, k) => { if (!text(o[k])) p.push(`${at}.${k}: non-empty text`); };
+  const need = (o, at, k) => {
+    if (!text(o[k])) p.push(`${at}.${k}: non-empty text`);
+    else if (!plainText(o[k])) p.push(`${at}.${k}: plain text without line breaks, control characters, emphasis markers or status words`);
+  };
   keys(m, '', ['$comment', 'schema', 'statusCeiling', 'capabilities']);
   if (m.schema !== 'ratio.platform-evidence-manifest/1') p.push('schema: must be ratio.platform-evidence-manifest/1');
   if (m.statusCeiling !== STATUS_CEILING) p.push('statusCeiling: must be the ADR-0001 status ceiling');
@@ -44,8 +57,12 @@ export function manifestProblems(m) {
     c.evidence.forEach((e, j) => {
       const ea = `${at}.evidence[${j}]`;
       if (!isObj(e)) return void p.push(`${ea}: object`);
-      keys(e, ea, ['id', 'slice', 'kind', 'description', 'status', 'tests']);
+      keys(e, ea, ['id', 'slice', 'kind', 'description', 'status', 'covers', 'tests']);
+      // The ADR-0001 §14 fragment the item covers, or null for supplementary evidence (pinned by the repository test).
+      if (e.covers !== null && !text(e.covers)) p.push(`${ea}.covers: an ADR-0001 §14 fragment or null`);
       for (const k of ['id', 'slice', 'description']) need(e, ea, k);
+      if (text(e.id) && !/^[a-z0-9][a-z0-9-]{0,62}$/.test(e.id)) p.push(`${ea}.id: lowercase letters, digits and hyphens`);
+      if (text(e.slice) && !/^[A-Z][A-Z0-9/]{0,15}$/.test(e.slice)) p.push(`${ea}.slice: a slice id such as A2 or C3/C4`);
       if (text(e.id) && ids.has(e.id)) p.push(`${ea}.id: duplicate item id`);
       ids.add(e.id);
       if (!KINDS.includes(e.kind)) p.push(`${ea}.kind: one of ${KINDS.join('|')}`);
@@ -56,7 +73,7 @@ export function manifestProblems(m) {
         const ta = `${ea}.tests[${k}]`;
         if (!isObj(t)) return void p.push(`${ta}: object`);
         keys(t, ta, ['file', 'suite', 'title']);
-        if (!(typeof t.file === 'string' && TEST_FILE.test(t.file))) p.push(`${ta}.file: a repository-relative *.test.{ts,tsx,mjs} path`);
+        if (!isTestFile(t.file)) p.push(`${ta}.file: a repository-relative *.test.{ts,tsx,mjs} path whose segments start with a letter, digit or underscore`);
         need(t, ta, 'suite');
         need(t, ta, 'title');
       });
@@ -78,10 +95,12 @@ export function indexVitestJson(json, roots) {
   if (!isObj(json)) return null;
   const idx = new Map();
   for (const f of Array.isArray(json.testResults) ? json.testResults : []) {
-    const rel = roots.map((r) => path.relative(r, String(f.name ?? ''))).find((x) => x && !x.startsWith('..') && !path.isAbsolute(x));
+    if (!isObj(f) || typeof f.name !== 'string') continue;
+    const rel = roots.map((r) => path.relative(r, f.name)).find((x) => x && !x.startsWith('..') && !path.isAbsolute(x));
     if (!rel) continue;
     for (const a of Array.isArray(f.assertionResults) ? f.assertionResults : []) {
-      const k = key(rel.split(path.sep).join('/'), (a.ancestorTitles ?? []).join(' > '), a.title);
+      if (!isObj(a) || typeof a.title !== 'string' || typeof a.status !== 'string' || !Array.isArray(a.ancestorTitles) || !a.ancestorTitles.every((x) => typeof x === 'string')) continue;
+      const k = key(rel.split(path.sep).join('/'), a.ancestorTitles.join(' > '), a.title);
       idx.set(k, [...(idx.get(k) ?? []), a.status]);
     }
   }
@@ -111,7 +130,9 @@ export function capabilityEvidence(m, index, reason = null) {
     const planned = st.filter((s) => s === ITEM.PLANNED).length;
     const status = st.some((s) => [ITEM.FAILED, ITEM.MISSING, ITEM.SKIPPED].includes(s)) ? CAP.NOT_VALIDATED
       : st.includes(ITEM.NOT_RUN) ? CAP.NOT_RUN
-        : planned > 0 ? CAP[c.status.replace(' ', '_').toUpperCase()]
+        // The declared status is a cap: the ceiling needs every item implemented and passing AND a deliberate
+        // "in progress" in the manifest; otherwise the declared status is shown (review L2).
+        : planned > 0 || c.status !== 'in progress' ? CAP[c.status.replace(' ', '_').toUpperCase()]
           : CAP.PRE_RELEASE;
     return {
       id: c.id, name: c.name, release: c.release, evidenceRequired: c.evidenceRequired, declared: c.status, status, items,
@@ -122,7 +143,8 @@ export function capabilityEvidence(m, index, reason = null) {
   return { ceiling: STATUS_CEILING, run: index ? { available: true } : { available: false, reason }, problems: [], capabilities };
 }
 
-const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+/** Untrusted text in Markdown: line breaks become spaces; inline Markdown and HTML characters are backslash-escaped. */
+const cell = (s) => String(s ?? '').replace(/[\r\n]+/g, ' ').replace(/[\\`*_[\]<>|~&]/g, '\\$&');
 /** The evidence.md section (Markdown), from the record the collector stores as `ev.platform`. */
 export function renderPlatformEvidenceMd(pe) {
   const L = ['## Platform capability evidence (non-gating)', ''];

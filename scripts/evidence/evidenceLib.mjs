@@ -356,7 +356,7 @@ export function statedTotals(path, text) {
 // --- report ------------------------------------------------------------------------------------
 
 /** A Markdown table cell: backslashes first, then pipes, then newlines (no partial escaping). */
-export const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+export const cell = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n|\r/g, ' ');
 /** A fenced block that its content cannot close: the fence is longer than any backtick run inside. */
 export function fence(text) {
   const longest = Math.max(2, ...[...String(text).matchAll(/`+/g)].map((m) => m[0].length));
