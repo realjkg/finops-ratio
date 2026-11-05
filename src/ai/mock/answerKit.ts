@@ -7,7 +7,7 @@ import { membersOf, rollup, scopeLabel } from './calc';
 import type { Scope, World, WorkloadFacts } from './types';
 
 export const REALIZED_LINE =
-  'Realized savings: $0 — no measured outcome evidence exists in the seeded data (everything here is projected or assumed).';
+  'Realized savings: $0 — no measured outcome evidence exists in this data (everything here is projected or assumed).';
 
 export const short = (s: EvidenceStatus | undefined): string => `(${s ?? 'unmarked'})`;
 

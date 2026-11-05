@@ -10,6 +10,8 @@ import { applyTypography, loadTypography } from '@/theme/typography';
 import { PersonaProvider } from '@/components/PersonaProvider';
 import { AppShell } from '@/components/layout/AppShell';
 import { NAV_ITEMS } from '@/components/layout/NavBar';
+import { DemoBadge } from '@/components/layout/DemoBadge';
+import { modeOfPage, showsDemoBadge } from '@/lib/demoMode';
 
 // The six north-star objects share one AppShell (nav + agent launcher + chat).
 // /demo also uses the shell so a self-service visitor gets the same navigation
@@ -24,6 +26,8 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const useShell = SHELL_ROUTES.has(router.pathname);
   const page = <Component {...pageProps} />;
+  // The server's mode, from the page's own props (the engagement page marks itself): the badge is a mode check first.
+  const mode = modeOfPage(pageProps);
   // Custom themes apply here; built-in choices are already set before paint (_document).
   useEffect(() => {
     const stored = loadActiveTheme();
@@ -36,7 +40,13 @@ export default function RatioApp({ Component, pageProps }: AppProps) {
   return (
     <PersonaProvider>
       <SimulationProvider>
-      {useShell ? <AppShell>{page}</AppShell> : page}
+      {useShell ? <AppShell mode={mode}>{page}</AppShell> : showsDemoBadge(router.pathname, mode) ? (
+        // Standalone demo routes (/mission, /hello) have no top bar: the same badge sits in a thin strip.
+        <>
+          <div className="flex items-center border-b border-edge bg-deep px-3 py-1.5"><DemoBadge /></div>
+          {page}
+        </>
+      ) : page}
     </SimulationProvider>
     </PersonaProvider>
   );

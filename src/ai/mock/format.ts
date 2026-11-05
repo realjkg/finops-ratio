@@ -62,8 +62,16 @@ export function months(n: number): string {
   return `${n.toFixed(1)} months`;
 }
 
+/** Every mock answer's provenance line starts with this; respond.ts keeps it in the protected tail. */
+export const SOURCE_PREFIX = 'Source: demo dataset';
+
 export function basisLine(asOf: string): string {
-  return `Basis: synthetic sample workspace data as of ${asOf.slice(0, 10)} — computed by a deterministic mock (no LLM, nothing live).`;
+  return `${SOURCE_PREFIX} as of ${asOf.slice(0, 10)} — computed by a deterministic mock (no LLM, nothing live).`;
+}
+
+/** Adds the source line to a mock answer that has none (the legacy answers), and never twice. */
+export function withSourceLine(content: string, asOf: string): string {
+  return content.includes(SOURCE_PREFIX) ? content : `${content}\n${basisLine(asOf)}`;
 }
 
 /** Render an Answer: header, body, assumptions, basis chip, next questions. */

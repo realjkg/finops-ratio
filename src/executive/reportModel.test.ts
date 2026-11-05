@@ -98,10 +98,10 @@ describe('report workbook', () => {
     );
   });
 
-  it('round-trips: the workbook opens with an "Initiatives" sheet whose every cell matches the model', async () => {
+  it('round-trips: the workbook opens with an "Initiatives" sheet (then the demo About sheet) whose every cell matches the model', async () => {
     const buffer = await buildReportWorkbook(FIXED);
     const book = await readBook(buffer);
-    expect(book.worksheets.map((ws) => ws.name)).toEqual(['Initiatives']);
+    expect(book.worksheets.map((ws) => ws.name)).toEqual(['Initiatives', 'About']); // About: the one demo line (review M1)
 
     const sheet = book.getWorksheet('Initiatives')!;
     // Raw 2-D view: header row first, then one array per data row.

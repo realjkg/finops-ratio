@@ -65,6 +65,20 @@ describe('main navigation', () => {
   });
 });
 
+describe('Demo badge', () => {
+  it('sits beside the logo when the page is a demo page, named for screen readers', () => {
+    act(() => root.render(<NavBar active="frameworks" demo />));
+    const badge = box.querySelector('nav [data-testid="demo-badge"]')!;
+    expect(badge.textContent).toBe('Demo');
+    expect(badge.getAttribute('aria-label')).toBe('Demo environment — figures are illustrative');
+    expect(box.querySelectorAll('[data-testid="demo-badge"]')).toHaveLength(1);
+  });
+
+  it('is absent unless asked for (engagement and simulation pages never pass it)', () => {
+    expect(box.querySelector('[data-testid="demo-badge"]')).toBeNull();
+  });
+});
+
 describe('page titles', () => {
   it('every in-scope route has its own title, so tabs, bookmarks and screen readers can tell pages apart', () => {
     const titles = NAV_ITEMS.map((i) => pageTitle(i.href));

@@ -39,16 +39,21 @@ describe('ConnectorCard — Test connection gating (H3)', () => {
   });
 });
 
-describe('ConnectorCard — synthetic cloud chip (A6)', () => {
-  it('connector_card_shows_synthetic_chip_for_new_sources', () => {
+describe('ConnectorCard — cloud sandbox cards (A6)', () => {
+  it('connector_card_names_new_sources_as_offline_sandboxes_with_no_synthetic_chip', () => {
     for (const id of ['aws-sandbox', 'azure-sandbox', 'gcp-sandbox']) {
       const src = sourceById(id);
       expect(src.kind).toBe('synthetic_cloud');
       const html = renderToStaticMarkup(<ConnectorCard source={src} onTest={onTest} />);
-      expect(html).toMatch(/>synthetic<\/span>/);
+      // No per-card "synthetic" chip (the top-bar Demo badge covers the environment); the name and
+      // note still say the source is an offline sandbox and not a live integration.
+      expect(html).not.toMatch(/>synthetic<\/span>/i);
+      expect(html).toContain('Cloud sandbox');
+      expect(html).toMatch(/\(offline sandbox\)/);
+      expect(html).toMatch(/not a live (AWS|Azure|GCP) integration/);
       expect(testButton(html)).not.toMatch(/\sdisabled=""/);
     }
-    // Live cloud connectors and the existing sandboxes do not carry the chip.
+    // Nor does any other card.
     for (const id of ['aws-data-exports', 'pointfive-sandbox']) {
       const html = renderToStaticMarkup(<ConnectorCard source={sourceById(id)} onTest={onTest} />);
       expect(html).not.toMatch(/>synthetic<\/span>/);
@@ -131,7 +136,8 @@ describe('ConnectorCard — walk mode', () => {
       />,
     );
     expect(html).toContain('Data landed');
-    expect(html).toContain('synthetic sample workspace data');
+    expect(html).toContain('offline sandbox');
+    expect(html).not.toMatch(/synthetic|sample workspace/i);
     // Re-ingest is offered once data has landed.
     expect(html).toContain('Re-ingest');
     expect(html).toContain('Disconnect');
@@ -143,7 +149,7 @@ describe('ConnectorCard — walk mode', () => {
       'pointfive-sandbox': landedRun('pointfive-sandbox'),
       'servicenow-sandbox': {
         sourceId: 'servicenow-sandbox',
-        sourceName: 'ServiceNow (synthetic demo data)',
+        sourceName: 'ServiceNow (offline sandbox)',
         at: '2026-06-01T14:31:00.000Z',
         result: ServiceNowAdapter.ingest(
           ServiceNowAdapter.seedRows(),

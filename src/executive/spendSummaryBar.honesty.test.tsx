@@ -1,4 +1,4 @@
-// Honesty: no fake freshness; the seeded spend is named AI spend, stamped with the seed's own as-of date.
+// Honesty: no fake freshness; the spend is named AI spend, stamped with the dataset's own as-of date (no data label).
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, it } from 'vitest';
 import { DEMO_NOW } from '@/data/workloads';
@@ -9,8 +9,9 @@ import { SpendSummaryBar } from './SpendSummaryBar';
 const bar = { totalMonthlySpend: 41212, projectedSavings: 4800, initiativesActive: 11, pendingApproval: 2 };
 const html = renderToStaticMarkup(<SpendSummaryBar summary={bar} />);
 
-it('stamps the seed as-of date derived from DEMO_NOW, never a relative freshness claim', () => {
-  expect(html).toContain(`Synthetic sample workspace data as of ${DEMO_NOW.toISOString().slice(0, 10)}`);
+it('stamps the dataset as-of date derived from DEMO_NOW, never a relative freshness claim', () => {
+  expect(html).toContain(`Data as of ${DEMO_NOW.toISOString().slice(0, 10)}`);
+  expect(html).not.toMatch(/synthetic|sample/i);
   expect(html).not.toMatch(/min ago|Updated/i);
 });
 

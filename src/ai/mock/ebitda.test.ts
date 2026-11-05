@@ -24,7 +24,7 @@ describe('EBITDA impact', () => {
     expect(t).toContain('one-for-one');
     expect(t).toContain('(assumption)');
     expect(t).toMatch(/operating expense/);
-    expect(t).toMatch(/No (EBITDA|revenue)[^.]*baseline[^.]*seeded data/i);
+    expect(t).toMatch(/No (EBITDA|revenue)[^.]*baseline[^.]*in this data/i);
     expect(t).toMatch(/group EBITDA|revenue/);
     // never fabricate a baseline-derived figure
     expect(t).not.toMatch(/New EBITDA/);
@@ -56,22 +56,23 @@ describe('EBITDA impact', () => {
     expect(t).toContain('+0.12 pp');
   });
 
-  it('percent reductions are taken against current seeded spend (hand: 20% x 4,270 = 854/mo = 10,248/yr)', async () => {
+  it('percent reductions are taken against current spend (hand: 20% x 4,270 = 854/mo = 10,248/yr)', async () => {
     const t = await last(['What is the EBITDA impact for the Legal team if spend went down 20%?']);
-    expect(t).toContain('20% of the group’s current seeded monthly spend');
+    expect(t).toContain('20% of the group’s current monthly spend');
     expect(t).toContain(`${usd(854)}/mo`);
     expect(t).toContain(`${usd(10248)}/yr`);
     expect(t).toContain('(assumption)');
   });
 
-  it('no stated amount, spend really fell (Platform Eng MoM trend): uses the seeded trend and labels it', async () => {
+  it('no stated amount, spend really fell (Platform Eng MoM trend): uses the MoM trend and labels it', async () => {
     const team_ = team('Platform Eng').members;
     const fall = -impliedMonthlyChange(team_); // hand: 2400-2400/0.968 + 640-640/1.055 = -45.97
     expect(fall).toBeGreaterThan(45);
     const t = await last(['What is the EBITDA effect on Platform Eng now that spending went down?']);
     expect(t).toContain(`${usd(fall)}/mo`);
     expect(t).toContain(`${usd(fall * 12)}/yr`);
-    expect(t).toMatch(/seeded MoM trend/);
+    expect(t).toMatch(/implied by the MoM trend/);
+    expect(t).toMatch(/this is the data’s trend/);
     expect(t).toMatch(/not a ledger measurement/);
   });
 
@@ -80,7 +81,7 @@ describe('EBITDA impact', () => {
     expect(t).toContain(`${usd(1568)}/mo`);
     expect(t).toContain(`${usd(1568 * 12)}/yr`);
     expect(t).toMatch(/projected/);
-    expect(t).toMatch(/seeded trend shows (a rise|spend up)|spend rose/i);
+    expect(t).toMatch(/MoM trend shows (a rise|spend up)|spend rose/i);
   });
 
   it('no reduction anywhere (Legal): says so and asks for the amount instead of inventing one', async () => {

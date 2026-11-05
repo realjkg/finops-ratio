@@ -49,10 +49,10 @@ export const VOCAB = {
     definition:
       'Quality-adjusted business value, less modeled harm from misses, divided by workload cost for the same reporting period. Break-even is 1×; it can be negative.',
   },
-  /** A workload's cost for the month as the sample workspace models it (an assumed figure). */
+  /** A workload's cost for the month as the demo models it (an assumed figure). */
   modeledCost: {
     label: 'Modeled workload cost',
-    definition: 'The workload\'s monthly cost as the sample workspace assumes it. It is not billed or effective cost.',
+    definition: 'The workload\'s monthly cost as modeled from stated assumptions. It is not billed or effective cost.',
   },
   /** Cost accumulated so far this month from recorded postings (customer simulation workspace). */
   recordedCost: {
@@ -71,7 +71,7 @@ export const VOCAB = {
   /** Neutral name for a monthly workload cost that may be modeled or recorded (exports, charts). */
   monthlyWorkloadCost: {
     label: 'Monthly workload cost',
-    definition: 'The workload\'s cost for the month: modeled in the sample workspace, recorded in a customer workspace.',
+    definition: 'The workload\'s cost for the month: modeled from stated assumptions, or recorded from postings in a customer workspace.',
   },
 } as const satisfies Record<string, Term>;
 
@@ -79,9 +79,8 @@ export type VocabKey = keyof typeof VOCAB;
 
 /** Display strings that are not cost measures but must read the same everywhere. */
 export const COPY = {
-  /** Replaces any freshness claim on synthetic data. */
-  sampleData: 'Synthetic data · No live connections',
-  basisModeled: 'Basis: demo assumption',
+  /** Modeled cost basis, stated only inside the View calculation disclosure (never Billed or Effective). */
+  basisModeled: 'Basis: modeled',
   /** Simulation postings are ledger-style entries whose billed/effective treatment is not stated. */
   basisRecorded: 'Basis: simulation postings',
   monthConvention: '30-day month convention',
@@ -123,7 +122,28 @@ export const BANNED_PHRASES: ReadonlyArray<{ pattern: RegExp; use: string }> = [
   { pattern: /\bCost [Ee]fficiency( [Ss]core)?\b/, use: 'Value / cost' },
   { pattern: /\bvalue ratios?\b/i, use: 'Value / cost' },
   { pattern: /\bValue return\b|\d× return\b/, use: 'Value / cost' },
-  { pattern: /\(Billed cost\)|\(Effective cost\)/, use: 'the cost basis is not Billed or Effective for seeded data' },
+  { pattern: /\(Billed cost\)|\(Effective cost\)/, use: 'the cost basis is not Billed or Effective for modeled data' },
+];
+
+/**
+ * Data labels the demo no longer spells out on its views (owner decision: one quiet Demo badge in the
+ * top bar instead). The vocabulary test scans user-facing sources for these; API contract values that
+ * must keep their wording are allowlisted there by exact file and match, and shown through id-keyed
+ * display tables.
+ */
+export const DEMO_LABEL_PHRASES: ReadonlyArray<{ pattern: RegExp; use: string }> = [
+  { pattern: /\bSynthetic data\b|No live connections\b/i, use: 'nothing: the top-bar Demo badge covers it' },
+  { pattern: /\bsample workspace\b/i, use: 'the Demo badge; on /simulation, "Simulation"' },
+  { pattern: /\bdemo assumption\b/i, use: 'Basis: modeled (inside View calculation only)' },
+  { pattern: /\bseeded (data|demo|adapters?|value assumptions?|spend|run-rate|alerts?|findings|trend|MoM|tokens|daily volume|rates|AI workloads|assumption)\b/i, use: 'plain wording: "this data", "alerts", "run-rate"' },
+  { pattern: /\bsynthetic (sample|sandbox|demo data|costs|connections|registry|seed|ledger|back-test|workload data|cloud)\b/i, use: '"offline sandbox", or nothing' },
+  { pattern: /\(synthetic\)/i, use: 'nothing' },
+  { pattern: /\bImport (sample|the three synthetic)\b/, use: 'Import' },
+  { pattern: /\bExample (Cloud|Private Cloud|Datacenter|Compute)\b/, use: 'the fictional names of the FOCUS demo datasets' },
+  { pattern: /\bStatic seed\b/, use: 'Offline sandbox' },
+  { pattern: /\bDeterministic seed workloads\b/, use: 'the one /demo sentence' },
+  { pattern: /\bsample (data|claims?) (is|are) (simulated|not real)\b|\bAll sample data\b|\bVerified sample claims\b|\bThese samples are simulated\b/i, use: '"Outcomes shown are illustrative, not real customer returns."' },
+  { pattern: /\bSeed imported\b|\bnext fixture available\b|\bFixture imported\b|\bImport \$\{[^}]+\} fixture\b/, use: '"Dataset imported"' },
 ];
 
 // --- Cost source: modeled (bundled seed) vs recorded (simulation postings) ---

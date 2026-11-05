@@ -1,5 +1,6 @@
 // The demo's synthetic API-connection datasets: deterministic, drift-checked against the committed
-// JSON, and every row passes the repo's FOCUS validator (src/ingest/focus/validate.ts).
+// JSON, and every row passes the repo's FOCUS validator (src/ingest/focus/validate.ts). Names are
+// fictional and allowlisted; no real brand, email, IP, URL, ARN or key-shaped string appears.
 import { describe, expect, it } from 'vitest';
 import fs from 'fs';
 import path from 'path';
@@ -13,6 +14,25 @@ const committed = (id: DatasetId): Dataset => JSON.parse(fs.readFileSync(path.jo
 const MONEY = ['BilledCost', 'EffectiveCost', 'ListCost', 'ContractedCost', 'ListUnitPrice', 'ContractedUnitPrice'];
 const col = (d: Dataset, name: string) => d.rows.map((r) => r[d.columns.indexOf(name)]);
 const sum = (values: string[]) => values.filter((v) => v !== '').reduce((s, v) => s + parseUnits(v), BigInt(0));
+
+// Names shown in the demo are fictional and come from this allowlist only: category-style providers and
+// issuers, fictional business units and services. Nothing here is a real company, product or customer.
+const FICTIONAL_NAMES = new Set([
+  'Public cloud billing API', 'Private cloud usage API', 'On-premises cost allocation API',
+  'Public cloud', 'Private cloud', 'On-premises data center', 'Public cloud billing', 'Internal IT chargeback', 'Data center operations',
+  'Corporate billing account', 'Shared services tenant', 'Primary cluster',
+  'Payments', 'Search', 'Data platform', 'Analytics', 'Platform', 'Idle capacity', 'Facilities',
+  'East 1', 'West 1', 'North data center', 'South data center', 'Headquarters data center',
+  'Virtual machines', 'Object storage', 'Managed database', 'Model inference', 'vCPU', 'Memory', 'Block storage', 'Floating IPs',
+  'CPU allocation', 'RAM allocation', 'Persistent volume', 'GPU allocation', 'Power and cooling', 'Credits', 'Tax', 'Adjustments',
+  'Compute savings plan', 'Reserved capacity block', '',
+]);
+const NAME_COLUMNS = ['ProviderName', 'PublisherName', 'InvoiceIssuerName', 'BillingAccountName', 'SubAccountName', 'RegionName', 'ServiceName', 'CommitmentDiscountName'];
+const ID_COLUMNS = ['BillingAccountId', 'SubAccountId', 'RegionId', 'AvailabilityZone', 'ResourceId', 'ResourceName', 'SkuId', 'SkuPriceId', 'CommitmentDiscountId'];
+/** Neutral lower-case ids ("acct-0001-payments", "compute-07") or SKU codes ("SKU-COMPUTE", "PRICE-GPU-3"). */
+const ID_SHAPE = /^([a-z][a-z0-9]*(-[a-z0-9]+)*|(SKU|PRICE)(-[A-Z0-9]+)+)$/;
+/** Real cloud, software and hardware brands (plus the old "Example" placeholder prefix) that must not appear as a vendor, account, resource or description. */
+const REAL_BRANDS = /\b(aws|amazon|azure|microsoft|google|gcp|oracle|oci|ibm|alibaba|aliyun|tencent|huawei|digitalocean|linode|akamai|vultr|ovh|hetzner|rackspace|cloudflare|heroku|vercel|netlify|snowflake|databricks|openai|anthropic|nvidia|intel|amd|dell|hpe?|lenovo|cisco|vmware|broadcom|nutanix|red ?hat|openshift|equinix|digital realty|servicenow|salesforce|sap|stripe|paypal|visa|mastercard|elastic|algolia|datadog|splunk|pointfive|example)\b/i;
 
 describe.each(ids)('%s', (id) => {
   const d = committed(id);
@@ -64,10 +84,15 @@ describe.each(ids)('%s', (id) => {
     for (const required of ['BilledCost', 'EffectiveCost', 'BillingCurrency', 'ChargeCategory', 'ProviderName', 'ServiceName']) expect(col(d, required).every((v) => v !== ''), required).toBe(true);
   });
 
-  it('is clearly fictional and synthetic', () => {
+  it('is marked synthetic in its meta, and every name column holds an allowlisted fictional name', () => {
     expect(d.meta.synthetic).toBe(true);
-    for (const name of ['ProviderName', 'BillingAccountName', 'InvoiceIssuerName']) expect(col(d, name).every((v) => /Example/.test(v)), name).toBe(true);
-    expect(d.meta.name).toMatch(/^Example /);
+    for (const name of NAME_COLUMNS) {
+      for (const v of new Set(col(d, name))) expect(FICTIONAL_NAMES.has(v), `${name}=${v} is not in the fictional allowlist`).toBe(true);
+    }
+    for (const name of ID_COLUMNS) {
+      for (const v of new Set(col(d, name))) expect(v === '' || ID_SHAPE.test(v), `${name}=${v} is not a neutral id`).toBe(true);
+    }
+    expect(FICTIONAL_NAMES.has(d.meta.name) && FICTIONAL_NAMES.has(d.meta.provider)).toBe(true);
   });
 });
 
@@ -96,6 +121,22 @@ describe('across the three connections', () => {
   it('holds no credential-shaped strings', () => {
     const text = ids.map((id) => fs.readFileSync(path.join(DIR, `${id}.json`), 'utf8')).join('\n');
     expect(text).not.toMatch(/AKIA[0-9A-Z]{16}|-----BEGIN|api[_-]?key|secret|password|bearer\s/i);
+  });
+  it('holds no email address, IP address, URL, ARN, cloud resource path or key-shaped token', () => {
+    const text = ids.map((id) => fs.readFileSync(path.join(DIR, `${id}.json`), 'utf8')).join('\n');
+    expect(text).not.toMatch(/[\w.+-]+@[\w-]+\.[\w.]+/); // email
+    expect(text).not.toMatch(/\b\d{1,3}(\.\d{1,3}){3}\b/); // IPv4
+    expect(text).not.toMatch(/\b[0-9a-f]{1,4}(:[0-9a-f]{1,4}){7}\b/i); // IPv6
+    expect(text).not.toMatch(/https?:\/\/|www\./i); // URL
+    expect(text).not.toMatch(/\barn:|\/subscriptions\/|projects\/[\w-]+\/|\bgs:\/\/|\bs3:\/\//i); // ARN / Azure / GCP resource paths
+    expect(text).not.toMatch(/\b[A-Za-z0-9+/]{40,}={0,2}|\b(sk|pk|ghp|xox[abp])[-_][A-Za-z0-9]{16,}/); // long base64 / API-key-shaped tokens
+  });
+  it('names no real cloud, software or hardware brand (the API style column only names open API styles)', () => {
+    const d = ids.map(committed);
+    for (const ds of d) {
+      const values = [ds.meta.name, ds.meta.provider, ...NAME_COLUMNS.flatMap((c) => col(ds, c)), ...ID_COLUMNS.flatMap((c) => col(ds, c)), ...col(ds, 'ChargeDescription'), ...col(ds, 'Tags')];
+      for (const v of new Set(values)) expect(v, `${ds.meta.id}: ${v}`).not.toMatch(REAL_BRANDS);
+    }
   });
 });
 
@@ -165,9 +206,10 @@ describe.each(ids)('%s: strict FOCUS 1.0', (id) => {
       expect(d.meta.zeroBilledReason).toMatch(/true \$?0 billed|no vendor invoice/);
     }
   });
-  it('names itself as Example in every identifying meta field', () => {
-    expect(d.meta.name).toMatch(/^Example /);
-    expect(d.meta.provider).toMatch(/^Example /);
+  it('uses a category-style provider and a plain connection name in its identifying meta fields', () => {
+    expect(d.meta.provider).toBe({ public_cloud: 'Public cloud', private_cloud: 'Private cloud', on_premise: 'On-premises data center' }[d.meta.connectionType]);
+    expect(d.meta.name).toMatch(/^(Public cloud|Private cloud|On-premises) .*API$/);
+    expect(d.meta.name).not.toMatch(/example|synthetic|sample/i);
     expect(d.meta.billingPeriod).toBe('2026-09');
   });
 });

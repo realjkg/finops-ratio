@@ -33,13 +33,16 @@ afterEach(() => {
 });
 
 describe('finding card (lowest Value / cost first: Fraud Triage Agent)', () => {
-  it('shows the status line, modeled cost with its basis, Value / cost with its target, and one reason', () => {
+  it('shows the status line, modeled cost, Value / cost with its target, and one reason; the basis only inside View calculation', () => {
     expect(q('[data-testid="finding-status"]')?.textContent).toBe('Below target');
     expect(box.textContent).toContain('Estimated value'); // beside the number, once on the card
     expect(q('[data-testid="finding-value-cost"]')?.textContent).toBe('-0.2×');
     const text = box.textContent ?? '';
     expect(text).toContain('Modeled workload cost');
-    expect(text).toContain('Basis: demo assumption');
+    const cell = q('section[aria-label="Cost and value"]')?.textContent ?? '';
+    expect(cell).toContain('Modeled workload cost');
+    expect(cell).not.toMatch(/Basis|demo assumption|synthetic|sample/i);
+    expect(text).not.toMatch(/demo assumption|Synthetic|No live connection/);
     expect(text).not.toMatch(/Monthly run rate|Cost basis not stated/);
     expect(text).toContain('Target 3×');
     expect(text).toContain('Why this is below target');
@@ -92,7 +95,7 @@ describe('finding card (lowest Value / cost first: Fraud Triage Agent)', () => {
       at = i;
     }
     expect(t.split('Set in demo configuration').length - 1).toBe(1); // said once, not twice
-    for (const part of ['applied once, to gross value', 'neither is deducted twice', 'Basis: demo assumption', '30-day month convention', 'Period.', 'Value assumptions.', 'Target source. Set in demo configuration.', 'Break-even. 1×, where value equals cost', 'not a general financial standard', 'Set in demo configuration', 'not Billed cost or Effective cost']) {
+    for (const part of ['applied once, to gross value', 'neither is deducted twice', 'Basis: modeled', '30-day month convention', 'Period.', 'Value assumptions.', 'Target source. Set in demo configuration.', 'Break-even. 1×, where value equals cost', 'not a general financial standard', 'Set in demo configuration', 'not Billed cost or Effective cost']) {
       expect(t, part).toContain(part);
     }
   });

@@ -68,7 +68,7 @@ describe('FocusDoorWalk — render states', () => {
     expect(html).toContain('Export version (configure)');
     expect(html).toContain('v1.0');
     expect(html).toContain('v1.4');
-    expect(html).toContain('Ingest sample rows');
+    expect(html).toContain('Ingest rows');
     expect(html).toContain('Close door');
   });
 
@@ -80,7 +80,8 @@ describe('FocusDoorWalk — render states', () => {
 
     const html = renderToStaticMarkup(<FocusDoorWalk />);
     expect(html).toContain('Data landed');
-    expect(html).toContain('synthetic sample workspace data');
+    expect(html).toContain('offline sandbox');
+    expect(html).not.toMatch(/synthetic|sample/i);
     expect(html).toContain('Re-ingest');
     // The shim audit: a v1.1 export upgraded to the v1.4 canonical model.
     expect(html).toContain('v1.1');

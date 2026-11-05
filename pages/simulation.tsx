@@ -1,16 +1,20 @@
+import Head from 'next/head';
 import Link from 'next/link';
 import { useSimulationAccess } from '@/simulation/SimulationProvider';
 import { PERSONA_LABELS } from '@/simulation/types';
 import { SampleWorkspace } from '@/simulation/SampleWorkspace';
+import { SIMULATION_TITLE } from '@/simulation/sampleWorkspace';
 import { useStore } from '@/store/useStore';
 export default function SimulationSignIn() {
   const access = useSimulationAccess();
   const sim = useStore(s => s.simulation);
   const sample = !access?.loading && !access?.enabled;
+  // The route and the heading say "Simulation", so the page carries no Demo badge and no data label.
   return <main className="min-h-screen bg-void px-5 py-12 font-body text-txt"><div className="mx-auto max-w-4xl">
+    <Head><title>{SIMULATION_TITLE}</title></Head>
     <Link href="/demo" className="text-sm text-unit underline">Ratio demo</Link>
-    <p className="mt-8 text-xs uppercase tracking-widest text-unit">{sample ? 'Sample workspace' : 'Simulated customer accounts'}</p>
-    <h1 className="mt-3 text-3xl font-semibold">{sample ? 'See the same costs through three roles.' : 'Follow the cost from import to decision.'}</h1>
+    {!sample && <p className="mt-8 text-xs uppercase tracking-widest text-unit">Simulated customer accounts</p>}
+    <h1 className={`${sample ? 'mt-8' : 'mt-3'} text-3xl font-semibold`}>{sample ? 'Simulation: see the same costs through three roles' : 'Simulation: follow the cost from import to decision'}</h1>
     {!sample && <>
     <p className="mt-4 max-w-2xl text-sub">Choose a test identity. Each customer has its own saved workspace. Executive, Technical, and Procurement share the same costs, with different permissions. No password, personal account, or cloud credential is used.</p>
     <p className="mt-3 text-sm text-sub">The identity provider is simulated. Session cookies, expiry, sign-out, tenant separation, authorization, and saved changes run on the server. Sessions expire after one hour.</p>

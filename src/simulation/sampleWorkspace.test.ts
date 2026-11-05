@@ -23,3 +23,11 @@ describe('sample workspace view-models', () => {
     }
   });
 });
+
+describe('procurement prices are labeled honestly (review M2)', () => {
+  it('says the prices are illustrative, not a quote, because /simulation has no Demo badge', () => {
+    const v = sampleView('procurement');
+    expect(v.note).toBe('Illustrative prices, not a quote or a current published price list.');
+    expect(v.note).not.toMatch(/list rates|registry/);
+  });
+});

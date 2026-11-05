@@ -13,9 +13,10 @@ import { useRouter } from 'next/router';
 import { useStore } from '@/store/useStore';
 import Head from 'next/head';
 import { NavBar, NAV_ITEMS, pageTitle } from './NavBar';
+import { showsDemoBadge, type RatioMode } from '@/lib/demoMode';
 import { ChatPanel } from '@/components/ai/ChatPanel';
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, mode = 'demo' }: { children: ReactNode; mode?: RatioMode }) {
   const router = useRouter();
   // Active item derived from the route — never a hardcoded per-page prop.
   const active = NAV_ITEMS.find((item) => item.href === router.pathname)?.key;
@@ -26,7 +27,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex h-screen flex-col bg-void font-body text-txt">
       <Head><title>{pageTitle(router.pathname)}</title></Head>
-      <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} />
+      <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} demo={showsDemoBadge(router.pathname, mode)} />
       <SimulationBar />
       <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
       {/* Launcher lives in the top bar; the panel itself is opened from there. */}

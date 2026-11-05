@@ -11,9 +11,11 @@ for (const width of [390, 768, 1024, 1280, 1440]) {
     page.on('request', (r) => { if (!/\/_next\//.test(r.url())) requests.push(`${r.method()} ${new URL(r.url()).pathname}`); });
     const cards = page.getByRole('article');
     await expect(cards).toHaveCount(3);
-    await expect(page.getByText('Synthetic', { exact: true })).toHaveCount(3);
-    for (const name of ['Example Cloud billing API', 'Example Private Cloud usage API', 'Example Datacenter cost allocation API']) {
-      await page.getByRole('article', { name }).getByRole('button', { name: 'Import sample' }).click();
+    // No per-card data label: the top bar's Demo badge is the one demo indicator.
+    await expect(page.getByText(/synthetic|sample/i)).toHaveCount(0);
+    await expect(page.getByRole('note', { name: 'Demo environment — figures are illustrative' })).toBeVisible();
+    for (const name of ['Public cloud billing API', 'Private cloud usage API', 'On-premises cost allocation API']) {
+      await page.getByRole('article', { name }).getByRole('button', { name: 'Import', exact: true }).click();
       await expect(page.getByRole('article', { name }).getByRole('status')).toContainText('Reconciled');
     }
     // The totals render as a table from 640px up and as stacked rows below it: read the whole section either way.
@@ -36,7 +38,7 @@ for (const width of [390, 768, 1024, 1280, 1440]) {
       .filter((x) => x.over > 0));
     expect(spill).toEqual([]);
     // The N/A list is collapsed by default and, opened, stays compact.
-    const details = page.getByRole('article', { name: 'Example Private Cloud usage API' }).locator('details');
+    const details = page.getByRole('article', { name: 'Private cloud usage API' }).locator('details');
     await expect(details).not.toHaveAttribute('open', '');
     await details.locator('summary').click();
     const height = (await details.boundingBox())!.height;

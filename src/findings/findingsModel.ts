@@ -47,7 +47,7 @@ export interface FindingCalculation {
   periodNote: string | null;
   costSource: CostSource;
   costLabel: string;
-  /** "Basis: demo assumption" or "Basis: simulation postings". */
+  /** "Basis: modeled" or "Basis: simulation postings". */
   basis: string;
   /** Disclosed only where the cost is a modeled estimate scaled by days. */
   monthConvention: string | null;
@@ -201,7 +201,7 @@ export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEM
         gapToTarget: ratio !== null && ratio < VALUE_MINIMUM ? VALUE_MINIMUM - ratio : null,
         valueAssumptions:
           'Protected revenue, avoided cost, the quality-floor pass rate and harm from misses are stated assumptions, not measured results.',
-        source: source === 'modeled' ? 'Synthetic workload data in this workspace. No live connection.' : 'Postings recorded in this workspace.',
+        source: source === 'modeled' ? 'Demo dataset.' : 'Postings recorded in this workspace.',
       };
 
       return {

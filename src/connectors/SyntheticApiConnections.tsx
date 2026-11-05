@@ -1,6 +1,7 @@
-// The demo's three SIMULATED API connections (public cloud, private cloud, on-premise). Nothing here
-// connects to anything: "Import sample" loads a committed synthetic FOCUS 1.0 fixture in the browser
-// and reconciles it exactly. There is no field for a credential, endpoint or token.
+// The demo's three SIMULATED API connections (public cloud, private cloud, on-premises). Nothing here
+// connects to anything: "Import" loads a committed synthetic FOCUS 1.0 fixture in the browser and
+// reconciles it exactly. There is no field for a credential, endpoint or token. The cards carry no
+// "synthetic" label: the top bar's Demo badge says the whole environment is a demo.
 import { CONNECTIONS } from '@/demo/apiDatasets';
 import { formatMoney, groupNaColumns, totalsByCurrency, type Reconciled } from '@/demo/apiDatasets/reconcile';
 import { importedList, useSampleImports } from '@/demo/apiDatasets/store';
@@ -13,7 +14,7 @@ function Reconciliation({ r }: { r: Reconciled }) {
   return (
     <div className="mt-3 space-y-2 text-xs">
       <p role="status" className={r.matchesControl ? 'text-value' : 'text-cost'}>
-        {r.matchesControl ? 'Reconciled: rows, billed and effective match the fixture’s control totals.' : 'Mismatch with the fixture’s control totals.'}
+        {r.matchesControl ? 'Reconciled: rows, billed and effective match the dataset’s control totals.' : 'Mismatch with the dataset’s control totals.'}
       </p>
       <MoneyTable
         narrow
@@ -35,14 +36,14 @@ function Reconciliation({ r }: { r: Reconciled }) {
 }
 
 export function SyntheticApiConnections() {
-  const { imported, busy, error, importOne, remove } = useSampleImports();
+  const { imported, importedAt, busy, error, importOne, remove } = useSampleImports();
   const list = importedList(imported);
   const totals = totalsByCurrency(list);
   return (
     <section aria-labelledby="synthetic-connections-heading" className="mb-8">
-      <h2 id="synthetic-connections-heading" className="mb-1 text-xs font-semibold text-sub">Simulated API connections · Synthetic</h2>
+      <h2 id="synthetic-connections-heading" className="mb-1 text-xs font-semibold text-sub">API connections</h2>
       <p className="mb-3 max-w-3xl text-sm text-sub">
-        Three kinds of API connection with fictional data in FOCUS 1.0 form. Nothing connects: Import sample loads a bundled file from this site, makes no data request, and keeps nothing after you leave. Each connection has its own currency, and currencies are never added together.
+        Three kinds of API connection in FOCUS 1.0 form. Import loads a bundled file from this site: it makes no data request and keeps nothing after you leave. Each connection has its own currency, and currencies are never added together.
       </p>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {CONNECTIONS.map((c) => {
@@ -50,20 +51,21 @@ export function SyntheticApiConnections() {
           return (
             <article key={c.id} className="flex min-w-0 flex-col rounded-card border border-edge bg-slab p-4" aria-label={c.name}>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="rounded border border-unit/40 bg-unit/10 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-unit">Synthetic</span>
                 <span className="text-xs text-sub">{c.typeLabel}</span>
               </div>
               <h3 className="mt-2 break-words text-sm font-semibold text-txt">{c.name}</h3>
               <p className="mt-1 text-xs text-sub">{c.apiStyle}</p>
               <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-                <dt className="text-sub">Last import</dt><dd>{utc(c.lastImport)} (simulated)</dd>
+                {/* The dataset's own date; an import time appears only once this tab has imported it (review M3). */}
+                <dt className="text-sub">Dataset date</dt><dd>{utc(c.lastImport)}</dd>
+                {r && importedAt[c.id] && <><dt className="text-sub">Imported</dt><dd>{utc(importedAt[c.id])} (this tab)</dd></>}
                 <dt className="text-sub">Billing period</dt><dd>2026-09</dd>
                 <dt className="text-sub">Rows</dt><dd className="font-mono tabular-nums">{c.rowCount} ready</dd>
                 <dt className="text-sub">Currency</dt><dd className="font-mono">{c.currency}</dd>
               </dl>
               <div className="mt-3 flex flex-wrap gap-2">
                 <button type="button" disabled={busy[c.id]} onClick={() => void importOne(c.id)} className="rounded border border-gate px-3 py-1.5 text-xs text-gate disabled:opacity-60">
-                  {busy[c.id] ? 'Importing…' : r ? 'Import again' : 'Import sample'}
+                  {busy[c.id] ? 'Importing…' : r ? 'Import again' : 'Import'}
                 </button>
                 {r && <button type="button" onClick={() => remove(c.id)} className="rounded border border-edge px-3 py-1.5 text-xs text-sub">Remove</button>}
               </div>
@@ -77,7 +79,7 @@ export function SyntheticApiConnections() {
         <div className="mt-4 rounded-card border border-edge bg-slab p-3">
           <MoneyTable
             label="Imported totals by currency"
-            caption="Imported totals, one row per currency (synthetic)"
+            caption="Imported totals, one row per currency"
             headers={['Currency', 'Connections', 'Rows', 'Billed', 'Effective']}
             rows={totals.map((t) => [t.currency, String(t.connections), String(t.rows), formatMoney(t.billed, t.currency), formatMoney(t.effective, t.currency)])}
           />

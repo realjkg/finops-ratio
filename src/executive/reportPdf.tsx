@@ -20,6 +20,7 @@ import {
 import { formatRatio, formatUSD } from '@/lib/format';
 import { COST_CATEGORIES } from '@/outcomes/types';
 import { budgetCellText, budgetNaFootnotes, buildReportModel, type ReportModel, type ReportRow } from './reportModel';
+import { demoExportLine } from '@/lib/demoMode';
 
 // Design tokens (durable, exact) reused for the print surface.
 const TOKEN = {
@@ -132,7 +133,13 @@ function Cell({
   );
 }
 
-export function ReportDocument({ model }: { model: ReportModel }) {
+/**
+ * `demoLine` is the quiet demo marker for the footer (review M1): the badge wording in demo mode, null
+ * outside it, so a forwarded demo PDF never reads as a real report. Engagement reports use their own
+ * renderer (src/reports) and never carry it.
+ */
+export function ReportDocument({ model, demoLine = demoExportLine(process.env) }: { model: ReportModel; demoLine?: string | null }) {
+  const mark = demoLine ? `${demoLine} \u00b7 ` : '';
   const { summary } = model;
   const COLS = colsFor(model.costSource);
   return (
@@ -180,13 +187,13 @@ export function ReportDocument({ model }: { model: ReportModel }) {
           </View>
         ))}
 
-        <Text style={styles.subhead}>Projected savings exclude findings from sources whose role is unconfirmed (simulated).</Text>
+        <Text style={styles.subhead}>Projected savings exclude findings from sources whose role is unconfirmed.</Text>
         {budgetNaFootnotes(model.rows, model.costSource).map((note) => (
           <Text key={note} style={styles.subhead}>{note}</Text>
         ))}
 
         <Text style={styles.footer} fixed>
-          Generated from Ratio Mission Control · Confidential · {model.generatedAt}
+          {`${mark}Generated from Ratio Mission Control · Confidential · ${model.generatedAt}`}
         </Text>
       </Page>
       {model.outcomeReports && <Page size="A4" orientation="landscape" style={styles.page}>
@@ -198,7 +205,7 @@ export function ReportDocument({ model }: { model: ReportModel }) {
           <Text style={{ marginTop: 3 }}>Full cost: {result.totalCostCents === null ? 'Incomplete' : formatUSD(result.totalCostCents / 100)} · benefit: {formatUSD(result.measuredBenefitCents / 100)} · return: {result.measuredRatio === null ? 'Not established' : formatRatio(result.measuredRatio)} · reviews value {record.measures.filter(m => m.status === 'measured' && m.verified).length}/{record.measures.filter(m => m.status === 'measured').length}, cost {COST_CATEGORIES.filter(k => record.costs[k].status === 'measured' && record.costs[k].verified).length}/{COST_CATEGORIES.filter(k => record.costs[k].status === 'measured').length} · decision {decisionStale ? 'renew' : result.recommendation}</Text>
           <Text style={{ marginTop: 3 }}>Thresholds · stop below {record.thresholds.stopBelow}× · continue at {record.thresholds.continueAt}× · expand at {record.thresholds.expandAt}× with performance target met</Text>
         </View>)}
-        <Text style={styles.footer} fixed>Generated from saved outcome evidence · {model.generatedAt}</Text>
+        <Text style={styles.footer} fixed>{`${mark}Generated from saved outcome evidence · ${model.generatedAt}`}</Text>
       </Page>}
     </Document>
   );

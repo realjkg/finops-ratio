@@ -12,6 +12,7 @@ import { OFFLINE_SANDBOX_SOURCE_IDS } from '@/costsource/sandboxSources';
 import { sourcesForEnv } from '@/costsource/seed';
 import { useStore } from '@/store/useStore';
 import { ConnectorCard } from './ConnectorCard';
+import { displaySourceName } from '@/costsource/sourcePresentation';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -76,7 +77,7 @@ it('Simulate connect lands normalized fixture rows with zero network calls, even
 
 it('sandbox cards keep the plain Connect walk and no simulated chip', () => {
   for (const src of SOURCES.filter((s) => OFFLINE_SANDBOX_SOURCE_IDS.has(s.id))) {
-    const el = card(src.name);
+    const el = card(displaySourceName(src));
     expect(buttons(el)).toEqual(['Connect']);
     expect(el.textContent).not.toContain('simulated');
   }

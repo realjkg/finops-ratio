@@ -5,7 +5,10 @@
 //
 // `explain` turns the label into a button that opens a short explanation. It works by tap,
 // click or keyboard (Enter and Space; Escape or an outside tap closes), unlike a title
-// tooltip. The explanation is rendered in a portal with fixed placement clamped to the
+// tooltip. Escape closes it from anywhere except inside the Frank panel (#ai-chat-panel), whose
+// own Escape closes that panel. When open,
+// the button is described by the popup (aria-describedby) and a polite live region next to the
+// button announces the text, because the portaled popup is not next to the button in the DOM. The explanation is rendered in a portal with fixed placement clamped to the
 // viewport (lib/popupPlacement.ts), so a narrow phone or an overflow container never clips it.
 // On phones a pseudo-element extends the hit area to at least 44px tall without adding layout height
 // (a taller box would push neighbouring lines at large text sizes).
@@ -17,6 +20,9 @@ import { createPortal } from 'react-dom';
 import type { EvidenceStatus } from '@/types';
 import { EVIDENCE_META } from '@/lib/valueEvidence';
 import { placePopup, type Placement } from '@/lib/popupPlacement';
+
+/** The ChatPanel <aside> id (Frank): Escape pressed inside it is the panel's, not this popup's. */
+const AI_PANEL_ID = 'ai-chat-panel';
 
 export function EvidenceMark({
   status,
@@ -52,10 +58,12 @@ export function EvidenceMark({
       if (!button.current?.contains(t) && !note.current?.contains(t)) setOpen(false);
     };
     const key = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        setOpen(false);
-        button.current?.focus();
-      }
+      if (e.key !== 'Escape') return;
+      // Escape inside the Frank panel belongs to that panel; from anywhere else it closes this popup.
+      const t = e.target as Element | null;
+      if (t?.closest?.(`#${AI_PANEL_ID}`)) return;
+      setOpen(false);
+      button.current?.focus();
     };
     document.addEventListener('pointerdown', away);
     document.addEventListener('keydown', key);
@@ -90,10 +98,13 @@ export function EvidenceMark({
         style={style}
         aria-expanded={open}
         aria-controls={id}
+        aria-describedby={open ? id : undefined}
         onClick={() => setOpen((o) => !o)}
       >
         {meta.label}
       </button>
+      {/* Announces the explanation when it opens (polite: it does not interrupt). Empty when closed. */}
+      <span className="sr-only" aria-live="polite" data-testid="evidence-live">{open ? meta.title : ''}</span>
       {open &&
         createPortal(
           <span

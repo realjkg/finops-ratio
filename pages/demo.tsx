@@ -40,16 +40,15 @@ export default function Demo() {
               </h1>
               <p className="mt-2 max-w-2xl text-sm leading-6 text-sub">
                 This is a working FinOps environment built from business requirements, not a slideshow.
-                Inspect seeded AI workloads, compare spend to value, test governance and budget controls,
+                Inspect AI workloads, compare spend to value, test governance and budget controls,
                 and ask Frank Coster, the Ratio assistant, questions about the same dataset.
               </p>
             </div>
 
             <div className="rounded-md border border-edge bg-slab px-4 py-3 text-xs text-sub lg:max-w-sm">
-              <p className="font-mono text-[10px] uppercase tracking-wider text-dim">Demo data</p>
-              <p className="mt-1 leading-5">
-                Deterministic seed workloads are used so every visitor sees the same business scenario.
-                No cloud credentials or external API key are required.
+              <p className="font-mono text-[10px] uppercase tracking-wider text-dim">About this demo</p>
+              <p className="mt-1 leading-5" data-testid="demo-sentence">
+                This is a demo: the figures are illustrative, every visitor sees the same scenario, and no cloud credentials or API key are needed.
               </p>
             </div>
           </div>

@@ -97,7 +97,7 @@ export function IngestVerification({
         </span>
         {sandbox && (
           <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider text-sub">
-            synthetic sample workspace data
+            offline sandbox
           </span>
         )}
       </div>

@@ -30,21 +30,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('counts offline sandbox seeds as seeded and reports 0 live', () => {
+it('counts offline sandbox sources as offline and reports 0 live', () => {
   const text = container.textContent ?? '';
   expect(text).not.toMatch(/\d+\s*\/\s*\d+\s*live/i);
   for (const label of ['Public cloud', 'Private cloud', 'On-prem']) {
-    expect(text).toMatch(new RegExp(`${label} · \\d+ of \\d+ seeded · 0 live`));
+    expect(text).toMatch(new RegExp(`${label} · \\d+ of \\d+ offline · 0 live`));
   }
 });
 
-it('does not call the seeded sandbox section "Active"', () => {
+it('does not call the offline sandbox section "Active", and never labels its data seeded or synthetic', () => {
   expect(container.textContent).not.toMatch(/Active\s*—/);
-  expect(container.textContent).toContain('Offline sandbox — 6 seeded adapters, none live');
+  expect(container.textContent).toContain('Offline sandbox — 6 adapters, none live');
+  expect(container.textContent).not.toMatch(/seeded|synthetic|Static seed|Import sample/i);
 });
 
-it('links /costsource and states that only the Static seed is shown anonymously', () => {
+it('links /costsource and states that only the offline sandbox is shown anonymously', () => {
   const link = [...container.querySelectorAll('a')].find((a) => a.getAttribute('href') === '/costsource');
   expect(link?.textContent).toContain('AI spend vs total cloud spend');
-  expect(container.textContent).toContain('The Ingested path needs an authenticated connection; only the Static seed is shown here.');
+  expect(container.textContent).toContain('The Ingested path needs an authenticated connection; only the offline sandbox is shown here.');
 });

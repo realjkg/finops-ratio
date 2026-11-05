@@ -76,7 +76,8 @@ describe('over-budget values stay visible', () => {
 describe('PDF savings explanation', () => {
   it('says unconfirmed-role findings are excluded and shows the verified total', () => {
     const text = pdfText(<ReportDocument model={buildReportModel(FIXED)} />);
-    expect(text).toMatch(/exclude findings from sources whose role is unconfirmed/);
+    expect(text).toMatch(/exclude findings from sources whose role is unconfirmed\./);
+    expect(text).not.toMatch(/synthetic|sample|seeded|\(simulated\)/i);
     expect(text).toContain('$2,408');
   });
 });
@@ -110,5 +111,36 @@ describe('PDF KPI follows the cost source', () => {
     const text = pdfText(ReportDocument({ model: buildReportModel(FIXED, WORKLOADS) } as never));
     expect(text).toMatch(/Modeled workload cost\|\$[\d,]+\/mo/);
     expect(text).not.toContain('Recorded cost to date');
+  });
+});
+
+describe('report with a workload whose Value / cost is N/A (#177 review)', () => {
+  const zero = buildReportModel(FIXED, [{ ...first, costs: { ...first.costs, monthly_spend: 0 } }, ...rest]);
+  const row = zero.rows.find((r) => r.name === first.name)!;
+
+  it('carries null, never 0, in the model', () => {
+    expect(row.costEfficiency).toBeNull();
+  });
+
+  it('writes the XLSX Value / cost cell as the text N/A, never 0', async () => {
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load((await buildReportWorkbook(FIXED, zero)) as unknown as ArrayBuffer);
+    const sheet = book.getWorksheet('Initiatives')!;
+    const r = sheet.getColumn(1).values.findIndex((v) => v === first.name);
+    expect(r).toBeGreaterThan(1);
+    const cell = sheet.getCell(r, 6).value;
+    expect(cell).toBe('N/A');
+    expect(cell).not.toBe(0);
+    // Every other row still carries a number.
+    for (let i = 2; i <= sheet.rowCount; i++) if (i !== r) expect(typeof sheet.getCell(i, 6).value, `row ${i}`).toBe('number');
+  });
+
+  it('prints N/A in the PDF Value / cost cell, never 0.0×', () => {
+    const text = pdfText(<ReportDocument model={zero} />);
+    const at = text.indexOf(`|${first.name}|`);
+    expect(at).toBeGreaterThanOrEqual(0);
+    const cells = text.slice(at + 1).split('|').slice(0, 8);
+    expect(cells).toContain('N/A');
+    expect(cells.join('|')).not.toMatch(/(^|\|)0(\.0+)?×(\||$)/);
   });
 });

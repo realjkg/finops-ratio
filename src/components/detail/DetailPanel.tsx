@@ -96,7 +96,7 @@ export function DetailPanel() {
       </div>
 
       <div id="detail-tabpanel" role="tabpanel" aria-labelledby={`detail-tab-${activeTab}`} className="flex-1 space-y-5 px-4 py-4 sm:px-6 sm:py-5 md:overflow-y-auto">
-        {simulation && <p className="text-xs text-sub">These operating metrics use seeded value assumptions. <button className="text-unit underline" onClick={() => setTab('outcomes')}>Review measured outcomes and full cost</button></p>}
+        {simulation && <p className="text-xs text-sub">These operating metrics use assumed value inputs. <button className="text-unit underline" onClick={() => setTab('outcomes')}>Review measured outcomes and full cost</button></p>}
         <KpiCards workload={workload} />
         {activeTab === 'budget' && (
           <BudgetProfileTab workload={workload} budget={budget} now={now} />

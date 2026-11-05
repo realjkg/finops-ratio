@@ -107,7 +107,7 @@ const CASES: Case[] = [
   { name: '22 alerts for Fraud Triage Agent', turns: ['What alerts exist for Fraud Triage Agent?'],
     has: alertsOf('wl-fraud').map((a) => a.message) },
   { name: '23 outcome evidence is not measured', turns: ['Is there outcome evidence for Code Review Bot?'],
-    has: ['**Outcome evidence — Code Review Bot**', 'no measured outcome evidence', 'assumed', 'simulated'] },
+    has: ['**Outcome evidence — Code Review Bot**', 'no measured outcome evidence', 'assumed', 'outcome records is marked assumed', 'not established'] },
   // ---- model ----
   { name: '24 ROI of gpt-4o', turns: ['What is the ROI of gpt-4o?'],
     has: ['**ROI — gpt-4o (model)**', usd(GPT4O.spend), usd(GPT4O.value), x1(GPT4O.ratio), EVID, 'Sales Copilot', 'Marketing Content Gen', 'Pipeline Forecast Analyst'] },
@@ -146,7 +146,7 @@ const CASES: Case[] = [
   { name: '39 unsupported question', turns: ['What will our spend be next quarter?'],
     has: [UNSUPPORTED, 'Closest questions I can answer'], not: ["I'm Frank Coster"] },
   { name: '40 capability ladder', turns: ['What can you answer, and how deep can you go for each team?'],
-    has: ['**What I can answer**', 'deterministic mock', 'no LLM', 'synthetic sample workspace data', 'portfolio', 'team', 'workload', 'model', 'alerts'] },
+    has: ['**What I can answer**', 'deterministic mock', 'no LLM', 'demo dataset', 'portfolio', 'team', 'workload', 'model', 'alerts'] },
 ];
 
 describe('proof-question matrix (oracle computed from the seed)', () => {
