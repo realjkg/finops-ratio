@@ -5,6 +5,8 @@ import type { Reconciled } from './reconcile';
 
 interface SampleImports {
   imported: Record<string, Reconciled>;
+  /** When each connection was imported in this tab (ISO, from the browser clock): distinct from the dataset date. */
+  importedAt: Record<string, string>;
   busy: Record<string, boolean>;
   error: string | null;
   importOne: (id: string) => Promise<void>;
@@ -13,13 +15,13 @@ interface SampleImports {
 }
 
 export const useSampleImports = create<SampleImports>((set, get) => ({
-  imported: {}, busy: {}, error: null,
+  imported: {}, importedAt: {}, busy: {}, error: null,
   async importOne(id) {
     if (get().busy[id]) return;
     set((s) => ({ busy: { ...s.busy, [id]: true }, error: null }));
     try {
       const result = await importSample(id);
-      set((s) => ({ imported: { ...s.imported, [id]: result } }));
+      set((s) => ({ imported: { ...s.imported, [id]: result }, importedAt: { ...s.importedAt, [id]: new Date().toISOString() } }));
     } catch {
       set({ error: 'The sample could not be loaded. Try again.' });
     } finally {
@@ -32,8 +34,10 @@ export const useSampleImports = create<SampleImports>((set, get) => ({
   remove(id) {
     set((s) => {
       const imported = { ...s.imported };
+      const importedAt = { ...s.importedAt };
       delete imported[id];
-      return { imported };
+      delete importedAt[id];
+      return { imported, importedAt };
     });
   },
 }));

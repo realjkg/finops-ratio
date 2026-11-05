@@ -17,7 +17,7 @@ const card = (name: string) => box.querySelector(`article[aria-label="${name}"]`
 const settle = async () => { for (let i = 0; i < 100 && Object.values(useSampleImports.getState().busy).some(Boolean); i++) await new Promise((r) => setTimeout(r, 20)); };
 const click = async (el: HTMLElement) => { await act(async () => { el.click(); await new Promise((r) => setTimeout(r, 0)); await settle(); }); };
 
-beforeEach(() => { useSampleImports.setState({ imported: {}, busy: {}, error: null }); localStorage.clear(); sessionStorage.clear(); });
+beforeEach(() => { useSampleImports.setState({ imported: {}, importedAt: {}, busy: {}, error: null }); localStorage.clear(); sessionStorage.clear(); });
 afterEach(() => { act(() => root.unmount()); box.remove(); vi.unstubAllGlobals(); });
 
 describe('SyntheticApiConnections', () => {
@@ -28,7 +28,9 @@ describe('SyntheticApiConnections', () => {
     expect(box.textContent).toMatch(/Public cloud API/);
     expect(box.textContent).toMatch(/Private cloud API/);
     expect(box.textContent).toMatch(/On-premises API/);
-    expect(box.textContent).toMatch(/Last import2026-10-30 06:00 UTC/);
+    // Before any import the card states the dataset's own date, never a 'Last import' that did not happen (review M3).
+    expect(box.textContent).toMatch(/Dataset date2026-10-30 06:00 UTC/);
+    expect(box.textContent).not.toMatch(/Last import|Imported/);
     expect(box.querySelectorAll('input, textarea, select')).toHaveLength(0);
     expect(box.querySelector('table')).toBeNull();
   });
@@ -53,6 +55,10 @@ describe('SyntheticApiConnections', () => {
     expect(na.textContent).not.toMatch(/ListCost/);
     expect(na.textContent).not.toMatch(/of 109/);
     expect(card('Public cloud billing API').querySelector('table')).toBeNull(); // others untouched
+    // After the import the card shows when it was imported in this tab, apart from the dataset date.
+    expect(priv.textContent).toMatch(/Dataset date2026-10-30 06:20 UTC/);
+    expect(priv.textContent).toMatch(/Imported\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC \(this tab\)/);
+    expect(card('Public cloud billing API').textContent).not.toMatch(/Imported/);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect([localStorage.length, sessionStorage.length]).toEqual([0, 0]);
   });

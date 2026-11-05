@@ -64,7 +64,7 @@ describe('/simulation with server simulation disabled', () => {
   it('uses the imported API connections in each persona view, still with no data request', async () => {
     const fetchSpy = vi.fn(() => { throw new Error('no network in the sample'); });
     vi.stubGlobal('fetch', fetchSpy);
-    useSampleImports.setState({ imported: {}, busy: {}, error: null });
+    useSampleImports.setState({ imported: {}, importedAt: {}, busy: {}, error: null });
     access.current = { ...base, enabled: false };
     mount();
     click(buttons()[0]);

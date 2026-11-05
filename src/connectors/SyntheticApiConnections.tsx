@@ -36,7 +36,7 @@ function Reconciliation({ r }: { r: Reconciled }) {
 }
 
 export function SyntheticApiConnections() {
-  const { imported, busy, error, importOne, remove } = useSampleImports();
+  const { imported, importedAt, busy, error, importOne, remove } = useSampleImports();
   const list = importedList(imported);
   const totals = totalsByCurrency(list);
   return (
@@ -56,7 +56,9 @@ export function SyntheticApiConnections() {
               <h3 className="mt-2 break-words text-sm font-semibold text-txt">{c.name}</h3>
               <p className="mt-1 text-xs text-sub">{c.apiStyle}</p>
               <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
-                <dt className="text-sub">Last import</dt><dd>{utc(c.lastImport)}</dd>
+                {/* The dataset's own date; an import time appears only once this tab has imported it (review M3). */}
+                <dt className="text-sub">Dataset date</dt><dd>{utc(c.lastImport)}</dd>
+                {r && importedAt[c.id] && <><dt className="text-sub">Imported</dt><dd>{utc(importedAt[c.id])} (this tab)</dd></>}
                 <dt className="text-sub">Billing period</dt><dd>2026-09</dd>
                 <dt className="text-sub">Rows</dt><dd className="font-mono tabular-nums">{c.rowCount} ready</dd>
                 <dt className="text-sub">Currency</dt><dd className="font-mono">{c.currency}</dd>
