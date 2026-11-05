@@ -5,8 +5,8 @@
 //
 // `explain` turns the label into a button that opens a short explanation. It works by tap,
 // click or keyboard (Enter and Space; Escape or an outside tap closes), unlike a title
-// tooltip. Escape closes it only when focus is on the button or in the popup (or nowhere in
-// particular), so Escape pressed inside another panel (Frank) is left to that panel. When open,
+// tooltip. Escape closes it from anywhere except inside the Frank panel (#ai-chat-panel), whose
+// own Escape closes that panel. When open,
 // the button is described by the popup (aria-describedby) and a polite live region next to the
 // button announces the text, because the portaled popup is not next to the button in the DOM. The explanation is rendered in a portal with fixed placement clamped to the
 // viewport (lib/popupPlacement.ts), so a narrow phone or an overflow container never clips it.
@@ -20,6 +20,9 @@ import { createPortal } from 'react-dom';
 import type { EvidenceStatus } from '@/types';
 import { EVIDENCE_META } from '@/lib/valueEvidence';
 import { placePopup, type Placement } from '@/lib/popupPlacement';
+
+/** The ChatPanel <aside> id (Frank): Escape pressed inside it is the panel's, not this popup's. */
+const AI_PANEL_ID = 'ai-chat-panel';
 
 export function EvidenceMark({
   status,
@@ -56,9 +59,9 @@ export function EvidenceMark({
     };
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      const t = e.target as Node | null;
-      const mine = !t || t === document.body || t === document.documentElement || button.current?.contains(t) || note.current?.contains(t);
-      if (!mine) return; // e.g. Escape inside the Frank panel closes that panel, not this popup
+      // Escape inside the Frank panel belongs to that panel; from anywhere else it closes this popup.
+      const t = e.target as Element | null;
+      if (t?.closest?.(`#${AI_PANEL_ID}`)) return;
       setOpen(false);
       button.current?.focus();
     };

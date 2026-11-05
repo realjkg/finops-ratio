@@ -72,30 +72,36 @@ describe('EvidenceMark', () => {
     expect(btn.hasAttribute('aria-describedby')).toBe(false);
   });
 
-  it('explain: Escape pressed in another panel (Frank) does not close it; on the button or the page it does', () => {
-    const other = document.createElement('input');
-    document.body.appendChild(other);
+  it('explain: Escape inside the Frank panel leaves it open; from any other control, the popup or the page it closes', () => {
+    const frank = document.createElement('aside');
+    frank.id = 'ai-chat-panel';
+    const frankInput = document.createElement('input');
+    frank.appendChild(frankInput);
+    const other = document.createElement('button');
+    document.body.append(frank, other);
+    const esc = (el: Element) => act(() => { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    const open = () => document.querySelector('[role="note"]') !== null;
     try {
       mount(<EvidenceMark status="assumed" explain />);
       const btn = box.querySelector('button')!;
       act(() => btn.click());
+      frankInput.focus();
+      esc(frankInput);
+      expect(open()).toBe(true); // Frank handles its own Escape
+      expect(document.activeElement).toBe(frankInput); // focus is not pulled out of the panel
+      // Review Low (a): opened from the keyboard, then Tab to another page control, then Escape: it closes.
       other.focus();
-      act(() => {
-        other.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      });
-      expect(document.querySelector('[role="note"]')).not.toBeNull();
-      expect(document.activeElement).toBe(other); // focus is not pulled out of the other panel
-      act(() => {
-        document.querySelector('[role="note"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      });
-      expect(document.querySelector('[role="note"]')).toBeNull();
+      esc(other);
+      expect(open()).toBe(false);
+      act(() => btn.click());
+      esc(document.querySelector('[role="note"]')!);
+      expect(open()).toBe(false);
       expect(document.activeElement).toBe(btn);
       act(() => btn.click());
-      act(() => {
-        document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      });
-      expect(document.querySelector('[role="note"]')).toBeNull();
+      esc(document.body);
+      expect(open()).toBe(false);
     } finally {
+      frank.remove();
       other.remove();
     }
   });

@@ -155,4 +155,14 @@ test('Estimated value: opening it describes the button and announces the text; E
   await expect(note).toHaveCount(0);
   await expect(mark).toBeFocused();
   await expect(page.getByTestId('evidence-live').first()).toHaveText('');
+  // Review Low (a): opened from the keyboard, Tab twice to another page control, then Escape still closes it.
+  await page.keyboard.press('Escape'); // close Frank if it is still open
+  await mark.focus();
+  await page.keyboard.press('Enter');
+  await expect(note).toBeVisible();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  expect(await page.evaluate(() => document.activeElement?.closest('#ai-chat-panel') === null)).toBe(true);
+  await page.keyboard.press('Escape');
+  await expect(note).toHaveCount(0);
 });
