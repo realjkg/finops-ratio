@@ -1,6 +1,7 @@
 // Table-driven tests for the pure policy evaluation library (ADR-0001 slice C1, §3.2 steps 2-3 and 6, §3.3).
 import { describe, expect, it } from 'vitest';
-import { validatePolicyDecision, type PolicyCondition, type PolicyDecision } from '../contracts';
+import { validatePolicyDecision, type Entitlement, type Policy, type PolicyBundle, type PolicyCondition, type PolicyDecision } from '../contracts';
+import type { RequestContext } from './context';
 import { evaluate, failureEvaluation, type Evaluation } from './evaluate';
 import { bundle, card, ctx, ent, HUMAN, input, NOW, pol, rule, ticking } from './testing/fixtures';
 
@@ -22,7 +23,9 @@ describe('decisions per rule action (pre_request, enforce)', () => {
     ['block', 'block', 'hard'], ['redact', 'redact', 'hard'], ['require_approval', 'require_approval', 'hard'], ['allow', 'allow', 'log_only'], ['log_only', 'allow', 'log_only'],
   ] as const)('a matched %s rule yields %s (%s control)', (action, outcome, controlClass) => {
     const e = valid(evaluate(input({ bundle: bundle({ policies: [pol({ rules: [rule({ action })] })] }), context: ctx({ findings: [card()] }) })));
-    expect(e.decisions[1]).toMatchObject({ outcome, controlClass, ruleIds: ['r-cards'], reasonCodes: ['DLP_PAYMENT_CARD'], findings: [card()] });
+    // A log-only rule does not act, so the policy default is recorded too.
+    const reasonCodes = action === 'log_only' ? ['DLP_PAYMENT_CARD', 'DEFAULT_ALLOW'] : ['DLP_PAYMENT_CARD'];
+    expect(e.decisions[1]).toMatchObject({ outcome, controlClass, ruleIds: ['r-cards'], reasonCodes, findings: [card()] });
     expect(e.verdict).toBe(outcome);
   });
   it('the most severe matched rule wins over an allow exception; a default block applies when nothing acts', () => {
@@ -56,7 +59,7 @@ describe('scope and effective dates', () => {
   it.each([
     ['another workload', {}, ctx({ workloadId: 'wl-other' })], ['no workload', {}, ctx({ workloadId: undefined })], ['another phase', { phase: 'pre_response', release: 'buffer_full' }, ctx()],
     ['another provider scope', { scope: { providers: ['provider-b'] } }, ctx()], ['not yet effective', { effectiveFrom: '2026-10-03' }, ctx()], ['no longer effective', { effectiveTo: '2026-10-02' }, ctx()],
-  ] as const)('a policy for %s does not apply', (_n, over, context) => {
+  ] as [string, Partial<Policy>, RequestContext][])('a policy for %s does not apply', (_n, over, context) => {
     const e = valid(evaluate(input({ bundle: bundle({ policies: [pol({ ...over, defaultAction: 'block' })] }), context })));
     expect(e.decisions).toHaveLength(1);
   });
@@ -79,8 +82,8 @@ describe('entitlements (cap 8): deny wins, the served model is re-checked', () =
     ['a served-model fallback', [ent()], { modelServed: 'model-y' }, { outcome: 'block', ruleIds: [], reasonCodes: ['SERVED_MODEL_NOT_GRANTED'] }],
     ['a denied served model', [ent(), ent({ entitlementId: 'ent-no-y', models: ['model-y'], effect: 'deny' })], { modelServed: 'model-y' }, { outcome: 'block', ruleIds: ['ent-no-y'], reasonCodes: ['SERVED_MODEL_DENIED'] }],
     ['an entitled fallback', [ent({ models: ['model-x', 'model-y'] })], { modelServed: 'model-y' }, { outcome: 'allow', ruleIds: ['ent-wl'], reasonCodes: ['ENTITLED'] }],
-  ] as const)('%s', (_n, entitlements, over, expected) => {
-    const e = valid(evaluate(input({ bundle: bundle({ entitlements: [...entitlements], policies: [] }), context: ctx(over) })));
+  ] as [string, Entitlement[], Partial<RequestContext>, { outcome: PolicyDecision['outcome']; ruleIds: string[]; reasonCodes: string[] }][])('%s', (_n, entitlements, over, expected) => {
+    const e = valid(evaluate(input({ bundle: bundle({ entitlements, policies: [] }), context: ctx(over) })));
     expect(access(e)).toEqual({ ...expected, enforced: true });
     expect(e.verdict).toBe(expected.outcome);
   });
@@ -128,7 +131,7 @@ describe('the failure table (ADR-0001 §3.3)', () => {
   it.each([
     ['expired', { notAfter: '2026-10-02T12:00:00Z' }, 'policy_expired', 'BUNDLE_EXPIRED'], ['not yet valid', { issuedAt: '2026-10-02T12:00:01Z' }, 'policy_invalid', 'BUNDLE_NOT_YET_VALID'],
     ['of another tenant', { tenantId: 'tenant-other', policies: [], entitlements: [] }, 'policy_invalid', 'BUNDLE_TENANT_MISMATCH'],
-  ] as const)('a bundle that is %s denies every decision', (_n, over, failure, code) => {
+  ] as [string, Partial<PolicyBundle>, PolicyDecision['failure'], string][])('a bundle that is %s denies every decision', (_n, over, failure, code) => {
     const e = valid(evaluate(input({ bundle: bundle(over) })));
     expect({ verdict: e.verdict, source: e.source }).toEqual({ verdict: 'block', source: 'none' });
     for (const d of e.decisions) expect(view(d)).toEqual({ outcome: 'block', enforced: true, ruleIds: [], reasonCodes: [code], failure, handling: 'denied' });

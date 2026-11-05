@@ -46,7 +46,7 @@ function policy(r: R, i: number): Policy {
   const phase = pick(r, ['pre_request', 'pre_response', 'stream_chunk'] as const);
   const strict = mode === 'enforce' && hard;
   const fail = () => (strict ? 'deny' : pick(r, ['deny', 'continue_with_gap'] as const));
-  const release = phase === 'pre_request' ? undefined : strict ? pick(r, ['buffer_full', 'buffer_window'] as const) : pick(r, ['buffer_full', 'buffer_window', 'pass_through', undefined]);
+  const release: Policy['release'] = phase === 'pre_request' ? undefined : strict ? pick(r, ['buffer_full', 'buffer_window'] as const) : pick(r, ['buffer_full', 'buffer_window', 'pass_through', undefined] as const);
   const scope = { ...(chance(r, 0.4) ? { workloadIds: some(r, WORKLOADS, 1) } : {}), ...(chance(r, 0.3) ? { providers: some(r, PROVIDERS, 1) } : {}) };
   return pol({ policyId: `pol-${i}`, scope, phase, mode, rules, defaultAction, evaluationTimeoutMs: 1 + Math.floor(r() * 100), onTimeout: fail(), onEngineError: fail(), ...(release ? { release } : {}) });
 }

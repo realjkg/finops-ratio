@@ -1,0 +1,108 @@
+GREEN evidence, platform slice C1 (pure policy evaluation library, ADR-0001 §13). Same tests as red.txt, implementation added.
+Test edits after RED (reviewed, no assertion weakened): (1) the log-only row of the per-action table now also expects DEFAULT_ALLOW,
+because a log-only rule does not act and the policy default is recorded; (2) table rows typed for tsc (no behavior change).
+
+Command: npx vitest run src/platform/policy --cache=false --reporter=verbose
+  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > allows a clean request and records the default
+  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched block rule yields block (hard control)
+  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched redact rule yields redact (hard control)
+  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched require_approval rule yields require_approval (hard control)
+  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched allow rule yields allow (log_only control)
+  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > a matched log_only rule yields allow (log_only control)
+  ✓ src/platform/policy/evaluate.test.ts > decisions per rule action (pre_request, enforce) > the most severe matched rule wins over an allow exception; a default bl...
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"destination","providers":["provider-a"],"match":"in"} with {} holds: true
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"destination","providers":["provider-a"],"match":"not_in"} with {} holds: false
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"destination","providers":["provider-a"],"match":"not_in"} with {"destination":"provider-a-batch"} ho...
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"model","models":["model-x"],"match":"in"} with {} holds: true
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"model","models":["model-x"],"match":"not_in"} with {} holds: false
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"model","models":["model-x"],"match":"not_in"} with {"modelServed":"model-y"} holds: true
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["shell"],"match":"in"} with {"tools":["search","shell"]} holds: true
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["shell"],"match":"in"} with {} holds: false
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["search"],"match":"not_in"} with {"tools":["search","shell"]} holds: true
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"tool","tools":["search"],"match":"not_in"} with {"tools":["search"]} holds: false
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"input_bytes_over","limit":512} with {} holds: false
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"input_bytes_over","limit":511} with {} holds: true
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"signal","signal":"prompt-injection","minConfidence":"medium"} with {"signals":[{"signal":"prompt-inj...
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"signal","signal":"prompt-injection","minConfidence":"medium"} with {"signals":[{"signal":"prompt-inj...
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"dlp_category","categories":["payment_card"],"minConfidence":"medium"} with {"findings":[{"category":...
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"dlp_category","categories":["payment_card"],"minConfidence":"high"} with {"findings":[{"category":"p...
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"dlp_category","categories":["us_ssn"],"minConfidence":"low"} with {"findings":[{"category":"payment_...
+  ✓ src/platform/policy/evaluate.test.ts > conditions > {"kind":"always"} with {} holds: true
+  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for another workload does not apply
+  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for no workload does not apply
+  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for another phase does not apply
+  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for another provider scope does not apply
+  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for not yet effective does not apply
+  ✓ src/platform/policy/evaluate.test.ts > scope and effective dates > a policy for no longer effective does not apply
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > no grant
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > allow and deny
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > deny before allow
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > another provider
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > an expired grant
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a wildcard grant
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a tenant grant
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a team grant
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a user grant
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a user grant for a service
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a service grant
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a served-model fallback
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > a denied served model
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > an entitled fallback
+  ✓ src/platform/policy/evaluate.test.ts > entitlements (cap 8): deny wins, the served model is re-checked > re-checks the served model before release, and records a...
+  ✓ src/platform/policy/evaluate.test.ts > monitor vs enforce > a monitor decision records what enforcement would do and never changes the verdict
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > required DLP unavailable denies a policy with a DLP condition; entitlements unavailab...
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > timeout: enforcing policies deny; a monitor policy configured to continue does so wit...
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > engine_error: enforcing policies deny; a monitor policy configured to continue does s...
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a policy that overran its own timeout (measured with the injected clock) is a timeout...
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > an engine error inside evaluation (a throwing clock) fails closed
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a bundle that is expired denies every decision
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a bundle that is not yet valid denies every decision
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > a bundle that is of another tenant denies every decision
+  ✓ src/platform/policy/evaluate.test.ts > the failure table (ADR-0001 §3.3) > an unreadable bundle is one enforced, denied decision under a placeholder id
+  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is used and recorded on every decision
+  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is refused when not approved
+  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is refused when itself expired
+  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is refused when of another tenant
+  ✓ src/platform/policy/evaluate.test.ts > last-known-good (approved, within its own validity, same tenant) > is never used for a valid bundle
+  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses a content key: block, no decision, no echoed value
+  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses a bad clock: block, no decision, no echoed value
+  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses an email as actor: block, no decision, no echoed value
+  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > refuses a bad finding: block, no decision, no echoed value
+  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > the generator only produces contract-valid bundles (so t...
+  ✓ src/platform/policy/boundary.test.ts > policy library boundary > has exactly these modules, importing only each other and the contracts
+  ✓ src/platform/policy/boundary.test.ts > policy library boundary > reads no clock, randomness, environment, network or file, and runs no dynamic code
+  ✓ src/platform/policy/boundary.test.ts > policy library boundary > the worker typecheck covers the library, and the fixtures are labeled SYNTHETIC
+  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > is deterministic: the same input gives an identical resu...
+  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > every decision passes validatePolicyDecision; the verdic...
+  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > deny wins: a matching deny entitlement always blocks access
+  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > never allows on error in enforce mode: every failed hard...
+  ✓ src/platform/policy/properties.test.ts > policy evaluation properties over 400 seeded random scenarios > random junk as input never throws and never allows
+ Test Files  3 passed (3)
+      Tests  74 passed (74)
+
+Gates on the implementation tree (Linux container, Node v22.23.4):
+  npm run lint: exit 0 | npx tsc --noEmit: exit 0 | npx tsc -p tsconfig.worker.json --noEmit: exit 0
+  npx vitest run --cache=false: exit 0, Test Files  312 passed (312), Tests  5251 passed (5251)
+  npm run build: exit 0 | npm run check:bundle: exit 0, {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]} | git diff --check: clean
+
+Mutation check (one mutation at a time, npx vitest run src/platform/policy; KILLED = a test failed):
+  M1  KILLED   deny-wins removed (an allow grant overrides a deny)  <- allow and deny
+  M2  KILLED   served-model re-check removed  <- a served-model fallback
+  M3  KILLED   last-known-good used without approval  <- is refused when not approved
+  M4  KILLED   last-known-good used outside its own validity  <- is refused when itself expired
+  M5  KILLED   monitor treated as enforce in the verdict  <- re-checks the served model before release, and records a monitor-mode violation without bl
+  M6  KILLED   fail-open on a measured timeout  <- a policy that overran its own timeout (measured with the injected clock) is a timeout, and
+  M7  KILLED   policy failures always continue with a gap (fail-open)  <- timeout: enforcing policies deny; a monitor policy configured to continue does so with a v
+  M8  KILLED   engine error inside evaluation allows  <- an engine error inside evaluation (a throwing clock) fails closed
+  M9  KILLED   expired bundle accepted  <- a bundle that is expired denies every decision
+  M10 KILLED   other-tenant bundle accepted  <- a bundle that is of another tenant denies every decision
+  M11 KILLED   first matched rule wins instead of the most severe  <- the most severe matched rule wins over an allow exception; a default block applies when no
+  M12 KILLED   required DLP unavailable ignored  <- required DLP unavailable denies a policy with a DLP condition; entitlements unavailable de
+  M13 KILLED   entitlements unavailable ignored  <- required DLP unavailable denies a policy with a DLP condition; entitlements unavailable de
+  M14 KILLED   minimum confidence off by one (>= to >)  <- a matched block rule yields block (hard control)
+  M15 KILLED   workload scope ignored  <- a policy for another workload does not apply
+  M16 KILLED   entitlement effective dates ignored  <- an expired grant
+  M17 KILLED   redact classed as log-only control  <- a matched redact rule yields redact (hard control)
+  M18 KILLED   unreadable bundle decided in the access mode (monitor fails open)  <- an unreadable bundle is one enforced, denied decision under a placeholder id
+  M19 KILLED   content key accepted in the request context  <- refuses a content key: block, no decision, no echoed value
+  19/19 killed
