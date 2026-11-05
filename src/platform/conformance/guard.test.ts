@@ -23,7 +23,8 @@ describe('conformance mocks are test-only', () => {
   });
   it('the text scan catches every import form: relative, @/ alias, bare baseUrl, template-literal and dynamic imports, require', () => {
     for (const planted of ["import { x } from '../platform/conformance/mockGateway';", "import x from '@/platform/conformance/mockProviders';", "import x from 'src/platform/conformance/mockGateway';",
-      'const m = await import(`./platform/${"conformance"}/mockGateway`);', "const m = await import(`../platform/conformance/${name}`);", "require('./platform/conformance/mockProviders')"]) {
+      'const m = await import(`./platform/${"conformance"}/mockGateway`);', "const m = await import(`../platform/conformance/${name}`);", "require('./platform/conformance/mockProviders')",
+      "import('./platform/con' + 'formance/mockGateway')", 'import(`../platform/` + `conformance` + `/mockProviders`)', "import('../platform/conformance/./mockProviders')", "import('../x/../platform/conformance//mockGateway')"]) {
       expect(mentionsMocks(planted), planted).toBe(true);
     }
     expect(mentionsMocks("import { evaluate } from '../platform/policy';")).toBe(false);

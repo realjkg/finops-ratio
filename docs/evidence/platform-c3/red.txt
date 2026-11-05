@@ -43,3 +43,26 @@ Command: npx vitest run src/platform/conformance --cache=false
 ⎯⎯⎯⎯⎯⎯ Failed Tests 27 ⎯⎯⎯⎯⎯⎯⎯
  Test Files  3 failed (3)
       Tests  27 failed | 47 passed (74)
+
+REVIEW ROUND 2 (challenger review of #184 at 87ee647: M1-M3, L1-L6). Tests committed before the fixes, on ba18bf4 (merge of #183 551e580 incl. main; gateway passes the required D7 flags, no behavior change).
+Test helper: testing/seeded.ts reports EVERY occurrence of each marker (L3); conformance and review tests use it (all still pass at ba18bf4).
+Command: npx vitest run src/platform/conformance --cache=false
+     × a marker as a JSON key in tool arguments is blocked before dispatch
+     × a marker as a top-level key is blocked before dispatch
+     × a marker as a metadata key is blocked before dispatch
+     × a PAN as a JSON number in tool arguments is blocked before dispatch
+     × a PAN as a JSON number in metadata is blocked before dispatch
+     × a 19-digit PAN number (beyond float precision) in metadata is blocked before dispatch
+     × code_interpreter (no name)
+     × an mcp server not allowed
+     × a tool without name or type
+     × a name that is not an id (_shell), not allowed
+     × a Image block is opaque: DLP unavailable
+     × a image_file block is opaque: DLP unavailable
+     × a INPUT_AUDIO block is opaque: DLP unavailable
+     × a video_url block is opaque: DLP unavailable
+     × a detector span below 2 is refused at creation (a 1-character span would carry the whole stream)
+     × the text scan catches every import form: relative, @/ alias, bare baseUrl, template-literal and dynamic imports, require
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  2 failed | 2 passed (4)
+      Tests  16 failed | 82 passed (98)

@@ -6,6 +6,7 @@ import { evaluate } from '../policy';
 import { bundle, ent, pol, rule } from '../policy/testing/fixtures';
 import { createMockGateway, type GatewayOptions, type GatewayResult } from './mockGateway';
 import { startMockProvider, type MockProvider, type MockProviderOptions } from './mockProviders';
+import { seeded } from './testing/seeded';
 
 const SECRET = 'SYNTH-CARD-4111';
 const PROMPT = 'SYNTHETIC prompt text';
@@ -20,11 +21,7 @@ const conformanceBundle = (stream: Partial<Policy> = {}, over: Partial<PolicyBun
 });
 const inspected: number[] = [];
 /** A seeded-marker detector standing in for the C4 detectors: offsets only, never the text. */
-const detect = (text: string, location: DlpFinding['location']): DlpFinding[] => {
-  inspected.push(text.length);
-  const at = text.indexOf(SECRET);
-  return at < 0 ? [] : [{ category: 'payment_card', detectorId: 'seeded-marker', detectorVersion: 1, confidence: 'high', location, start: at, end: at + SECRET.length, normalization: [] }];
-};
+const detect = (text: string, location: DlpFinding['location']): DlpFinding[] => { inspected.push(text.length); return seeded([SECRET])(text, location); };
 
 const providers: MockProvider[] = [];
 const provider = async (o: MockProviderOptions) => { const p = await startMockProvider(o); providers.push(p); return p; };

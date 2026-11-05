@@ -2,17 +2,15 @@
 // TEST-ONLY, SYNTHETIC content, loopback servers on ephemeral ports.
 import net from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { validateGatewayRequestRecord, validatePolicyDecision, type DlpFinding, type Policy } from '../contracts';
+import { validateGatewayRequestRecord, validatePolicyDecision, type Policy } from '../contracts';
 import { evaluate, type EvaluationInput } from '../policy';
 import { bundle, ent, pol, rule } from '../policy/testing/fixtures';
 import { createMockGateway, type GatewayOptions, type GatewayResult } from './mockGateway';
 import { startMockProvider, type MockProvider, type MockProviderOptions } from './mockProviders';
+import { seeded } from './testing/seeded';
 
 const SECRET = 'SYNTH-CARD-4111';
-const detect = (text: string, location: DlpFinding['location']): DlpFinding[] => {
-  const at = text.indexOf(SECRET);
-  return at < 0 ? [] : [{ category: 'payment_card', detectorId: 'seeded-marker', detectorVersion: 1, confidence: 'high', location, start: at, end: at + SECRET.length, normalization: [] }];
-};
+const detect = seeded([SECRET]);
 const dlp = (phase: Policy['phase'] = 'pre_request', over: Partial<Policy> = {}) =>
   pol({ policyId: `pol-${phase}`, phase, rules: [rule({ ruleId: 'r-card', reasonCode: 'DLP_PAYMENT_CARD' })], ...(phase === 'pre_request' ? {} : { release: 'buffer_window' }), ...over });
 const ents = [ent(), ent({ entitlementId: 'ent-b', provider: 'provider-b', models: ['model-c'] })];
