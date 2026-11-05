@@ -1,25 +1,30 @@
-// Policy bundles, compiled once at load (ADR-0001 slice C1; review round 1 L1, L4, L5). A compiled bundle is a strict
-// deep copy (structuredClone: getters read once, symbol keys and prototypes dropped), validated as policy-bundle/1,
-// frozen, and with superseded versions removed: of each policy or entitlement id only the highest version is
-// evaluated. Only compileBundle makes one; a look-alike object is validated as a raw bundle.
+// Policy bundles, compiled once at load (ADR-0001 slice C1; review rounds 1-2). A compiled bundle is a strict deep copy
+// (structuredClone: getters read once, symbol keys and prototypes dropped), validated as policy-bundle/1 and frozen.
+// Only compileBundle makes one; a look-alike object is validated as a raw bundle. Supersession is decided at
+// evaluation time (current()): of each id, the highest version EFFECTIVE at now; versions not yet effective wait.
 import { instantBefore, validatePolicyBundle, type Entitlement, type Policy, type PolicyBundle } from '../contracts';
 
 export type BundleFailure = 'policy_expired' | 'policy_invalid';
 export interface CompiledBundle {
   readonly bundle: PolicyBundle;
-  /** Current policies with their index in `bundle.policies` (a decision names its policy as `p<index>`). */
+  /** All policies with their index in `bundle.policies` (a decision names its policy as `p<index>`). */
   readonly policies: readonly { policy: Policy; index: number }[];
   readonly entitlements: readonly Entitlement[];
 }
 export type Selected = { ok: true; compiled: CompiledBundle; lkg?: { contentSha256: string; reason: BundleFailure } }
   | { ok: false; compiled: CompiledBundle | null; failure: BundleFailure; codes: string[] };
 
+/** Reserved for refusal placeholders: refused in request contexts and bundle ids, so a placeholder cannot be forged. */
+export const RESERVED_PREFIX = 'refused:';
 const COMPILED = new WeakSet<object>();
 const freeze = <T>(x: T): T => { if (x && typeof x === 'object' && !Object.isFrozen(x)) { Object.values(x).forEach(freeze); Object.freeze(x); } return x; };
-function latest<T extends { version: number }>(xs: readonly T[], id: (x: T) => string): (x: T) => boolean {
+type Versioned = { id: string; version: number; effectiveFrom: string; effectiveTo?: string };
+/** Of each id, the highest version effective on `day` (YYYY-MM-DD); versions not yet effective, or ended, are ignored. */
+export function current<T>(xs: readonly T[], of: (x: T) => Versioned, day: string): T[] {
+  const live = xs.filter((x) => { const v = of(x); return v.effectiveFrom <= day && (v.effectiveTo === undefined || day < v.effectiveTo); });
   const top = new Map<string, number>();
-  for (const x of xs) top.set(id(x), Math.max(top.get(id(x)) ?? 0, x.version));
-  return (x) => top.get(id(x)) === x.version;
+  for (const x of live) top.set(of(x).id, Math.max(top.get(of(x).id) ?? 0, of(x).version));
+  return live.filter((x) => top.get(of(x).id) === of(x).version);
 }
 
 export const isCompiled = (x: unknown): x is CompiledBundle => typeof x === 'object' && x !== null && COMPILED.has(x);
@@ -29,11 +34,9 @@ export function compileBundle(raw: unknown): CompiledBundle | null {
   if (isCompiled(raw)) return raw;
   try {
     const r = validatePolicyBundle(structuredClone(raw));
-    if (!r.ok) return null;
+    if (!r.ok || r.value.bundleId.startsWith(RESERVED_PREFIX)) return null;
     const b = r.value;
-    const policy = latest(b.policies, (p) => p.policyId);
-    const entitlement = latest(b.entitlements, (e) => e.entitlementId);
-    const c: CompiledBundle = freeze({ bundle: b, policies: b.policies.map((p, index) => ({ policy: p, index })).filter((x) => policy(x.policy)), entitlements: b.entitlements.filter(entitlement) });
+    const c: CompiledBundle = freeze({ bundle: b, policies: b.policies.map((p, index) => ({ policy: p, index })), entitlements: b.entitlements });
     COMPILED.add(c);
     return c;
   } catch {

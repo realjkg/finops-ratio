@@ -36,7 +36,9 @@ export interface RequestContext {
 }
 
 const CONTEXT = obj({
-  tenantId: req(C.id), requestRef: req(rule('request-ref@1', 'identifier of at most 128 characters', (v) => isId(v) && v.length <= 128)), sequence: opt(C.count),
+  // The refused: prefix is reserved for refusal placeholders (unforgeable).
+  tenantId: req(rule('tenant-ref@1', 'identifier, not refused:', (v) => isId(v) && !v.startsWith('refused:'))),
+  requestRef: req(rule('request-ref@2', 'identifier of at most 128 characters, not refused:', (v) => isId(v) && v.length <= 128 && !v.startsWith('refused:'))), sequence: opt(C.count),
   phase: req(oneOf(POLICY_PHASES)), workloadId: opt(C.id), teamIds: opt(set(C.id, 0, 256)), actorType: req(oneOf(ACTOR_TYPES)), actorRef: opt(C.id),
   provider: req(C.id), destination: req(C.id), modelRequested: opt(C.model), modelServed: opt(C.model), tools: opt(set(C.id, 0, 256)), inputBytes: req(C.count),
   findings: req(arr(rule('finding@1', 'DLP finding (offsets only)', (v) => validateDlpFinding(v).ok), 0, 1000)),

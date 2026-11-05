@@ -36,8 +36,7 @@ export const card = (confidence: 'low' | 'medium' | 'high' = 'high') =>
   ({ category: 'payment_card' as const, detectorId: 'luhn-pan', detectorVersion: 1, confidence, location: 'input' as const, start: 4, end: 20, normalization: [] });
 
 const flags = (enforcement: boolean) => ({ enabled: true, economics: false, adoption: false, policyMonitor: true, enforcement });
-/** D7 flags for each access mode (the access mode is derived from them). */
-export const FLAGS = { enforce: flags(true), monitor: flags(false) } as const;
+export const FLAGS = { enforce: flags(true), monitor: flags(false) } as const; // D7 flags per access mode
 export const input = ({ accessMode = 'enforce', ...over }: Partial<EvaluationInput> = {}): EvaluationInput => ({ bundle: bundle(), context: ctx(), clock: { now: NOW }, flags: FLAGS[accessMode], ...over });
 
 /** A deterministic fake clock: each read advances by `step` microseconds. */

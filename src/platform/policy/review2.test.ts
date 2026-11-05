@@ -7,7 +7,6 @@ import { bundle, card, ctx, ent, FLAGS, input, pol } from './testing/fixtures';
 const valid = (e: Evaluation) => { for (const d of e.decisions) expect(validatePolicyDecision(d).ok).toBe(true); return e; };
 const brief = (d: PolicyDecision) => [d.mode, d.enforced, d.outcome, d.failure ?? '-', d.reasonCodes.join('+')];
 const access = (e: Evaluation) => e.decisions[0].reasonCodes.join('+');
-
 describe('M1: per id, the highest version EFFECTIVE at now is evaluated', () => {
   const at = (now: string) => ({ clock: { now } });
   it.each([['2026-10-02T12:00:00Z', 'ENTITLEMENT_DENIED'], ['2026-11-30T23:59:59.999Z', 'ENTITLEMENT_DENIED'], ['2026-12-01T00:00:00Z', 'ENTITLEMENT_DENIED']])('deny v1 now, v2 from Dec 1 (%s): model-z %s', (now, code) => {
@@ -20,7 +19,6 @@ describe('M1: per id, the highest version EFFECTIVE at now is evaluated', () => 
     expect(access(evaluate(input({ bundle: bundle({ policies: [], entitlements: [ent({ version: 1 }), ent({ version: 2, models: ['model-x', 'model-y'], effectiveFrom: '2026-12-01' })] }) })))).toBe('ENTITLED');
   });
 });
-
 describe('M2: a refusal is at least as strict as the normal path', () => {
   const enforceDlp = bundle({ policies: [pol()] });
   const many = Array.from({ length: 1001 }, (_, i) => ({ ...card(), start: i * 20, end: i * 20 + 16 }));
@@ -33,10 +31,9 @@ describe('M2: a refusal is at least as strict as the normal path', () => {
   it('only when every applicable policy is monitor (or none applies) does a monitor refusal record and allow', () => {
     expect(evaluate(input({ bundle: bundle({ policies: [pol({ mode: 'monitor' })] }), accessMode: 'monitor', context: ctx({ findings: many }) })).verdict).toBe('allow');
     expect(evaluate(input({ bundle: bundle({ policies: [pol({ phase: 'pre_response', release: 'buffer_full' })] }), accessMode: 'monitor', context: ctx({ findings: many }) })).verdict).toBe('allow');
-    expect(evaluate(input({ bundle: enforceDlp, accessMode: 'monitor', context: { ...ctx({ findings: many }), phase: 'bogus' } as never })).verdict).toBe('block');
+    expect(evaluate(input({ bundle: bundle({ policies: [pol({ phase: 'pre_response', release: 'buffer_full' })] }), accessMode: 'monitor', context: { ...ctx(), phase: 'bogus' } as never })).verdict).toBe('block');
   });
 });
-
 describe('L1/L2: flags are required and bound through capabilityOn; off is a recorded allow', () => {
   it('off flags never block: one recorded POLICY_DISABLED allow, nothing enforced', () => {
     for (const flags of [{}, { enabled: true }, { enabled: false, enforcement: true }, { enabled: true, enforcement: 'true' }, Object.create({ enabled: true, enforcement: true })]) {
@@ -47,12 +44,9 @@ describe('L1/L2: flags are required and bound through capabilityOn; off is a rec
   });
   it('a flags/accessMode mismatch or junk flags are refused (enforce with this bundle); enforcement wins over monitor', () => {
     expect([accessModeFor(FLAGS.enforce), accessModeFor(FLAGS.monitor)]).toEqual(['enforce', 'monitor']);
-    for (const over of [{ accessMode: 'monitor' as const }, { flags: 'on' as never }, { flags: null as never }]) {
-      expect(access(valid(evaluate({ ...input(), ...over })))).toBe('CONTEXT_INVALID');
-    }
+    for (const over of [{ accessMode: 'monitor' as const }, { flags: 'on' as never }, { flags: null as never }]) expect(access(valid(evaluate({ ...input(), ...over })))).toBe('CONTEXT_INVALID');
   });
 });
-
 describe('L3 families, L4 placeholders, L5 compile', () => {
   const b = (deny: string) => bundle({ policies: [], entitlements: [ent({ models: ['*'] }), ent({ entitlementId: 'ent-deny', models: [deny], effect: 'deny' })] });
   it.each([['gpt-4', 'openai/gpt-4', true], ['gpt-4', 'models/gpt-4', true], ['gpt-4', 'ft:gpt-4:org::abc', true], ['gpt-4', 'ft:gpt-4-turbo:org::abc', true], ['gpt-4-', 'gpt-4-turbo', true],
@@ -69,8 +63,7 @@ describe('L3 families, L4 placeholders, L5 compile', () => {
   });
   it('a compiled bundle is frozen and independent of the raw input, which stays mutable', () => {
     const raw = bundle({ policies: [], entitlements: [ent({ models: ['model-x'] })] });
-    const c = compileBundle(raw);
-    if (!c) throw new Error('compile');
+    const c = compileBundle(raw) as NonNullable<ReturnType<typeof compileBundle>>;
     expect(() => (c.entitlements as unknown[]).push(ent({ models: ['*'] }))).toThrow(TypeError);
     expect(() => ((c.bundle.entitlements[0].models as string[]).push('model-z'))).toThrow(TypeError);
     raw.entitlements[0].models.push('model-z');

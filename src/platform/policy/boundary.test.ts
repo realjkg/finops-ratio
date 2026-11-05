@@ -14,7 +14,7 @@ describe('policy library boundary', () => {
     expect(prod).toEqual(['bundle.ts', 'context.ts', 'evaluate.ts', 'index.ts']);
     for (const f of prod) {
       for (const i of ts.preProcessFile(fs.readFileSync(path.join(DIR, f), 'utf8'), true, true).importedFiles) {
-        expect(`${f} -> ${i.fileName}`).toMatch(/ -> \.\/(bundle|context|evaluate)$| -> \.\.\/contracts$/);
+        expect(`${f} -> ${i.fileName}`).toMatch(/ -> \.\/(bundle|context|evaluate)$| -> \.\.\/(contracts|flags)$/);
       }
     }
   });

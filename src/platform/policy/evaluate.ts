@@ -7,7 +7,8 @@
 // Work per evaluation is bounded by the contract maxima (256 policies x 512 rules, 4096 entitlements x 256 models,
 // 1000 findings, 256 teams and tools): O(P*R + E*M + F) with per-category finding summaries.
 import { isCount, isId, isIsoInstant, validatePolicyDecision, POLICY_PHASES, type Entitlement, type Policy, type PolicyCondition, type PolicyDecision } from '../contracts';
-import { compileBundle, selectBundle, type BundleFailure, type CompiledBundle, type Selected } from './bundle';
+import { capabilityOn, type PlatformFlags } from '../flags';
+import { compileBundle, current, RESERVED_PREFIX, selectBundle, type BundleFailure, type CompiledBundle, type Selected } from './bundle';
 import { validateRequestContext, type RequestContext } from './context';
 
 export type Outcome = PolicyDecision['outcome'];
@@ -16,8 +17,6 @@ type Failure = NonNullable<PolicyDecision['failure']>;
 
 /** `now` is a UTC instant; `elapsedMicros`, if given, is a monotonic reading used for latency and per-policy timeouts. */
 export interface Clock { now: string; elapsedMicros?: () => number }
-/** The per-instance opt-in flags of ADR-0001 D7 that bind the access mode. */
-export interface PlatformFlags { enabled?: boolean; policyMonitor?: boolean; enforcement?: boolean }
 export interface EvaluationInput {
   /** A raw policy-bundle/1 (validated on every call) or a CompiledBundle from compileBundle (validated once at load). */
   bundle: unknown;
@@ -25,9 +24,10 @@ export interface EvaluationInput {
   lastKnownGood?: unknown;
   context: unknown;
   clock: Clock;
-  /** Mode of the access (entitlement) and refusal decisions. With `flags`, it must equal accessModeFor(flags). */
+  /** The instance's D7 flags (required): they set the access mode via accessModeFor; off means policy is disabled. */
+  flags: PlatformFlags;
+  /** Optional assertion: when given, it must equal accessModeFor(flags), or the input is refused. */
   accessMode?: Mode;
-  flags?: PlatformFlags;
 }
 export interface Evaluation {
   /** What the gateway applies: the most severe outcome among ENFORCED decisions (block when a decision is dropped). */
@@ -45,18 +45,25 @@ const SEVERITY: Record<Outcome, number> = { allow: 0, redact: 1, require_approva
 const RANK = { low: 0, medium: 1, high: 2 } as const;
 const worst = (xs: Outcome[]): Outcome => xs.reduce<Outcome>((a, b) => (SEVERITY[b] > SEVERITY[a] ? b : a), 'allow');
 const day = (now: string) => now.slice(0, 10);
-const effective = (x: { effectiveFrom: string; effectiveTo?: string }, d: string) => x.effectiveFrom <= d && (x.effectiveTo === undefined || d < x.effectiveTo);
 const uniq = (xs: string[]) => [...new Set(xs)];
 const FAILURE_CODE = { timeout: 'EVALUATION_TIMEOUT', engine_error: 'ENGINE_ERROR' } as const;
 const EPOCH = '1970-01-01T00:00:00Z';
+const P = (k: string) => `${RESERVED_PREFIX}${k}`;
 
-/** The single binding point between the D7 flags and the access mode: `enabled` is required; enforcement wins over monitor. */
-export const accessModeFor = (f: PlatformFlags | undefined): Mode | 'off' => (f?.enabled !== true ? 'off' : f.enforcement === true ? 'enforce' : f.policyMonitor === true ? 'monitor' : 'off');
+/** The single binding point between the D7 flags and the access mode (main's capabilityOn: own properties, `enabled` required). */
+export const accessModeFor = (f: PlatformFlags | undefined): Mode | 'off' => (capabilityOn(f, 'enforcement') ? 'enforce' : capabilityOn(f, 'policyMonitor') ? 'monitor' : 'off');
 
-/** A deny names a model family: the id itself and any id extending it after a separator (@ - : . / _), case-folded. */
+const SEP = /[@\-:./_]/;
+/** The id under a namespace or provider prefix (`openai/`, `models/`) and inside a fine-tune wrapper (`ft:<base>:...`). */
+const bare = (m: string) => { const ft = /^ft:([^:]+)/.exec(m); const x = ft ? ft[1] : m; return x.slice(x.lastIndexOf('/') + 1); };
+const family = (p: string, m: string) => m === p || (m.startsWith(p) && (SEP.test(p.charAt(p.length - 1)) || SEP.test(m.charAt(p.length))));
+/**
+ * A deny names a model family, case-folded: the id, any id extending it after a separator (@ - : . / _; a pattern
+ * ending in one is a prefix), also under a namespace prefix or fine-tune wrapper. Accepted over-deny: gpt-4 denies gpt-4.1.
+ */
 const denies = (pattern: string, model: string) => {
   const p = pattern.toLowerCase(), m = model.toLowerCase();
-  return pattern === '*' || m === p || (m.startsWith(p) && /[@\-:./_]/.test(m.charAt(p.length)));
+  return pattern === '*' || family(p, m) || family(bare(p), bare(m));
 };
 /** A grant is exact (fail closed): `*` or the identical id. */
 const grants = (pattern: string, model: string) => pattern === '*' || pattern === model;
@@ -67,7 +74,7 @@ export const controlClass = (p: Policy): PolicyDecision['controlClass'] =>
 
 /** Current policies of the compiled bundle that apply to this context (phase, effective date, workload and provider scope). */
 export function applicablePolicies(b: CompiledBundle, c: Pick<RequestContext, 'phase' | 'workloadId' | 'provider'>, now: string): { policy: Policy; index: number }[] {
-  return b.policies.filter(({ policy: p }) => p.phase === c.phase && effective(p, day(now))
+  return current(b.policies, (x) => ({ id: x.policy.policyId, ...x.policy }), day(now)).filter(({ policy: p }) => p.phase === c.phase
     && (p.scope.workloadIds === undefined || (c.workloadId !== undefined && p.scope.workloadIds.includes(c.workloadId)))
     && (p.scope.providers === undefined || p.scope.providers.includes(c.provider)));
 }
@@ -130,7 +137,7 @@ function accessPart(b: CompiledBundle, c: RequestContext, now: string, mode: Mod
   if (c.unavailable?.includes('entitlements')) return failed(mode, 'hard', 'entitlement_unavailable', 'ENTITLEMENTS_UNAVAILABLE');
   const subject = (e: Entitlement) => e.subjectKind === 'tenant' ? e.subjectRef === c.tenantId : e.subjectKind === 'team' ? (c.teamIds ?? []).includes(e.subjectRef)
     : e.subjectKind === 'workload' ? e.subjectRef === c.workloadId : c.actorType === (e.subjectKind === 'user' ? 'human' : 'service') && c.actorRef === e.subjectRef;
-  const candidates = b.entitlements.filter((e) => e.provider === c.provider && effective(e, day(now)) && subject(e));
+  const candidates = current(b.entitlements, (e) => ({ id: e.entitlementId, ...e }), day(now)).filter((e) => e.provider === c.provider && subject(e));
   const check = (model: string | undefined, served: boolean) => {
     if (model === undefined) return { code: 'MODEL_UNKNOWN', deny: [], allow: [] };
     const deny = candidates.filter((e) => e.effect === 'deny' && e.models.some((m) => denies(m, model))).map((e) => e.entitlementId);
@@ -153,20 +160,15 @@ export function sealEvaluation(source: Evaluation['source'], decisions: PolicyDe
   return { verdict, decisions: ok, source, gap: ok.some((d) => d.failureHandling === 'continued_with_gap'), problems: [...inputProblems, ...dropped] };
 }
 
-function resolveMode(i: EvaluationInput, problems: string[]): Mode | undefined {
-  if (i.flags !== undefined) {
-    const m = accessModeFor(i.flags);
-    if (m === 'off') problems.push('$.flags: policy evaluation is off');
-    else if (i.accessMode !== undefined && i.accessMode !== m) problems.push('$.accessMode: does not match the platform flags');
-    else return m;
-    return undefined;
-  }
-  if (i.accessMode === 'monitor' || i.accessMode === 'enforce') return i.accessMode;
-  problems.push('$.accessMode: one of monitor|enforce');
-  return undefined;
+function resolveMode(i: EvaluationInput, problems: string[]): Mode | 'off' | undefined {
+  const f: unknown = i.flags;
+  if (typeof f !== 'object' || f === null || Array.isArray(f)) { problems.push('$.flags: required, the platform flags object'); return undefined; }
+  const m = accessModeFor(f as PlatformFlags);
+  if (m !== 'off' && i.accessMode !== undefined && i.accessMode !== m) { problems.push('$.accessMode: does not match the platform flags'); return undefined; }
+  return m;
 }
 /** One strict read of the input: the context is cloned before validation, so getters are read once and never again. */
-interface Snapshot { c?: RequestContext; loose?: unknown; now?: unknown; mode?: Mode; problems: string[] }
+interface Snapshot { c?: RequestContext; loose?: unknown; now?: unknown; mode?: Mode | 'off'; problems: string[] }
 function snapshot(i: EvaluationInput): Snapshot {
   const s: Snapshot = { problems: [] };
   s.mode = resolveMode(i, s.problems);
@@ -180,22 +182,38 @@ function snapshot(i: EvaluationInput): Snapshot {
   } catch { s.problems.push('$.context: not a plain, cloneable object'); }
   return s;
 }
-/** A refused input is still recorded: one denied engine_error decision (CONTEXT_INVALID), in the access mode or enforce. */
-function refusal(i: EvaluationInput, s: Snapshot): Evaluation {
-  const field = (k: string, ok: (v: unknown) => boolean, d: string) => { try { const v = (s.loose as Record<string, unknown>)?.[k]; return ok(v) ? (v as string) : d; } catch { return d; } };
-  let b: CompiledBundle | null = null;
-  try { b = compileBundle(i.bundle); } catch { /* unreadable: placeholder below */ }
+/** The record of an input that was not evaluated: placeholders (reserved prefix, unforgeable) for unusable fields. */
+function recordOf(i: EvaluationInput, s: Snapshot) {
+  const field = (k: string, ok: (v: unknown) => boolean, d: string) => { try { const v = (s.loose as Record<string, unknown>)?.[k]; return ok(v) && !(v as string).startsWith(RESERVED_PREFIX) ? (v as string) : d; } catch { return d; } };
+  const read = (raw: () => unknown) => { try { return compileBundle(raw()); } catch { return null; } };
+  const bundles = [read(() => i.bundle), read(() => i.lastKnownGood)].filter((x): x is CompiledBundle => x !== null);
   const clockOk = isIsoInstant(s.now);
-  const c = { tenantId: field('tenantId', isId, 'unknown-tenant'), requestRef: field('requestRef', (v) => isId(v) && (v as string).length <= 128, 'unknown-request'),
-    phase: field('phase', (v) => (POLICY_PHASES as readonly unknown[]).includes(v), 'pre_request') } as RequestContext;
-  const x: Ctx = { c, now: clockOk ? (s.now as string) : EPOCH, bundleId: b?.bundle.bundleId ?? 'unreadable-bundle', bundleVersion: b?.bundle.version ?? 1 };
-  const part = { ...failed(s.mode ?? 'enforce', 'hard', 'engine_error', 'CONTEXT_INVALID'), reasonCodes: ['CONTEXT_INVALID', ...(clockOk ? [] : ['CLOCK_INVALID'])] };
+  const phaseOk = (v: unknown) => (POLICY_PHASES as readonly unknown[]).includes(v);
+  const c = { tenantId: field('tenantId', isId, P('unknown-tenant')), requestRef: field('requestRef', (v) => isId(v) && (v as string).length <= 128, P('unknown-request')),
+    phase: field('phase', phaseOk, 'pre_request') } as RequestContext;
+  const x: Ctx = { c, now: clockOk ? (s.now as string) : EPOCH, bundleId: bundles[0]?.bundle.bundleId ?? P('unreadable-bundle'), bundleVersion: bundles[0]?.bundle.version ?? 1 };
+  const phase = phaseOk(field('phase', phaseOk, '')) ? c.phase : undefined;
+  // A refusal is at least as strict as the normal path: any enforce-mode policy for the phase (any phase when unknown) blocks.
+  const enforcing = bundles.some((b) => (clockOk ? current(b.policies, (y) => ({ id: y.policy.policyId, ...y.policy }), day(s.now as string)) : b.policies)
+    .some(({ policy: p }) => p.mode === 'enforce' && (phase === undefined || p.phase === phase)));
+  return { x, clockOk, enforcing };
+}
+/** A refused input is still recorded: one denied engine_error decision (CONTEXT_INVALID), never laxer than evaluation. */
+function refusal(i: EvaluationInput, s: Snapshot): Evaluation {
+  const { x, clockOk, enforcing } = recordOf(i, s);
+  const mode: Mode = s.mode === 'monitor' && !enforcing ? 'monitor' : 'enforce';
+  const part = { ...failed(mode, 'hard', 'engine_error', 'CONTEXT_INVALID'), reasonCodes: ['CONTEXT_INVALID', ...(clockOk ? [] : ['CLOCK_INVALID'])] };
   return sealEvaluation('none', [decision(x, 'access', part, 0)], s.problems.length ? s.problems : ['$: evaluation failed']);
+}
+/** Policy capability off (D7): nothing is evaluated or enforced; one recorded POLICY_DISABLED allow. */
+function disabled(i: EvaluationInput, s: Snapshot): Evaluation {
+  const { x } = recordOf(i, s);
+  return sealEvaluation('none', [decision(x, 'access', { mode: 'monitor', controlClass: 'log_only', outcome: 'allow', ruleIds: [], reasonCodes: ['POLICY_DISABLED'] }, 0)]);
 }
 
 /** No usable bundle and no approved last-known-good: every decision is a denied failure, each in its own mode. */
 function bundleFailure(mode: Mode, c: RequestContext, now: string, r: Extract<Selected, { ok: false }>, latency = 0): Evaluation {
-  const x: Ctx = { c, now, bundleId: r.compiled?.bundle.bundleId ?? 'unreadable-bundle', bundleVersion: r.compiled?.bundle.version ?? 1 };
+  const x: Ctx = { c, now, bundleId: r.compiled?.bundle.bundleId ?? P('unreadable-bundle'), bundleVersion: r.compiled?.bundle.version ?? 1 };
   const part = (m: Mode, cls: Part['controlClass']) => ({ ...failed(m, cls, r.failure, r.codes[0]), reasonCodes: r.codes });
   return sealEvaluation('none', [decision(x, 'access', part(mode, 'hard'), latency),
     ...(r.compiled ? applicablePolicies(r.compiled, c, now) : []).map(({ policy, index }) => decision(x, `p${index}`, part(policy.mode, controlClass(policy)), latency))]);
@@ -210,8 +228,10 @@ function policyFailure(p: Policy, f: 'timeout' | 'engine_error'): Part {
 export function evaluate(i: EvaluationInput): Evaluation {
   try {
     const s = snapshot(i);
+    if (s.mode === 'off') return disabled(i, s);
     if (s.problems.length || !s.c || !s.mode) return refusal(i, s);
-    const { c, mode } = s;
+    const { c } = s;
+    const mode: Mode = s.mode;
     const now = s.now as string;
     const r = selectBundle(i.bundle, i.lastKnownGood, c.tenantId, now);
     if (!r.ok) return bundleFailure(mode, c, now, r);
@@ -244,8 +264,10 @@ export function failureEvaluation(i: EvaluationInput, f: 'timeout' | 'engine_err
   let s: Snapshot = { problems: [] };
   try {
     s = snapshot(i);
+    if (s.mode === 'off') return disabled(i, s);
     if (s.problems.length || !s.c || !s.mode) return refusal(i, s);
-    const { c, mode } = s;
+    const { c } = s;
+    const mode: Mode = s.mode;
     const now = s.now as string;
     const latency = isCount(latencyMicros) ? latencyMicros : 0;
     const r = selectBundle(i.bundle, i.lastKnownGood, c.tenantId, now);
