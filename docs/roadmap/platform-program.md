@@ -1,7 +1,7 @@
 # Platform program roadmap (AI usage, adoption and policy)
 
 Status of every row: **planned**. Nothing here is released, and nothing here is evidence for the 1.0 release
-candidate, which keeps its own security and deployed-demo gates (README, "Engagement mode", rows R1–R12). Design:
+candidate, which keeps its own security and deployed-demo gates (README "Engagement mode" cites rows R1–R4 and R11; R12 packaging evidence is `docs/evidence/r12-packaging`). Design:
 [ADR-0001](../adr/ADR-0001-ai-usage-and-gateway-platform.md).
 
 ## Numbering
