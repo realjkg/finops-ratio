@@ -28,8 +28,8 @@ It installs nothing silently, needs no secret or token, and sends no telemetry. 
 
 | Location | What and when |
 |---|---|
-| `$TMPDIR/ratio-evidence-pr<n>.XXXXXX/` | The clone, logs, temporary files of the tests (the collector runs with `TMPDIR` inside it) and the evidence. Removed at the end. |
-| `$TMPDIR/ratio-evidence-rollback-*` | The rollback worktree. Removed at the end, also on Ctrl-C. |
+| `$TMPDIR/ratio-evidence-pr<n>.XXXXXX/` | The clone, logs, the evidence and the tests' temporary files: the collector runs with `TMPDIR=<workspace>/tmp`, so the **rollback worktree** (`<workspace>/tmp/ratio-evidence-rollback-*`) lives here too. Removed at the end. |
+| `/tmp/rpe.XXXXXX` | A short temporary directory for the Playwright gates only. Chromium's socket path must fit macOS's 104-byte limit, which a path inside the workspace would exceed. Removed by exact path at the end, also on Ctrl-C, and by the script if the collector is killed. |
 | `~/ratio-evidence/pr-<n>/<sha>/` | The copy of `evidence.md` and `evidence.json`. Kept. |
 | `~/.npm` | npm's download cache, filled by `npm ci`. Kept. |
 | `~/Library/Caches/ms-playwright` | The pinned Chromium from `npx playwright install chromium`. Kept. Downloaded from `cdn.playwright.dev` or `playwright.download.prss.microsoft.com`. |
@@ -41,7 +41,21 @@ The database containers are **local only and ephemeral**:
 - Their data lives in memory (tmpfs) and disappears with the container.
 - Postgres uses **trust authentication with no password**, exactly as CI does. The database tests need that: they create password-less login roles.
 
-The script drops every `RATIO_*` variable you have exported, except `RATIO_EVIDENCE_HOME` and `RATIO_EVIDENCE_CHROMIUM`. The collector also runs the PR's code with a small environment allowlist. As a result, no app database URL or token from your shell can reach the run. Down-migrations only ever run against the throwaway `ratio_evidence_*` database on 127.0.0.1.
+Inherited variables are dropped before anything runs:
+- every `RATIO_*` variable you have exported, except `RATIO_EVIDENCE_HOME` and `RATIO_EVIDENCE_CHROMIUM`;
+- every libpq `PG*` variable (`PGHOST`, `PGUSER`, `PGPASSWORD`, …).
+
+The collector also runs the PR's code with a small environment allowlist:
+- PATH, HOME, TMPDIR, locale, CI and proxy/CA variables, including `ALL_PROXY`;
+- npm's registry/CA/proxy/TLS settings, but never npm credentials;
+- `NODE_OPTIONS` is deliberately excluded, because it can preload arbitrary code.
+
+As a result, no app database URL or token from your shell can reach the run.
+
+Down-migrations only ever run against a throwaway `ratio_evidence_*` database:
+- on a loopback host (`127.0.0.1`, `localhost` or `::1`);
+- with no `host`/`hostaddr`/`port`/`dbname`/`service` override in the URL;
+- never when `RATIO_ENV` or `NODE_ENV` is production.
 
 ## Troubleshooting
 
@@ -50,6 +64,7 @@ The script drops every `RATIO_*` variable you have exported, except `RATIO_EVIDE
 | `node >= 22.13 required` | Run the command the script prints (`nvm install 22 && nvm use 22`, `fnm install 22`, or `brew install node@22 && brew link --overwrite node@22`), open a new terminal and run again. |
 | `database gates: NOT RUN (no Docker …)`, `docker could not start Postgres`, or `could not pull` | Start Docker Desktop, Colima (`colima start`) or OrbStack and wait until `docker info` works. A pull failure means Docker Hub is blocked or rate-limited: retry later. If `test:db` stays NOT RUN with "PG16 client tools", run `brew install postgresql@16`. `--no-db` runs without a database on purpose; the gap is recorded. |
 | Port already in use | Ports are picked at random. If one is taken in between, run again. A container left by a killed run is named `ratio-evidence-pg-<pr>-…` or `ratio-evidence-s3-<pr>-…`; remove it with `docker rm -f -v <that exact name>`. If the collector says a rollback worktree is still registered, run the `git worktree remove --force …` command it prints. |
+| `Chromium did not launch` (browser gates NOT RUN) | The collector launches Chromium once before the browser gates and records why it failed (see the "Chromium launch preflight" row in evidence.md). Usually a blocked or partial download: run `npx playwright install chromium` again in the workspace (`--keep`), or set `RATIO_EVIDENCE_CHROMIUM`. |
 | `Playwright Chromium download failed` | VPN, proxy or firewall: allow `cdn.playwright.dev` and `playwright.download.prss.microsoft.com`, or set `RATIO_EVIDENCE_CHROMIUM=/path/to/Chromium.app/Contents/MacOS/Chromium`. Until then the browser gates are NOT RUN, never PASS. |
 | `disk: need >= 5 GB free` | Free space, or use a larger volume: `TMPDIR=/Volumes/Data/tmp ./scripts/evidence/mac-evidence.sh --pr 179`. |
 

@@ -55,26 +55,35 @@ describe('mac-evidence.sh', () => {
     expect(src).toMatch(/-p "127\.0\.0\.1:\$PG_PORT:5432"/);
   });
 
-  it('cleanup removes only a workspace it created (mktemp name directly under TMPDIR), never anything else', () => {
-    const ours = fs.mkdtempSync(path.join(tmp, 'ratio-evidence-pr179.'));
-    fs.writeFileSync(path.join(ours, 'f'), 'x');
-    expect(sh(['--self-test-cleanup', ours]).stdout).toMatch(/removed workspace/);
-    expect(fs.existsSync(ours)).toBe(false);
+  it('cleanup removes only the exact workspace this run created, directly under the TMPDIR captured at start', () => {
+    const made = sh(['--self-test-cleanup', 'create', '--pr', '179']);
+    const ws = /workspace: (\S+)/.exec(made.stdout)[1];
+    expect(path.dirname(ws)).toBe(tmp);
+    expect(made.stdout).toMatch(/removed workspace/);
+    expect(fs.existsSync(ws)).toBe(false);
 
-    const other = fs.mkdtempSync(path.join(tmp, 'precious-'));
-    const r = sh(['--self-test-cleanup', other]);
-    expect(r.stderr).toMatch(/refusing to remove/);
-    expect(fs.existsSync(other)).toBe(true);
+    // Paths this run did not create are refused, even when they look like a workspace name.
+    for (const name of ['ratio-evidence-pr179.abcdef', 'ratio-evidence-pr1-important.backup', 'precious']) {
+      const d = path.join(tmp, name);
+      fs.mkdirSync(d);
+      const r = sh(['--self-test-cleanup', d]);
+      expect(r.stderr, name).toMatch(/refusing to remove/);
+      expect(fs.existsSync(d), name).toBe(true);
+      fs.rmSync(d, { recursive: true });
+    }
 
-    const sneaky = path.join(tmp, 'ratio-evidence-pr1.abcdef', '..', path.basename(other));
-    fs.mkdirSync(path.join(tmp, 'ratio-evidence-pr1.abcdef'));
-    expect(sh(['--self-test-cleanup', sneaky]).stderr).toMatch(/refusing to remove/);
-    expect(fs.existsSync(other)).toBe(true);
+    // A workspace swapped for a symlink after creation is refused, and its target is untouched.
+    const swap = sh(['--self-test-cleanup', 'create-swap', '--pr', '5']);
+    const link = /workspace: (\S+)/.exec(swap.stdout)[1];
+    expect(swap.stderr).toMatch(/refusing to remove/);
+    expect(fs.existsSync(`${link}.target`)).toBe(true);
+    fs.rmSync(link); fs.rmSync(`${link}.target`, { recursive: true });
 
-    const kept = fs.mkdtempSync(path.join(tmp, 'ratio-evidence-pr2.'));
-    expect(sh(['--self-test-cleanup', kept, '--keep']).stdout).toMatch(/kept workspace/);
-    expect(fs.existsSync(kept)).toBe(true);
-    for (const d of [other, kept, path.join(tmp, 'ratio-evidence-pr1.abcdef')]) fs.rmSync(d, { recursive: true, force: true });
+    const kept = sh(['--self-test-cleanup', 'create', '--keep', '--pr', '2']);
+    const keptWs = /workspace: (\S+)/.exec(kept.stdout)[1];
+    expect(kept.stdout).toMatch(/kept workspace/);
+    expect(fs.existsSync(keptWs)).toBe(true);
+    fs.rmSync(keptWs, { recursive: true });
   });
 
   it('prints its usage with --help', () => {

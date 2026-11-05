@@ -30,9 +30,13 @@ WS_BASE="${WS_BASE%/}"
 for v in $(env | sed -n 's/^\(RATIO_[A-Za-z0-9_]*\)=.*/\1/p'); do
   case "$v" in RATIO_EVIDENCE_HOME|RATIO_EVIDENCE_CHROMIUM) ;; *) unset "$v" ;; esac
 done
+# libpq reads PG* variables (PGHOST, PGPORT, PGUSER, PGDATABASE, PGPASSWORD, PGSERVICE, PGSSLMODE, ...):
+# drop them so createdb/dropdb/psql only ever talk to the server named explicitly below.
+for v in $(env | sed -n 's/^\(PG[A-Z_]*\)=.*/\1/p'); do unset "$v"; done
 
 PR="" HEAD_ARG="" BASE_ARG="" LOCAL_REPO="" NO_DB=0 KEEP=0 DRY=0 SKIP_NETWORK=0 SMOKE="" SELF_TEST_WS=""
-WS="" PG_NAME="" S3_NAME="" BREW_DB="" DB_MODE="none" DB_REASON="" CPID=""
+WS="" WS_CREATED="" PG_NAME="" S3_NAME="" BREW_DB="" DB_MODE="none" DB_REASON="" CPID=""
+BREW_PG_HOST="127.0.0.1" BREW_PG_PORT="5432"
 
 say() { printf '%s\n' "$*"; }
 warn() { printf 'warning: %s\n' "$*" >&2; }
@@ -57,20 +61,41 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# --- cleanup: exact names only; a workspace is removed only if it is one this script creates --------
+# --- cleanup: exact names only -------------------------------------------------------------------
+# A workspace is removed only if it is EXACTLY the path mktemp returned in this run, sits directly under the
+# TMPDIR captured at start, and is a real directory (not a symlink).
+make_workspace() {
+  WS="$(mktemp -d "$WS_BASE/ratio-evidence-pr${PR:-0}.XXXXXX")" || fail 3 "cannot create a temporary workspace"
+  WS_CREATED="$WS"
+}
 # shellcheck disable=SC2329 # used by cleanup
 is_our_workspace() {
-  local rest="${1#"$WS_BASE"/}"
-  [ "$rest" != "$1" ] || return 1 # not directly under the workspace base
-  case "$rest" in */*|.*) return 1 ;; ratio-evidence-pr[0-9]*.??????) [ -d "$1" ] && [ ! -L "$1" ] ;; *) return 1 ;; esac
+  [ -n "$WS_CREATED" ] && [ "$1" = "$WS_CREATED" ] || return 1
+  [ "$(dirname "$1")" = "$WS_BASE" ] || return 1
+  [ -d "$1" ] && [ ! -L "$1" ]
+}
+# shellcheck disable=SC2329 # used by cleanup
+stop_orphans() {
+  # If the collector was killed hard, its running gate's process group and its short Playwright temp dir
+  # are left: it records both under $WS/logs, so stop/remove them here (exact pid and exact path only).
+  local f="$WS/logs/current-gate.pgid" t="$WS/logs/short-tmp.path" pgid d
+  if [ -n "$WS" ] && [ -f "$f" ]; then
+    pgid="$(cat "$f")"
+    case "$pgid" in ''|*[!0-9]*) ;; *) kill -TERM -- "-$pgid" 2>/dev/null && say "stopped orphaned gate process group $pgid" ;; esac
+  fi
+  if [ -n "$WS" ] && [ -f "$t" ]; then
+    d="$(cat "$t")"
+    case "$d" in /tmp/rpe.??????|"$WS_BASE"/rpe.??????) [ -d "$d" ] && [ ! -L "$d" ] && rm -rf "$d" ;; esac
+  fi
 }
 # shellcheck disable=SC2329 # invoked by the EXIT trap
 cleanup() {
   local rc=$?
   if [ -n "$CPID" ]; then kill -TERM "$CPID" 2>/dev/null; wait "$CPID" 2>/dev/null; fi
+  stop_orphans
   if [ -n "$PG_NAME" ]; then docker rm -f -v "$PG_NAME" >/dev/null 2>&1 && say "removed container $PG_NAME"; fi
   if [ -n "$S3_NAME" ]; then docker rm -f -v "$S3_NAME" >/dev/null 2>&1 && say "removed container $S3_NAME"; fi
-  if [ -n "$BREW_DB" ]; then dropdb --if-exists "$BREW_DB" >/dev/null 2>&1 && say "dropped database $BREW_DB"; fi
+  if [ -n "$BREW_DB" ]; then dropdb -h "$BREW_PG_HOST" -p "$BREW_PG_PORT" --if-exists "$BREW_DB" >/dev/null 2>&1 && say "dropped database $BREW_DB"; fi
   if [ -n "$WS" ]; then
     if [ "$KEEP" = 1 ]; then say "kept workspace: $WS"
     elif is_our_workspace "$WS"; then
@@ -85,7 +110,16 @@ trap cleanup EXIT
 # INT/TERM: stop the collector first (it removes its own rollback worktree), then the EXIT trap cleans up.
 trap 'say "interrupted"; exit 130' INT TERM
 
-if [ -n "$SELF_TEST_WS" ]; then WS="$SELF_TEST_WS"; exit 0; fi
+# Test hook for the cleanup guard: 'create' makes a real workspace (removed on exit); any other value is a
+# path this run did not create (must be refused).
+if [ -n "$SELF_TEST_WS" ]; then
+  case "$SELF_TEST_WS" in
+    create) make_workspace; say "workspace: $WS" ;;
+    create-swap) make_workspace; rmdir "$WS"; mkdir "$WS.target"; ln -s "$WS.target" "$WS"; say "workspace: $WS" ;; # swapped for a symlink
+    *) WS="$SELF_TEST_WS" ;;
+  esac
+  exit 0
+fi
 
 case "$PR" in ''|0*|*[!0-9]*) fail 2 "--pr <positive number> is required (got '${PR}')" ;; esac
 if [ -n "$HEAD_ARG" ]; then
@@ -157,7 +191,7 @@ elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   if [ "$SKIP_NETWORK" = 0 ] && ! docker image inspect "$PG_IMAGE" >/dev/null 2>&1 && ! reach https://registry-1.docker.io/v2/; then
     bad "Docker Hub (registry-1.docker.io) unreachable and the pinned images are not cached; allow it or use --no-db"
   fi
-elif command -v pg_isready >/dev/null 2>&1 && pg_isready -q -h localhost >/dev/null 2>&1 && command -v createdb >/dev/null 2>&1; then
+elif command -v pg_isready >/dev/null 2>&1 && pg_isready -q -h "$BREW_PG_HOST" -p "$BREW_PG_PORT" >/dev/null 2>&1 && command -v createdb >/dev/null 2>&1; then
   DB_MODE="brew"; ok "Homebrew Postgres: running (migration checks only; test:db also needs S3, so it is recorded NOT RUN)"
 else
   DB_MODE="none"; DB_REASON="no Docker and no running local Postgres"
@@ -184,7 +218,7 @@ say "  workspace:  $WS_BASE/ratio-evidence-pr$PR.XXXXXX ($([ "$KEEP" = 1 ] && ec
 if [ "$DRY" = 1 ]; then say ""; say "dry run: nothing cloned, started or written"; exit 0; fi
 
 # --- workspace and sources --------------------------------------------------------------------
-WS="$(mktemp -d "$WS_BASE/ratio-evidence-pr$PR.XXXXXX")" || fail 3 "cannot create a temporary workspace"
+make_workspace
 mkdir -p "$WS/tmp"
 say ""; say "Workspace: $WS"
 if [ -n "$LOCAL_REPO" ]; then git clone --quiet --no-hardlinks -- "$LOCAL_REPO" "$WS/repo" || fail 4 "clone of $LOCAL_REPO failed"
@@ -243,9 +277,9 @@ if [ "$DB_MODE" = docker ]; then
   if [ -n "$PG16_BIN" ]; then export RATIO_EVIDENCE_PG_DUMP="$PG16_BIN/pg_dump" RATIO_EVIDENCE_PSQL="$PG16_BIN/psql"; fi
 elif [ "$DB_MODE" = brew ]; then
   BREW_DB="ratio_evidence_${PR}_$(node -e "process.stdout.write(require('crypto').randomBytes(4).toString('hex'))")"
-  createdb "$BREW_DB" || fail 3 "createdb $BREW_DB failed"
+  createdb -h "$BREW_PG_HOST" -p "$BREW_PG_PORT" "$BREW_DB" || fail 3 "createdb $BREW_DB failed"
   say "Created database $BREW_DB"
-  RATIO_EVIDENCE_SCRATCH_DATABASE_URL="postgres://$(id -un)@127.0.0.1:5432/$BREW_DB"
+  RATIO_EVIDENCE_SCRATCH_DATABASE_URL="postgres://$(id -un)@$BREW_PG_HOST:$BREW_PG_PORT/$BREW_DB"
   export RATIO_EVIDENCE_SCRATCH_DATABASE_URL
 fi
 
