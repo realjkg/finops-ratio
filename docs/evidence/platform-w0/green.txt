@@ -1,0 +1,24 @@
+GREEN evidence, platform wave 0 (ADR-0001). Gates run at 08717eb on base 1056be0, sequentially, in a fresh clone after npm ci.
+1 lint (npm run lint): exit 0
+2 typecheck (npm run typecheck): exit 0
+3 worker typecheck (npx tsc -p tsconfig.worker.json --noEmit, now incl. src/platform/contracts): exit 0
+4 full vitest (npx vitest run --cache=false): Test Files  308 passed (308); Tests  5169 passed (5169)
+5 build (npm run build): exit 0 (git status clean afterwards; next-env.d.ts unchanged)
+6 check:bundle: {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]}
+7 contracts only (npx vitest run src/platform scripts/check-next-bundle.test.mjs --cache=false): Test Files 7 passed (7); Tests 93 passed (93)
+8 git diff --check origin/main...HEAD: clean
+9 classify-risk --git origin/main...HEAD: risk restricted; classes retention (retention.mention, docs), unclassified (fail-closed-default: src/platform/**, tsconfig.worker.json)
+10 rollback: scratch GIT_INDEX_FILE read-tree HEAD + apply -R + write-tree = adf0cd6b989ffdbf636a3ec83983ad44b60c0dc7 = base tree
+Mutations (each applied alone, targeted suite run, source restored; git status clean after):
+ M1 strict objects accept unknown keys: KILLED (9 failing): carries no prompt or response body 9ms
+ M2 enforcing policy may fail open: KILLED (2 failing): an enforcing policy that can block fails closed on timeout and engine error 11ms
+ M3 allocation sum not checked: KILLED (1 failing): shares plus the explicit unallocated remainder equal the source amount exactly 7ms
+ M4 human actor ref not pseudonymous: KILLED (2 failing): humans only as keyed pseudonyms; services and agents by registered id; unknown carries n
+ M5 negative token counts accepted: KILLED (2 failing): token counts are non-negative decimal strings, never numbers 14ms
+ M6 output policy may pass through: KILLED (1 failing): an enforcing output policy must buffer: released stream content cannot be withdrawn 7ms
+ M7 monitor decision may be enforced: KILLED (1 failing): a monitor-only decision is never enforced; it records what enforcement would have done 8
+ M8 bundle tenant not checked: KILLED (1 failing): every policy and entitlement belongs to the bundle tenant (tenant isolation) 8ms
+ M9 contract markers allowed in client files: KILLED (1 failing): a client chunk carrying a contract schema version fails; the same text in a server chunk
+ M10 instants accept offsets: KILLED (1 failing): instants are UTC with a Z; offsets, 24:00 and leap seconds are refused 7ms
+ M11 estimate without rate card: KILLED (1 failing): an estimate names the rate card version that priced it 11ms
+ M12 human metric counts services: KILLED (1 failing): human metrics count humans only; service activity never counts humans 7ms
