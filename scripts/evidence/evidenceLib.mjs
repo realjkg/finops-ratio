@@ -174,6 +174,7 @@ export function renderEvidenceMd(e) {
   L.push(`# Merge evidence: PR #${e.pr}`, '');
   L.push(`Attests code SHA \`${e.head.sha}\` (tree \`${e.head.tree}\`) against base \`${e.base.sha}\` (tree \`${e.base.tree}\`), merge-base \`${e.mergeBase}\`.`);
   L.push(`Generated ${e.generatedAt} by \`${e.command}\`. Node ${e.env.node}, npm ${e.env.npm}, ${e.env.os}.`);
+  if (e.collector) L.push(`Collector: commit \`${e.collector.commit ?? 'not a git checkout'}\`, script sha256 \`${e.collector.script.slice(0, 16)}…\`, lib sha256 \`${e.collector.lib.slice(0, 16)}…\`.`);
   if (e.evidenceCommitNote) L.push('', e.evidenceCommitNote);
   L.push('', '## Charter', '', '| # | Item | Status | Evidence |', '|---|---|---|---|');
   for (const c of e.charter) L.push(`| ${c.id} | ${cell(c.item)} | **${c.status}** | ${cell(c.evidence)} |`);

@@ -23,9 +23,19 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
+import { fileURLToPath } from 'node:url';
 import { STATUS, browserPlan, dbTestPlan, redact, secretsFromEnv, classifyGate, fixtureRows, gatesItemStatus, parsePlaywrightTotals, parseVitestTotals, renderEvidenceMd, statedTotals, stripAnsi, totalsByCurrency } from './evidenceLib.mjs';
 
 const ROOT = process.cwd();
+const SELF = fileURLToPath(import.meta.url);
+/** Which collector produced the evidence: its files' sha256 and, when it lives in a git checkout, that commit. */
+function collectorProvenance() {
+  const dir = path.dirname(SELF);
+  let commit = null;
+  try { commit = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not a checkout */ }
+  const file = (n) => crypto.createHash('sha256').update(fs.readFileSync(path.join(dir, n))).digest('hex');
+  return { commit, script: file('collect-pr-evidence.mjs'), lib: file('evidenceLib.mjs') };
+}
 const SECRETS = secretsFromEnv(process.env);
 const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1] && !all[i + 1].startsWith('--') ? all[i + 1] : 'true']] : acc), []));
 const say = (m) => process.stdout.write(`${m}\n`);
@@ -44,7 +54,8 @@ const LOGS = path.resolve(args.logs ?? path.join(OUT, 'logs'));
 fs.mkdirSync(LOGS, { recursive: true });
 const ev = {
   schema: 'ratio.pr-evidence/1', pr: Number(args.pr), generatedAt: new Date().toISOString(),
-  command: `node scripts/evidence/collect-pr-evidence.mjs --base ${args.base} --head ${args.head} --pr ${args.pr}${args.out ? ` --out ${args.out}` : ''}`,
+  command: `node ${path.relative(ROOT, SELF) || SELF} --base ${args.base} --head ${args.head} --pr ${args.pr}${args.out ? ` --out ${args.out}` : ''}`,
+  collector: collectorProvenance(),
   env: { node: process.version, npm: execFileSync('npm', ['-v'], { encoding: 'utf8' }).trim(), os: `${os.type()} ${os.release()} ${os.arch()}` },
   base: { ref: args.base, sha: baseSha, tree: git('rev-parse', `${baseSha}^{tree}`) },
   head: { sha: headSha, tree: git('rev-parse', `${headSha}^{tree}`) },

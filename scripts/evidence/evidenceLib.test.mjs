@@ -89,6 +89,7 @@ describe('renderEvidenceMd', () => {
     expect(md).toMatch(/\| 1 \| All gates green \| \*\*NOT RUN\*\* \|/);
     expect(md).toContain('## Known gaps\n\n- no database');
     expect(md).toContain(`Attests code SHA \`${'h'.repeat(40)}\``);
+    expect(renderEvidenceMd({ ...base, collector: { commit: 'c'.repeat(40), script: 'a'.repeat(64), lib: 'b'.repeat(64) } })).toContain(`Collector: commit \`${'c'.repeat(40)}\``);
   });
 });
 
