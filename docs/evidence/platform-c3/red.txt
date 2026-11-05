@@ -87,3 +87,25 @@ Command: npx vitest run src/platform/conformance --cache=false
 ⎯⎯⎯⎯⎯⎯ Failed Tests 13 ⎯⎯⎯⎯⎯⎯⎯
  Test Files  2 failed | 2 passed (4)
       Tests  13 failed | 98 passed (111)
+
+REVIEW ROUND 4 (challenger review of #184 at 201c973: M1, L1-L6). #183 merged (e6eee94); main merged in first (54846f8).
+Tests committed before the fixes in 02ebdd4: C3 in src/platform/conformance/review2.test.ts ("round 4"), C1 in src/platform/policy/review2.test.ts.
+Tests that already pass before the fix guard mutations N38, N49, N50 and the accepted L5 availability cost.
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance
+     × Messages mcp_servers under an fn:search allowlist (M1)
+     × a nameless mcp_servers entry, no tool policy
+     × an unknown tool-declaring parameter (plugins), no tool policy
+     × a bundle listing the unidentified sentinel is refused (L2)
+     × server_tool_use in history is type:web_search (L4)
+     × mcp_tool_use in history is mcp:<server_name>
+     × a Responses mcp_call item is mcp:<server_label>
+     × a Responses input item of unknown type (L3) is uninspectable: DLP unavailable
+     × a typeless Responses input item with data is uninspectable: DLP unavailable
+     × function_call_output.output parts of unknown type is uninspectable: DLP unavailable
+     × known Responses items stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly
+     × a bundle naming an unidentified: tool is refused (L2)
+     × an unidentified tool is refused by the access decision (enforce: block)
+     × an unidentified tool is refused by the access decision (monitor: allow)
+     × unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)
+ Test Files  2 failed | 7 passed (9)
+      Tests  15 failed | 257 passed (272)

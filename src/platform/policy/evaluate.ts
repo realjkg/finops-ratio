@@ -8,7 +8,7 @@
 // 1000 findings, 256 teams and tools): O(P*R + E*M + F) with per-category finding summaries.
 import { isCount, isId, isIsoInstant, validatePolicyDecision, POLICY_PHASES, type Entitlement, type Policy, type PolicyCondition, type PolicyDecision } from '../contracts';
 import { capabilityOn, parsePlatformBlock, type PlatformFlags } from '../flags';
-import { compileBundle, current, RESERVED_PREFIX, selectBundle, type BundleFailure, type CompiledBundle, type Selected } from './bundle';
+import { compileBundle, current, RESERVED_PREFIX, selectBundle, UNIDENTIFIED_PREFIX, type BundleFailure, type CompiledBundle, type Selected } from './bundle';
 import { validateRequestContext, type RequestContext } from './context';
 
 export type Outcome = PolicyDecision['outcome'];
@@ -132,7 +132,7 @@ function policyPart(p: Policy, env: Env): Part {
   return { mode: p.mode, controlClass: cls, outcome, ruleIds: matched.map((r) => r.ruleId), reasonCodes: [...matched.map((r) => r.reasonCode), ...(acting.length ? [] : [p.defaultAction === 'block' ? 'DEFAULT_BLOCK' : 'DEFAULT_ALLOW'])], findings };
 }
 
-/** Entitlements for the requested AND the served model: a family deny wins; an exact grant is required; no model, no access. */
+/** Entitlements for the requested AND the served model: a family deny wins; an exact grant is required; no model, no access; an unidentified tool, no access. */
 function accessPart(b: CompiledBundle, c: RequestContext, now: string, mode: Mode): Part {
   if (c.unavailable?.includes('entitlements')) return failed(mode, 'hard', 'entitlement_unavailable', 'ENTITLEMENTS_UNAVAILABLE');
   const subject = (e: Entitlement) => e.subjectKind === 'tenant' ? e.subjectRef === c.tenantId : e.subjectKind === 'team' ? (c.teamIds ?? []).includes(e.subjectRef)
@@ -146,7 +146,7 @@ function accessPart(b: CompiledBundle, c: RequestContext, now: string, mode: Mod
     return { code, deny, allow };
   };
   const checks = [check(c.modelRequested, false), ...(c.modelServed !== undefined && c.modelServed !== c.modelRequested ? [check(c.modelServed, true)] : [])];
-  const refused = checks.filter((k) => k.code !== null);
+  const refused = [...checks.filter((k) => k.code !== null), ...((c.tools ?? []).some((t) => t.startsWith(UNIDENTIFIED_PREFIX)) ? [{ code: 'TOOL_UNIDENTIFIED', deny: [] }] : [])];
   return refused.length
     ? { mode, controlClass: 'hard', outcome: 'block', ruleIds: uniq(refused.flatMap((k) => k.deny)), reasonCodes: refused.map((k) => k.code as string) }
     : { mode, controlClass: 'hard', outcome: 'allow', ruleIds: uniq(checks.flatMap((k) => k.allow)), reasonCodes: ['ENTITLED'] };

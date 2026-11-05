@@ -7,7 +7,7 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { isId, isModelId, type ActorType, type DlpFinding, type GatewayRequestRecord, type PolicyDecision } from '../contracts';
-import { applicablePolicies, compileBundle, evaluate, failureEvaluation, selectBundle, type Evaluation, type EvaluationInput, type RequestContext } from '../policy';
+import { applicablePolicies, compileBundle, evaluate, failureEvaluation, selectBundle, UNIDENTIFIED_PREFIX, type Evaluation, type EvaluationInput, type RequestContext } from '../policy';
 import { CONFORMANCE_MARKER } from './mockProviders';
 
 type Location = DlpFinding['location'];
@@ -52,28 +52,41 @@ const MEDIA = /^(input_)?(image|audio|video|file|document)(_url|_file)?$/i;
 interface Seg { location: Location; text: string }
 interface Parsed { model?: string; stream: boolean; segs: Seg[]; tools: string[]; opaque: boolean }
 
-/** A JSON number as written (JSON.parse source text access), so long numbers keep every digit. */
+/** A JSON number as written (JSON.parse source text access, Node >= 21), so long numbers keep every digit. No fallback. */
 class Num { constructor(readonly src: string) {} }
-const parse = (text: string): J => JSON.parse(text, (_k, v, ctx?: { source?: string }) => (typeof v === 'number' ? new Num(ctx?.source ?? String(v)) : v));
+type Reviver = (k: string, v: unknown, ctx?: { source?: string }) => unknown;
+const parse = (text: string): J => JSON.parse(text, (_k, v, ctx?: { source: string }) => (typeof v === 'number' ? new Num((ctx as { source: string }).source) : v));
+/** Fails loudly (at gateway creation) when the runtime has no source text access. */
+export function requireSourceText(p: (text: string, r: Reviver) => unknown = JSON.parse) {
+  let s: unknown;
+  p('1', (_k, v, ctx) => { s = ctx?.source; return v; });
+  if (s !== '1') throw new Error('JSON.parse source text access is required (Node >= 21): numbers must keep their digits');
+}
 const ident = (kind: string, n: string) => (isId(`${kind}:${n}`) ? `${kind}:${n}` : `${kind}-h:${crypto.createHash('sha256').update(n).digest('hex').slice(0, 16)}`);
 /**
  * Every identity of a tool, namespaced so none collides: function tools (type function or none, and named calls) by
  * `fn:<name>` (all names given), mcp tools by `mcp:<server_label>`, other typed tools by `type:<type>` (a name there is
- * not an identity). With no identity, `unidentified:<requestRef>`, which no policy can list.
+ * not an identity). With no identity, `unidentified:<requestRef>`, which no policy can list. Anthropic `mcp_servers` entries
+ * are `mcp:<name>`; any other top-level parameter that may declare tools is unidentified (refused in enforce).
  */
 const toolIds = (t: J, unidentified: string): string[] => {
   const type = typeof t?.type === 'string' && !['function', 'tool_use', 'function_call'].includes(t.type) ? t.type : undefined;
-  if (type === 'mcp') return [typeof t.server_label === 'string' ? ident('mcp', t.server_label) : unidentified];
+  const named = (kind: string, n: unknown) => [typeof n === 'string' ? ident(kind, n) : unidentified];
+  if (type?.startsWith('mcp')) return named('mcp', t.server_label ?? t.server_name); // mcp tools, mcp_call and mcp_tool_use history items
+  if (type === 'server_tool_use') return named('type', t.name); // a server tool call in history names its tool
   if (type) return [ident('type', type)];
   const names = [t?.function?.name, t?.name].filter((n): n is string => typeof n === 'string');
   return names.length ? names.map((n) => ident('fn', n)) : [unidentified];
 };
 /**
- * Content-block positions (chat and Responses message `content`, Messages `content`, `system` and tool_result `content`):
+ * Content-block positions (chat and Responses message `content`, Responses `input` items and function_call_output `output`,
+ * Messages `content`, `system` and tool_result `content`):
  * a block of an unknown type, or a typeless part with binary-ish fields, is uninspectable. Elsewhere (e.g. JSON schemas in
  * tool definitions) objects are data and are walked.
  */
-const TEXT_BLOCKS = new Set(['text', 'input_text', 'output_text', 'refusal', 'thinking', 'tool_use', 'tool_result', 'function_call', 'function_call_output']);
+const TEXT_BLOCKS = new Set(['text', 'input_text', 'output_text', 'refusal', 'thinking', 'tool_use', 'tool_result', 'function_call', 'function_call_output',
+  'message', 'mcp_call', 'server_tool_use', 'mcp_tool_use']);
+const TOOLISH = /tool|function|mcp|server|plugin|connector/i, NOT_DECLARING = new Set(['tools', 'functions', 'tool_choice', 'parallel_tool_calls', 'function_call', 'max_tool_calls']);
 const BINARY = ['image_url', 'image', 'input_audio', 'audio', 'file', 'file_data', 'source', 'data'];
 const inspectable = (b: J) => !b || typeof b !== 'object' || Array.isArray(b) || b instanceof Num || (typeof b.type === 'string' ? TEXT_BLOCKS.has(b.type) : !BINARY.some((k) => k in b));
 /**
@@ -84,7 +97,8 @@ const inspectable = (b: J) => !b || typeof b !== 'object' || Array.isArray(b) ||
 function inspect(root: J, base: Location, unidentified: string): Parsed {
   const out: Parsed = { stream: root?.stream === true, segs: [], tools: [], opaque: false, model: isModelId(root?.model) ? root.model : undefined };
   const add = (location: Location, text: string) => out.segs.push({ location, text });
-  const tool = (t: J) => { for (const id of toolIds(t, unidentified)) if (!out.tools.includes(id)) out.tools.push(id); };
+  const id = (x: string) => { if (!out.tools.includes(x)) out.tools.push(x); };
+  const tool = (t: J) => { for (const x of toolIds(t, unidentified)) id(x); };
   const walk = (v: J, loc: Location, depth: number, nested: number): void => {
     if (depth > MAX_DEPTH || out.segs.length > MAX_SEGMENTS) { out.opaque = true; return; }
     if (typeof v === 'string') {
@@ -101,12 +115,15 @@ function inspect(root: J, base: Location, unidentified: string): Parsed {
     if (!v || typeof v !== 'object') return; // booleans and null carry no text
     if (typeof v.type === 'string' && MEDIA.test(v.type)) { out.opaque = true; return; }
     const here: Location = v.role === 'system' || v.role === 'developer' ? 'system' : v.role === 'tool' || v.type === 'tool_result' || v.type === 'function_call_output' ? 'tool_result' : loc;
-    if (v.role === undefined && (v.type === 'tool_use' || v.type === 'function_call' || 'arguments' in v || (v.type === 'function' && v.function))) tool(v);
+    if (v.role === undefined && (['tool_use', 'function_call', 'server_tool_use', 'mcp_tool_use'].includes(v.type) || 'arguments' in v || (v.type === 'function' && v.function))) tool(v);
     for (const [k, x] of Object.entries(v)) {
       add(here, k);
       if (k === 'model' && depth === 0) continue;
       if ((k === 'tools' || k === 'functions') && Array.isArray(x)) for (const t of x) tool(t);
-      const blocks = (k === 'content' && (v.role !== undefined || v.type === 'tool_result' || v.type === 'message')) || (k === 'system' && depth === 0);
+      if (depth === 0 && k === 'mcp_servers') for (const s of Array.isArray(x) ? x : [x]) id(typeof s?.name === 'string' ? ident('mcp', s.name) : unidentified);
+      else if (depth === 0 && TOOLISH.test(k) && !NOT_DECLARING.has(k)) id(unidentified);
+      const blocks = (k === 'content' && (v.role !== undefined || v.type === 'tool_result' || v.type === 'message')) || (k === 'output' && v.type === 'function_call_output')
+        || (depth === 0 && (k === 'system' || (k === 'input' && Array.isArray(x))));
       if (blocks && !(Array.isArray(x) ? x : [x]).every(inspectable)) out.opaque = true;
       const l: Location = k === 'system' || k === 'instructions' ? 'system' : k === 'arguments' || k === 'partial_json' || (k === 'input' && v.type === 'tool_use') ? 'tool_arguments' : here;
       walk(x, l, depth + 1, nested);
@@ -156,6 +173,7 @@ const post = (url: string, body: Buffer) => new Promise<http.IncomingMessage>((r
 const readAll = async (res: http.IncomingMessage) => { const parts: Buffer[] = []; for await (const p of res) parts.push(p as Buffer); return Buffer.concat(parts); };
 
 export function createMockGateway(o: GatewayOptions) {
+  requireSourceText();
   const engine = o.engine ?? evaluate;
   const flags = Object.freeze({ enabled: true, economics: false, adoption: false, policyMonitor: true, enforcement: o.accessMode === 'enforce' });
   const bundle = compileBundle(o.bundle) ?? o.bundle; // compiled once at load (C1 L4); an invalid one is decided by C1
@@ -202,7 +220,7 @@ export function createMockGateway(o: GatewayOptions) {
     const provider = (route && Object.keys(o.providers).find((k) => o.providers[k].flavor === route.flavor)) || 'unrouted';
     let parsed: Parsed = { stream: false, segs: [], tools: [], opaque: true };
     const oversized = raw.length > o.maxInspectBytes; // bytes, not characters
-    if (!oversized) { try { parsed = inspect(parse(raw.toString('utf8')), 'input', `unidentified:${requestRef}`); } catch { /* opaque: fails closed below */ } }
+    if (!oversized) { try { parsed = inspect(parse(raw.toString('utf8')), 'input', `${UNIDENTIFIED_PREFIX}${requestRef}`); } catch { /* opaque: fails closed below */ } }
     const decisions: PolicyDecision[] = [];
     const base = { tenantId: id.tenantId, requestRef, workloadId: id.workloadId, teamIds: id.teamIds, actorType: id.actorType, actorRef: id.actorRef, provider,
       destination: `${provider}:${route?.dest ?? 'unknown'}`, modelRequested: parsed.model, inputBytes: raw.length };
@@ -230,7 +248,7 @@ export function createMockGateway(o: GatewayOptions) {
       let j: J, body: Buffer, bodyText: string;
       try { body = await readAll(res); bodyText = body.toString('utf8'); j = parse(bodyText); } catch { return finish(502, [], 'dispatched', 'none'); }
       const big = body.length > o.maxInspectBytes;
-      const out: Parsed = big ? { stream: false, segs: [], tools: [], opaque: true, model: isModelId(j?.model) ? j.model : undefined } : inspect(j, 'output', `unidentified:${requestRef}`);
+      const out: Parsed = big ? { stream: false, segs: [], tools: [], opaque: true, model: isModelId(j?.model) ? j.model : undefined } : inspect(j, 'output', `${UNIDENTIFIED_PREFIX}${requestRef}`);
       const text = outputText(route.dest, j);
       const ok = await run({ ...base, phase: 'pre_response', modelServed: out.model, tools: out.tools, findings: findings(out.segs), ...dlpGap(out.opaque) });
       return ok ? finish(200, [text], 'dispatched', 'full', { text, model: out.model }) : finish(403, [], 'dispatched', 'none', { text, model: out.model });

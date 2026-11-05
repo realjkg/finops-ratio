@@ -83,7 +83,5 @@ describe('#184 round 4: unidentified tools are never listable or allowed; unname
     const e = valid(evaluate(input({ accessMode, bundle: bundle({ policies: [] }), context: ctx({ tools: ['fn:search', 'unidentified:gw-req-1'] }) })));
     expect([e.verdict, brief(e.decisions[0])]).toEqual([verdict, [accessMode, enforced, 'block', '-', 'TOOL_UNIDENTIFIED']]);
   });
-  it('unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)', () => {
-    expect(unnamespacedTools(compileBundle(tools(['shell', 'fn:search', 'mcp:wiki', 'type:web_search', 'fn-h:0123456789abcdef', 'mcp_x'], 'in'))!)).toEqual(['shell', 'mcp_x']);
-  });
+  it('unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)', () => expect(unnamespacedTools(compileBundle(tools(['shell', 'fn:search', 'mcp:wiki', 'type:web_search', 'fn-h:0123456789abcdef', 'mcp_x'], 'in'))!)).toEqual(['shell', 'mcp_x']));
 });

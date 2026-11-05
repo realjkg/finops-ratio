@@ -26,7 +26,6 @@ beforeAll(async () => {
   servers.push({ close: () => new Promise((r) => raw.close(r)) });
 });
 afterAll(async () => { await Promise.all(servers.map((s) => s.close())); });
-
 const gw = (over: Partial<GatewayOptions> = {}, pa = () => a.url) => createMockGateway({
   gatewayId: 'gw-mock', bundle: bundle({ policies: [dlp()], entitlements: ents }), accessMode: 'enforce', detect, maxInspectBytes: 4096, windowChunks: 2, maxDetectorSpan: SECRET.length,
   credentials: { 'vk-bot': { tenantId: 'tenant-syn', workloadId: 'wl-bot', actorType: 'service', actorRef: 'svc:bot' } },
@@ -43,7 +42,6 @@ function sum(r: GatewayResult) {
   return { status: r.status, codes: [...new Set(r.decisions.flatMap((d) => (d.enforced && d.outcome !== 'allow' ? d.reasonCodes : [])))] };
 }
 const chat = (content: unknown, more: object = {}) => ({ model: 'model-x', messages: [{ role: 'user', content }], ...more });
-
 describe('H1: a model the gateway cannot read is never dispatched (enforce)', () => {
   const allowAllDenyZ = bundle({ policies: [], entitlements: [ent({ models: ['*'] }), ent({ entitlementId: 'ent-no-z', models: ['model-z'], effect: 'deny' })] });
   it.each([
@@ -72,7 +70,6 @@ describe('H1: a model the gateway cannot read is never dispatched (enforce)', ()
     expect({ ...sum(r), bytes: r.record?.inputBytes }).toEqual({ status: 403, codes: ['MODEL_UNKNOWN', 'DLP_UNAVAILABLE'], bytes: Buffer.byteLength(body) });
   });
 });
-
 describe('M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds', () => {
   it.each([
     ['chat tools[].function.description', '/v1/chat/completions', chat('q', { tools: [{ type: 'function', function: { name: 'search', description: `use ${SECRET}` } }] })],
@@ -97,7 +94,6 @@ describe('M1: every string value is inspected (unknown keys are content), nested
     expect(sum(await send(gw(), '/v1/chat/completions', chat('q', { metadata: deep })))).toEqual({ status: 403, codes: ['DLP_UNAVAILABLE'] });
   });
 });
-
 describe('M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools', () => {
   const spin = (ms: number) => { const t = performance.now(); while (performance.now() - t < ms); };
   it.each([['enforce', 403, 0], ['monitor', 200, 1]] as const)('a CPU-bound engine over the deadline is a timeout (%s: %i, %i calls)', async (accessMode, status, n) => {
@@ -120,7 +116,6 @@ describe('M2, M4, M5: synchronous engines, last-known-good settings, multi-turn 
     expect(sum(await send(gw({ accessMode, bundle: bundle({ policies: [dlp('pre_request', { mode: accessMode })], entitlements: ents }) }), '/v1/chat/completions', body))).toEqual({ status: 200, codes: [] });
   });
 });
-
 describe('M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams', () => {
   const streamed = async (o: MockProviderOptions, release: Policy['release']) => {
     const p = await provider(o);

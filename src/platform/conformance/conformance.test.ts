@@ -22,13 +22,11 @@ const conformanceBundle = (stream: Partial<Policy> = {}, over: Partial<PolicyBun
 const inspected: number[] = [];
 /** A seeded-marker detector standing in for the C4 detectors: offsets only, never the text. */
 const detect = (text: string, location: DlpFinding['location']): DlpFinding[] => { inspected.push(text.length); return seeded([SECRET])(text, location); };
-
 const providers: MockProvider[] = [];
 const provider = async (o: MockProviderOptions) => { const p = await startMockProvider(o); providers.push(p); return p; };
 afterAll(async () => { await Promise.all(providers.map((p) => p.close())); });
 let a: MockProvider, b: MockProvider;
 beforeAll(async () => { a = await provider({ flavor: 'openai', reply: ['Hello ', 'there'] }); b = await provider({ flavor: 'anthropic', reply: ['Hi'] }); });
-
 const gateway = (over: Partial<GatewayOptions> = {}, pa = a, pb = b) => createMockGateway({
   gatewayId: 'gw-mock', bundle: conformanceBundle(), accessMode: 'enforce', detect, maxInspectBytes: 4096, windowChunks: 2,
   credentials: { 'vk-bot': { tenantId: 'tenant-syn', workloadId: 'wl-bot', actorType: 'service', actorRef: 'svc:bot' } },
@@ -48,7 +46,6 @@ function checked(r: GatewayResult) {
 }
 const codes = (r: GatewayResult) => r.decisions.flatMap((d) => (d.enforced && d.outcome !== 'allow' ? d.reasonCodes : []));
 const calls = (p: MockProvider) => p.calls.length;
-
 describe('pre-dispatch: a blocked request never reaches the provider', () => {
   it('a clean request is dispatched once and released in full; test servers listen on 127.0.0.1 only', async () => {
     expect([a.url, b.url].every((u) => /^http:\/\/127\.0\.0\.1:\d+$/.test(u))).toBe(true);
@@ -109,7 +106,6 @@ describe('pre-dispatch: a blocked request never reaches the provider', () => {
     expect(codes(r)).toContain('DLP_UNAVAILABLE');
   });
 });
-
 describe('fail closed on evaluation timeout and engine error', () => {
   it('a hung engine times out at the policy deadline and the request is never dispatched', async () => {
     const before = calls(a);
@@ -130,7 +126,6 @@ describe('fail closed on evaluation timeout and engine error', () => {
     expect({ status: r.status, calls: calls(a) - before, gap: r.decisions.some((d) => d.failureHandling === 'continued_with_gap') }).toEqual({ status: 200, calls: 1, gap: true });
   });
 });
-
 describe('pre-release: output policy, served-model fallback, streaming and partial failure', () => {
   it('a blocked response is never released (non-streamed)', async () => {
     const p = await provider({ flavor: 'openai', reply: ['card ', SECRET] });

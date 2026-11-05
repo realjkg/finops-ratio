@@ -16,6 +16,11 @@ export type Selected = { ok: true; compiled: CompiledBundle; lkg?: { contentSha2
 
 /** Reserved for refusal placeholders: refused in request contexts and bundle ids, so a placeholder cannot be forged. */
 export const RESERVED_PREFIX = 'refused:';
+/** A tool the gateway could not identify: never listable (a bundle naming one is refused), refused by the access decision. */
+export const UNIDENTIFIED_PREFIX = 'unidentified:';
+const toolIdsOf = (b: PolicyBundle) => b.policies.flatMap((p) => p.rules.flatMap((r) => (r.condition.kind === 'tool' ? r.condition.tools : [])));
+/** Advisory (non-gating): tool ids without a gateway namespace (fn:, mcp:, type:), which never match a gateway identity. */
+export const unnamespacedTools = (c: CompiledBundle) => [...new Set(toolIdsOf(c.bundle).filter((t) => !/^(fn|mcp|type)(-h)?:/.test(t)))];
 const COMPILED = new WeakSet<object>();
 const freeze = <T>(x: T): T => { if (x && typeof x === 'object' && !Object.isFrozen(x)) { Object.values(x).forEach(freeze); Object.freeze(x); } return x; };
 type Versioned = { id: string; version: number; effectiveFrom: string; effectiveTo?: string };
@@ -34,7 +39,7 @@ export function compileBundle(raw: unknown): CompiledBundle | null {
   if (isCompiled(raw)) return raw;
   try {
     const r = validatePolicyBundle(structuredClone(raw));
-    if (!r.ok || r.value.bundleId.startsWith(RESERVED_PREFIX)) return null;
+    if (!r.ok || r.value.bundleId.startsWith(RESERVED_PREFIX) || toolIdsOf(r.value).some((x) => x.startsWith(UNIDENTIFIED_PREFIX))) return null;
     const b = r.value;
     const c: CompiledBundle = freeze({ bundle: b, policies: b.policies.map((p, index) => ({ policy: p, index })), entitlements: b.entitlements });
     COMPILED.add(c);

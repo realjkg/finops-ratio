@@ -32,7 +32,6 @@ async function go(path: string, body: unknown, over: Partial<GatewayOptions> = {
 const chat = (content: unknown, more: object = {}) => ({ model: 'model-x', messages: [{ role: 'user', content }], ...more });
 const args = (x: string) => ({ model: 'model-x', messages: [{ role: 'assistant', content: null, tool_calls: [{ id: 't1', type: 'function', function: { name: 'search', arguments: x } }] }] });
 const blocked = { status: 403, calls: 0 };
-
 describe('M1: object keys and non-string scalars are inspected', () => {
   it.each([
     ['a marker as a JSON key in tool arguments', args(JSON.stringify({ [SECRET]: 'x' }))], ['a marker as a top-level key', { ...chat('q'), [SECRET]: 1 }],
@@ -43,7 +42,6 @@ describe('M1: object keys and non-string scalars are inspected', () => {
     expect(await go('/v1/chat/completions', body)).toMatchObject({ ...blocked, codes: ['DLP_PAYMENT_CARD'] });
   });
 });
-
 describe('M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist', () => {
   const allow = bundle({ entitlements: ENTS, policies: [pol({ policyId: 'pol-tools', rules: [rule({ ruleId: 'r-tools', condition: { kind: 'tool', tools: ['fn:search', 'type:web_search_preview', 'mcp:wiki', 'fn:_lookup', 'unidentified-tool'], match: 'not_in' }, reasonCode: 'TOOL_NOT_ALLOWED' })] })] });
   it.each([
@@ -54,12 +52,11 @@ describe('M2 / L1: tools identified by name, else by type; unidentifiable tools 
     ['a tool without name or type', '/v1/responses', { model: 'model-x', input: 'q', tools: [{ container: {} }] }, 403],
     ['a name that is not an id (_shell), not allowed', '/v1/chat/completions', chat('q', { tools: [{ type: 'function', function: { name: '_shell' } }] }), 403],
     ['a name that is not an id (_lookup), allowed as fn:_lookup', '/v1/chat/completions', chat('q', { tools: [{ type: 'function', function: { name: '_lookup' } }] }), 200],
-  ])('%s', async (_n, path, body, status) => {
+  ])('%s', async (n, path, body, status) => {
     const r = await go(path, body, { bundle: allow });
-    expect({ status: r.status, codes: r.codes }).toEqual({ status, codes: status === 403 ? ['TOOL_NOT_ALLOWED'] : [] });
+    expect({ status: r.status, codes: r.codes }).toEqual({ status, codes: status === 403 ? [...(n.includes('without name') ? ['TOOL_UNIDENTIFIED'] : []), 'TOOL_NOT_ALLOWED'] : [] });
   });
 });
-
 describe('M3: over-cap findings or tools never flip block to allow (monitor access, enforce DLP policy)', () => {
   const mixed = { accessMode: 'monitor' as const, maxInspectBytes: 1e7 };
   it.each([
@@ -69,7 +66,6 @@ describe('M3: over-cap findings or tools never flip block to allow (monitor acce
     expect(await go(path, body, mixed)).toMatchObject(blocked);
   });
 });
-
 describe('L2-L4: media types, carried findings, oversized responses, detector span', () => {
   it.each(['Image', 'image_file', 'INPUT_AUDIO', 'video_url'])('a %s block is opaque: DLP unavailable', async (type) => {
     expect(await go('/v1/messages', { model: 'model-c', messages: [{ role: 'user', content: [{ type, source: {} }] }] })).toMatchObject({ ...blocked, codes: ['DLP_UNAVAILABLE'] });
@@ -135,7 +131,7 @@ describe('round 4: tools declared outside tools, history identities, item and bl
     ['an unknown tool-declaring parameter (plugins), no tool policy', '/v1/chat/completions', chat('q', { plugins: [{ id: 'x' }] }), undefined, 403, U],
     ['fn:search + mcp:evil under fn:search + mcp:wiki', R, { model: 'model-x', input: 'q', tools: [{ type: 'function', name: 'search' }, { type: 'mcp', server_label: 'evil' }] }, only(['fn:search', 'mcp:wiki']), 403, N],
     ['a bundle listing the unidentified sentinel is refused (L2)', R, { model: 'model-x', input: 'q', tools: [{ type: 'mcp' }] }, only(['unidentified:gw-mock-req-1']), 403, ['BUNDLE_INVALID']],
-    ['server_tool_use in history is type:web_search (L4)', M, msgs({}, { type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'x' } }), only(['fn:search']), 403, N],
+    ['server_tool_use in history is type:web_search (L4)', M, msgs({}, { type: 'server_tool_use', id: 's1', name: 'web_search', input: { query: 'x' } }), only(['type:web_search'], 'in'), 403, N],
     ['mcp_tool_use in history is mcp:<server_name>', M, msgs({}, { type: 'mcp_tool_use', id: 'm1', name: 'run', server_name: 'evil', input: {} }), only(['mcp:evil'], 'in'), 403, N],
     ['a Responses mcp_call item is mcp:<server_label>', R, { model: 'model-x', input: [{ type: 'mcp_call', id: 'c1', server_label: 'evil', name: 'run', arguments: '{}', output: 'ok' }] }, only(['mcp:evil'], 'in'), 403, N],
   ])('%s', async (_n, path, body, b, status, codes) => expect(await go(path, body, b ? { bundle: b } : {})).toMatchObject({ status, codes }));
@@ -146,9 +142,13 @@ describe('round 4: tools declared outside tools, history identities, item and bl
     ['a tool_result content block of unknown type (N49)', M, msgs({}, { type: 'tool_result', tool_use_id: 't', content: [{ type: 'pdf', data: 'QUJD' }] })], ['a top-level system block of unknown type (N50)', M, msgs({ system: [{ type: 'pdf', data: 'QUJD' }] })],
     ['redacted_thinking in history (accepted availability cost, L5)', M, msgs({}, { type: 'redacted_thinking', data: 'QUJD' })], ['web_search_tool_result in history (L5)', M, msgs({}, { type: 'web_search_tool_result', tool_use_id: 's', content: [] })],
   ])('%s is uninspectable: DLP unavailable', async (_n, path, body) => expect(await go(path, body)).toMatchObject({ ...blocked, codes: ['DLP_UNAVAILABLE'] }));
-  it('known Responses items stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly', async () => {
-    expect((await go(R, { model: 'model-x', input: [{ role: 'user', content: 'q' }, { type: 'function_call', call_id: 'c', name: 'search', arguments: '{}' }, { type: 'function_call_output', call_id: 'c', output: 'ok' }] })).status).toBe(200);
+  it('known items and blocks stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly at creation', async () => {
+    expect((await go(R, { model: 'model-x', tool_choice: 'auto', parallel_tool_calls: true, max_tool_calls: 2, function_call: 'auto', input: [{ type: 'message', role: 'user', content: 'q' }, { type: 'function_call', call_id: 'c', name: 'search', arguments: '{}' }, { type: 'function_call_output', call_id: 'c', output: 'ok' }, { type: 'mcp_call', server_label: 'wiki', name: 'run', arguments: '{}', output: 'ok' }] })).status).toBe(200);
+    expect((await go(M, msgs({}, { type: 'server_tool_use', id: 's', name: 'web_search', input: {} }, { type: 'mcp_tool_use', id: 'm', name: 'run', server_name: 'wiki', input: {} }))).status).toBe(200);
     expect(await go('/v1/completions', { model: 'model-x', prompt: [Number(PAN), 7] })).toMatchObject({ ...blocked, codes: ['DLP_PAYMENT_CARD'] });
-    expect([() => requireSourceText(), () => requireSourceText((s, r) => JSON.parse(s, (k, v) => r(k, v)))].map((f) => { try { f(); return 'ok'; } catch (e) { return String(e); } })).toEqual(['ok', expect.stringMatching(/source text/)]);
+    const real = JSON.parse;
+    JSON.parse = ((s: string, r?: (k: string, v: unknown) => unknown) => real(s, r && ((k: string, v: unknown) => r(k, v)))) as typeof JSON.parse; // no source text
+    try { expect([requireSourceText, () => gw()].map((f) => { try { f(); return 'ok'; } catch (e) { return String(e); } })).toEqual([expect.stringMatching(/source text/), expect.stringMatching(/source text/)]); } finally { JSON.parse = real; }
+    expect(() => requireSourceText()).not.toThrow();
   });
 });

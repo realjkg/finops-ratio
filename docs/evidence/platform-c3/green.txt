@@ -110,3 +110,38 @@ Mutation check, round 3 (one at a time, same command): reviewer set rv183c-mut-c
   rv-N18, rv-N19, rv-N20, rv-N21, rv-N22, rv-N23, rv-N24, rv-N25, rv-N26, rv-N27, rv-N28, rv-N29, rv-N30, rv-N31, rv-N32, rv-N33, rv-N34, rv-N35
   rv-N36, rv-N37, rv-N38, rv-N39, rv-N40, rv-N41, rv-N42, rv-N43, rv-N44, rv-N45, rv-N46, R3-1, R3-2, R3-3, R3-4, R3-5, R3-6, R3-7, R3-8, R3-9, R3-10
   Not killed: rv-N13, equivalent (no route means provider "unrouted", which has no target; the 404 branch is reached either way).
+
+REVIEW ROUND 4 (challenger review of #184 at 201c973). Same tests as the round-4 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the server_tool_use case uses a type:web_search denylist; the control case adds tool_choice-style keys, a typed
+message item, mcp_call, server_tool_use and mcp_tool_use; the source-text case also patches JSON.parse to check creation. One round-2 expectation is now
+exact for the access decision: "a tool without name or type" reports TOOL_UNIDENTIFIED and TOOL_NOT_ALLOWED.
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance scripts/check-next-bundle.test.mjs --reporter=verbose (round-4 lines)
+  ✓ Messages mcp_servers under an fn:search allowlist (M1)
+  ✓ Messages mcp_servers allowed as mcp:evil
+  ✓ a nameless mcp_servers entry, no tool policy
+  ✓ an unknown tool-declaring parameter (plugins), no tool policy
+  ✓ fn:search + mcp:evil under fn:search + mcp:wiki
+  ✓ a bundle listing the unidentified sentinel is refused (L2)
+  ✓ server_tool_use in history is type:web_search (L4)
+  ✓ mcp_tool_use in history is mcp:<server_name>
+  ✓ a Responses mcp_call item is mcp:<server_label>
+  ✓ an unidentified tool is recorded, not enforced, in monitor mode
+  ✓ a Responses input item of unknown type (L3) is uninspectable: DLP unavailable
+  ✓ a typeless Responses input item with data is uninspectable: DLP unavailable
+  ✓ function_call_output.output parts of unknown type is uninspectable: DLP unavailable
+  ✓ a tool_result content block of unknown type (N49) is uninspectable: DLP unavailable
+  ✓ a top-level system block of unknown type (N50) is uninspectable: DLP unavailable
+  ✓ redacted_thinking in history (accepted availability cost, L5) is uninspectable: DLP unavailable
+  ✓ web_search_tool_result in history (L5) is uninspectable: DLP unavailable
+  ✓ known items and blocks stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly at creation
+  ✓ a bundle naming an unidentified: tool is refused (L2)
+  ✓ an unidentified tool is refused by the access decision (enforce: block)
+  ✓ an unidentified tool is refused by the access decision (monitor: allow)
+  ✓ unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)
+  Test Files  10 passed (10)
+  Tests  305 passed (305)
+Mutation check, round 4 (one at a time, policy + conformance + check-next-bundle tests): reviewer set rv183d-mut-c3 (53, five anchors adapted: N19, N26,
+  N37, N40, N50): 52/53 killed, incl. the reviewer survivors N38, N49, N50. R4-1..R4-21 new (mcp_servers, unknown tool parameters, non-declaring keys,
+  bundle sentinel, TOOL_UNIDENTIFIED, unnamespacedTools, history identities, Responses positions, text block types, source-text check): 20/21 killed.
+  Not killed, equivalent: rv-N13 (no route means provider "unrouted", which has no target; 404 either way); R4-20 (a source-text fallback in parse is
+  unreachable: the gateway refuses to start without source text).
