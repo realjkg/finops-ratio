@@ -137,6 +137,9 @@ describe('M3, L1, L3, L4: stream windows, served-model fallback, prototype names
   ] as const)('%s: the marker is caught on the joined window', async (_n, reply, release, released, rel) => {
     expect(await streamed({ flavor: 'openai', reply: [...reply] }, release)).toEqual({ status: 403, codes: ['DLP_PAYMENT_CARD'], released, rel });
   });
+  it('a buffered window over the inspection bound is not inspected: DLP unavailable, withheld', async () => {
+    expect(await streamed({ flavor: 'openai', reply: ['x'.repeat(3000), 'y'.repeat(3000)] }, 'buffer_full')).toEqual({ status: 403, codes: ['DLP_UNAVAILABLE'], released: [], rel: 'none' });
+  });
   it('a streamed served-model fallback is re-entitled before release (N17)', async () => {
     expect(await streamed({ flavor: 'openai', reply: ['ok'], serveModel: 'model-y' }, 'buffer_window')).toEqual({ status: 403, codes: ['SERVED_MODEL_NOT_GRANTED'], released: [], rel: 'none' });
   });
@@ -144,6 +147,7 @@ describe('M3, L1, L3, L4: stream windows, served-model fallback, prototype names
     const m = await provider({ flavor: 'anthropic', reply: [], serveModel: 'model-y' });
     const e = await send(gw({ providers: { 'provider-b': { flavor: 'anthropic', url: m.url } } }), '/v1/messages', { model: 'model-c', stream: true, messages: [{ role: 'user', content: 'q' }] });
     expect({ ...sum(e), released: e.released, rel: e.record?.released }).toEqual({ status: 403, codes: ['SERVED_MODEL_NOT_GRANTED'], released: [], rel: 'none' });
+    expect(await streamed({ flavor: 'openai', reply: [], serveModel: 'model-y' }, 'buffer_window')).toEqual({ status: 403, codes: ['SERVED_MODEL_NOT_GRANTED'], released: [], rel: 'none' });
     const p = await provider({ flavor: 'openai', reply: [] });
     const r = await send(gw({}, () => p.url), '/v1/chat/completions', chat('q', { stream: true }));
     expect({ status: r.status, phases: [...new Set(r.decisions.map((d) => d.phase))] }).toEqual({ status: 200, phases: ['pre_request', 'stream_chunk'] });

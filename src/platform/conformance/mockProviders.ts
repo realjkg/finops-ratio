@@ -43,7 +43,7 @@ function events(o: MockProviderOptions, model: string): string[] {
     return [sse({ type: 'message_start', message: { model } }, 'message_start'), ...o.reply.map((text) => sse({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } }, 'content_block_delta')),
       ...args.map((partial_json) => sse({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json } }, 'content_block_delta')), sse({ type: 'message_stop' }, 'message_stop')];
   }
-  return [...o.reply.map((content) => sse({ model, choices: [{ index: 0, delta: { content } }] })),
+  return [sse({ model, choices: [{ index: 0, delta: { role: 'assistant' } }] }), ...o.reply.map((content) => sse({ model, choices: [{ index: 0, delta: { content } }] })),
     ...args.map((a) => sse({ model, choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: a } }] } }] })), sse('[DONE]')];
 }
 

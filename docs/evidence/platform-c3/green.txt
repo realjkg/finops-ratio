@@ -3,50 +3,7 @@ Test edit after RED (reviewed, no assertion weakened): one test ADDED after the 
 without its terminal event must be a partial failure; mock option omitTerminal). Nothing removed or relaxed.
 
 Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (conformance + B8 lines)
-  ✓ scripts/check-next-bundle.test.mjs > B8 test-only conformance mocks stay out of every bundle (ADR-0001 slice C3) > the conformance marker fails in a client file ...
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > a clean request is dispatched once and released in full; test servers listen o...
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat user text: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat content parts: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat system: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat tool-call arguments: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > chat tool result: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > completions-style prompt: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > responses input: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > responses function output: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages system: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages text block: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages tool_use input: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > messages tool_result: seeded card is found and blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > clean /v1/completions is dispatched (surface { model: 'model-x', …(1) })
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > clean /v1/responses is dispatched (surface { model: 'model-x', …(1) })
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > clean /v1/messages is dispatched (surface { model: 'model-c', messages: [Array...
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > an unknown surface (embeddings) is blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > a disallowed tool is blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > an uninspectable content block is blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > malformed JSON is blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > a disallowed model is blocked before dispatch
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > identity comes from the gateway credential; claimed headers are ignored; an un...
-  ✓ conformance.test.ts > pre-dispatch: a blocked request never reaches the provider > an oversized input is bounded: never parsed or inspected past the limit, DLP u...
-  ✓ conformance.test.ts > fail closed on evaluation timeout and engine error > a hung engine times out at the policy deadline and the request is never dispatched
-  ✓ conformance.test.ts > fail closed on evaluation timeout and engine error > an engine that throws fails closed
-  ✓ conformance.test.ts > fail closed on evaluation timeout and engine error > monitor-only: a timeout continues with a visible gap and the request is dispatched
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a blocked response is never released (non-streamed)
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a provider-side model fallback is re-entitled before rel...
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > streams a clean response window by window
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > buffer_full: no chunk before a block is released
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > buffer_window: the blocked window and everything after i...
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a split marker across windows is a documented gap (overl...
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > pass_through (one-chunk windows, no buffering) is refuse...
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > anthropic stream: a card in streamed tool input is withheld
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > partial failure mid-stream (buffer_window): released ["a...
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > partial failure mid-stream (buffer_full): released [], r...
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > a stream that ends without its terminal event is a parti...
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > an upstream error status is dispatched, never released
-  ✓ conformance.test.ts > pre-release: output policy, served-model fallback, streaming and partial failure > the default engine is the C1 library
-  ✓ guard.test.ts > conformance mocks are test-only > have exactly these modules, importing only node built-ins, the contracts, the policy library and each other
-  ✓ guard.test.ts > conformance mocks are test-only > no non-test module of the app, worker, scripts or client imports them
-  ✓ guard.test.ts > conformance mocks are test-only > the worker build does not compile them
-  ✓ guard.test.ts > conformance mocks are test-only > plant test: a minified, tree-shaken bundle of either mock carries the marker check:bundle refuses in client and...
+  (round 0 listing condensed in round 1: 44 tests listed at commit 91f1145; reproducible with the command above)
  Test Files  3 passed (3)
       Tests  76 passed (76)
 
@@ -61,7 +18,7 @@ Mutation check (one at a time, npx vitest run src/platform/conformance scripts/c
   M1  KILLED   blocked request dispatched anyway  <- chat user text: seeded card is found and blocked before dispatch
   M2  KILLED   fail-open on evaluation timeout  <- a hung engine times out at the policy deadline and the request is never dispatched
   M3  KILLED   fail-open on engine error  <- an engine that throws fails closed
-  M4  KILLED   oversized bound removed  <- an oversized input is bounded: never parsed or inspected past the limit, DLP unavailable, 
+  M4  KILLED   oversized bound removed  <- an oversized input is bounded: never parsed or inspected past the limit, DLP unavailable,
   M5  KILLED   streaming window released before (regardless of) its decision  <- buffer_full: no chunk before a block is released
   M6  KILLED   buffer_full ignored (released per window)  <- buffer_full: no chunk before a block is released
   M7  KILLED   tool-call arguments not inspected  <- chat tool-call arguments: seeded card is found and blocked before dispatch
@@ -70,9 +27,83 @@ Mutation check (one at a time, npx vitest run src/platform/conformance scripts/c
   M10 KILLED   partial failure releases the pending window  <- partial failure mid-stream (buffer_window): released ["a","b"], recorded as partial, no us
   M11 KILLED   served model not re-checked before release  <- a provider-side model fallback is re-entitled before release
   M12 KILLED   claimed tenant header trusted  <- identity comes from the gateway credential; claimed headers are ignored; an unknown creden
-  M13 KILLED   raw output text in the record  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1 
-  M14 KILLED   destination not surface-qualified  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1 
+  M13 KILLED   raw output text in the record  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1
+  M14 KILLED   destination not surface-qualified  <- a clean request is dispatched once and released in full; test servers listen on 127.0.0.1
   M15 KILLED   non-streamed blocked response released  <- a blocked response is never released (non-streamed)
-  M16 KILLED   stream without its terminal event treated as complete  <- a stream that ends without its terminal event is a partial failure: the pending window is 
+  M16 KILLED   stream without its terminal event treated as complete  <- a stream that ends without its terminal event is a partial failure: the pending window is
   M17 KILLED   check:bundle rule 8 (server files) removed  <- the conformance marker fails in a client file and in a server file
   17/17 killed (first pass: 16/17; the survivor M16 led to the added test)
+
+REVIEW ROUND 1 (challenger review of #184 at c42657c). Same tests as the round-1 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the empty-stream test also checks an OpenAI stream (the mock now sends the role chunk with
+the model first, as real streams do); one test added for a buffered window over the inspection bound (mutation R12 survived first).
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false --reporter=verbose (review.test.ts lines)
+  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > an oversized request for a denied model: 403, zero provider calls
+  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > a model string that is not a model id: 403, zero provider calls
+  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > an oversized request under allow * and no DLP policy: 403, zero provider calls
+  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > a small request for the denied model: 403, zero provider calls
+  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > blocked requests open no TCP connection to the provider; an allowed one opens one (raw soc...
+  ✓ H1: a model the gateway cannot read is never dispatched (enforce) > the bound is in bytes: 2100 two-byte characters exceed a 4096-byte bound (N7)
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat tools[].function.description: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat legacy functions[]: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat assistant function_call.arguments: blocked before dis...
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat prediction.content: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat message name: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > chat metadata: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > responses tools[].description: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > messages tools[].description: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > messages tools[].input_schema: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > nested JSON escape in tool arguments: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > doubly nested JSON in tool arguments: blocked before dispatch
+  ✓ M1: every string value is inspected (unknown keys are content), nested JSON decoded within bounds > content nested past the depth bound fails closed (DLP unav...
+  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a CPU-bound engine over the deadline is a timeout (enforce: 403, 0 calls)
+  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a CPU-bound engine over the deadline is a timeout (monitor: 200, 1 calls)
+  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > under a last-known-good, the release window and the deadline come from the bundl...
+  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a tool declared and called in one request is evaluated (monitor), never a 403 wi...
+  ✓ M2, M4, M5: synchronous engines, last-known-good settings, multi-turn tools > a tool declared and called in one request is evaluated (enforce), never a 403 wi...
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > buffer_full, split inside the buffer: the marker is caught on the join...
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > buffer_window, split inside one window: the marker is caught on the jo...
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > buffer_window, split across windows (overlap): the marker is caught on...
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > a buffered window over the inspection bound is not inspected: DLP unav...
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > a streamed served-model fallback is re-entitled before release (N17)
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > a stream with no content still gets an output-phase decision (and its ...
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > prototype-named credentials and paths are refused cleanly (L3)
+  ✓ M3, L1, L3, L4: stream windows, served-model fallback, prototype names, empty streams > 40 parallel requests, 20 with the seeded card: exactly 20 provider cal...
+  Test Files  4 passed (4)
+  Tests  108 passed (108)
+
+Mutation check, round 1 (one at a time, same command): reviewer set N1-N20 and the round-0 set M1-M17 adapted, R1-R12 new.
+  KILLED   N1/M1 blocked request dispatched anyway (socket opened)
+  KILLED   N2/M2 fail-open on evaluation timeout
+  KILLED   N3/M3 fail-open on engine error
+  KILLED   N4/M4 oversized input parsed and inspected
+  KILLED   N5/M5 window released regardless of its decision
+  KILLED   N7 bound measured in characters
+  KILLED   N8/M9 media (opaque) content treated as inspected
+  KILLED   N9/M12 claimed tenant header trusted
+  KILLED   N10/M11 served model not re-checked (non-stream)
+  KILLED   N11/M16 truncated stream treated as complete
+  KILLED   N12/M10 pending window released after a mid-stream failure
+  KILLED   N14/M8 tool results not inspected (location lost)
+  KILLED   N15/M15 non-stream blocked response released
+  KILLED   N16 mock provider does not count calls
+  KILLED   N17 streamed served model ignored
+  KILLED   N18/M6 buffer_full ignored
+  KILLED   N19 tool names not collected
+  KILLED   N20 marker dropped from providers
+  KILLED   M13 raw output text in the record
+  KILLED   M14 destination not surface-qualified
+  KILLED   M17 check:bundle rule 8 (server files) removed
+  KILLED   R1 H1 unreadable model defaulted to a placeholder
+  KILLED   R2 M1 allowlist walker (only messages content)
+  KILLED   R3 M1 nested JSON not decoded
+  KILLED   R4 M1 depth bound removed
+  KILLED   R5 M2 synchronous overrun not measured
+  KILLED   R6 M3 per-chunk detection (no joined window)
+  KILLED   R7 M3 no overlap carried between windows
+  KILLED   R8 M4 window and deadline from the primary bundle
+  KILLED   R9 M5 tool names not de-duplicated
+  KILLED   R10 L3 prototype credentials resolved
+  KILLED   R11 L4 empty stream not decided
+  KILLED*  R12 stream window over the bound inspected
+  33/33 killed (* R12 survived the first pass; killed after the added over-bound test).

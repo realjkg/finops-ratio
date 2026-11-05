@@ -2,10 +2,12 @@
 // pre-dispatch and pre-release positions (§3.2) in front of the mock providers. It is NOT a production gateway and
 // Ratio is not one (D2): it exists to prove the library's behavior in a gateway position. Never imported by app,
 // worker, scripts or client code (guard.test.ts). Records carry sizes and keyed digests only, never content.
+// Limit: the deadline cannot preempt a synchronous engine; it is measured afterward and an overrun is a timeout.
+// True preemption needs the evaluation in a worker or isolate (a production integration concern, slice C6).
 import crypto from 'node:crypto';
 import http from 'node:http';
 import { isId, isModelId, type ActorType, type DlpFinding, type GatewayRequestRecord, type PolicyDecision } from '../contracts';
-import { applicablePolicies, compileBundle, evaluate, failureEvaluation, type Evaluation, type EvaluationInput, type RequestContext } from '../policy';
+import { applicablePolicies, compileBundle, evaluate, failureEvaluation, selectBundle, type Evaluation, type EvaluationInput, type RequestContext } from '../policy';
 import { CONFORMANCE_MARKER } from './mockProviders';
 
 type Location = DlpFinding['location'];
@@ -15,76 +17,71 @@ type J = any;
 export interface Identity { tenantId: string; workloadId?: string; actorType: ActorType; actorRef?: string; teamIds?: string[] }
 export interface GatewayOptions {
   gatewayId: string;
-  bundle: unknown; lastKnownGood?: unknown; accessMode: EvaluationInput['accessMode'];
+  bundle: unknown; lastKnownGood?: unknown; accessMode: NonNullable<EvaluationInput['accessMode']>;
   /** Gateway credentials (virtual keys) to identities: the only source of tenant, workload and actor. */
   credentials: Record<string, Identity>;
   providers: Record<string, { flavor: Flavor; url: string }>;
   /** The caller's detectors (slice C4 later); offsets only. */
   detect: (text: string, location: Location) => DlpFinding[];
-  /** Inputs larger than this are never parsed or inspected (DLP unavailable, so enforcing DLP policies deny). */
+  /** Requests and responses larger than this are never parsed or inspected (model unknown, DLP unavailable). */
   maxInspectBytes: number;
   /** Chunks per window for `buffer_window` release (default 4). */
   windowChunks?: number;
+  /** The longest detector match, carried between stream windows as overlap (default 64 characters). */
+  maxDetectorSpan?: number;
   digestKey: { keyId: string; secret: string };
   now: () => string;
-  /** Defaults to the C1 `evaluate`; tests inject a hung or throwing engine. */
+  /** Defaults to the C1 `evaluate`; tests inject a hung, slow or throwing engine. */
   engine?: (i: EvaluationInput) => Evaluation | Promise<Evaluation>;
 }
 export interface GatewayRequest { credential: string; path: string; headers?: Record<string, string>; body: string | Buffer }
 export interface GatewayResult { status: number; released: string[]; record: GatewayRequestRecord | null; decisions: PolicyDecision[]; origin: string }
 
-const ROUTES: Record<string, { surface: GatewayRequestRecord['surface']; flavor: Flavor; dest: string }> = {
-  '/v1/chat/completions': { surface: 'openai_chat', flavor: 'openai', dest: 'openai_chat' },
-  '/v1/completions': { surface: 'other', flavor: 'openai', dest: 'openai_completions' },
-  '/v1/responses': { surface: 'openai_responses', flavor: 'openai', dest: 'openai_responses' },
-  '/v1/messages': { surface: 'anthropic_messages', flavor: 'anthropic', dest: 'anthropic_messages' },
-};
+const ROUTES = new Map<string, { surface: GatewayRequestRecord['surface']; flavor: Flavor; dest: string }>([
+  ['/v1/chat/completions', { surface: 'openai_chat', flavor: 'openai', dest: 'openai_chat' }],
+  ['/v1/completions', { surface: 'other', flavor: 'openai', dest: 'openai_completions' }],
+  ['/v1/responses', { surface: 'openai_responses', flavor: 'openai', dest: 'openai_responses' }],
+  ['/v1/messages', { surface: 'anthropic_messages', flavor: 'anthropic', dest: 'anthropic_messages' }],
+]);
 const DEFAULT_DEADLINE_MS = 50;
+const MAX_DEPTH = 64, MAX_SEGMENTS = 10000, NESTED_JSON = 2;
+/** Media blocks carry binary content the text detectors cannot inspect: they make the request opaque (DLP unavailable). */
+const MEDIA = new Set(['image', 'image_url', 'input_image', 'document', 'file', 'input_file', 'audio', 'input_audio']);
 interface Seg { location: Location; text: string }
 interface Parsed { model?: string; stream: boolean; segs: Seg[]; tools: string[]; opaque: boolean }
 
-/** Walks request or response JSON into inspectable segments; anything it does not understand makes it opaque. */
-function walker(base: Location) {
-  const out: Parsed = { stream: false, segs: [], tools: [], opaque: false };
-  const add = (location: Location, v: J) => { if (typeof v === 'string') out.segs.push({ location, text: v }); else out.opaque = true; };
-  const tool = (name: J) => { if (isId(name)) out.tools.push(name); else out.opaque = true; };
-  const message = (m: J) => {
-    const loc: Location = m?.role === 'system' || m?.role === 'developer' ? 'system' : m?.role === 'tool' ? 'tool_result' : base;
-    if (m?.content !== null && m?.content !== undefined) block(loc, m.content);
-    for (const c of m?.tool_calls ?? []) { tool(c?.function?.name); add('tool_arguments', c?.function?.arguments); }
-  };
-  const block = (loc: Location, b: J): void => {
-    if (typeof b === 'string') return add(loc, b);
-    if (Array.isArray(b)) return b.forEach((x) => block(loc, x));
-    switch (b?.type) {
-      case 'text': case 'input_text': case 'output_text': return add(loc, b.text);
-      case 'tool_use': tool(b.name); return add('tool_arguments', JSON.stringify(b.input ?? {}));
-      case 'tool_result': return block('tool_result', b.content ?? '');
-      case 'function_call': tool(b.name); return add('tool_arguments', b.arguments);
-      case 'function_call_output': return add('tool_result', b.output);
-      default: if (typeof b?.role === 'string') return message(b); out.opaque = true;
+/** Every string value of the JSON is content (unknown keys included), with bounded depth and nested-JSON decoding. */
+function inspect(root: J, base: Location): Parsed {
+  const out: Parsed = { stream: root?.stream === true, segs: [], tools: [], opaque: false, model: isModelId(root?.model) ? root.model : undefined };
+  const tool = (n: J) => { if (isId(n)) { if (!out.tools.includes(n)) out.tools.push(n); } else if (n !== undefined) out.opaque = true; };
+  const walk = (v: J, loc: Location, depth: number, nested: number): void => {
+    if (depth > MAX_DEPTH || out.segs.length > MAX_SEGMENTS) { out.opaque = true; return; }
+    if (typeof v === 'string') {
+      if (nested < NESTED_JSON && /^\s*[[{]/.test(v)) { try { return walk(JSON.parse(v), loc, depth + 1, nested + 1); } catch { /* not JSON: text */ } }
+      out.segs.push({ location: loc, text: v });
+      return;
+    }
+    if (Array.isArray(v)) { for (const x of v) walk(x, loc, depth + 1, nested); return; }
+    if (!v || typeof v !== 'object') return;
+    if (MEDIA.has(v.type)) { out.opaque = true; return; }
+    const here: Location = v.role === 'system' || v.role === 'developer' ? 'system' : v.role === 'tool' || v.type === 'tool_result' || v.type === 'function_call_output' ? 'tool_result' : loc;
+    if (v.role === undefined && (v.type === 'tool_use' || v.type === 'function_call' || 'arguments' in v)) tool(v.name);
+    if (v.type === 'function' && v.function) tool(v.function.name);
+    for (const [k, x] of Object.entries(v)) {
+      if (k === 'model' && depth === 0) continue;
+      if ((k === 'tools' || k === 'functions') && Array.isArray(x)) for (const t of x) tool(t?.function?.name ?? t?.name);
+      const l: Location = k === 'system' || k === 'instructions' ? 'system' : k === 'arguments' || k === 'partial_json' || (k === 'input' && v.type === 'tool_use') ? 'tool_arguments' : here;
+      walk(x, l, depth + 1, nested);
     }
   };
-  const strings = (v: J): void => { if (typeof v === 'string') add(base, v); else if (v && typeof v === 'object') Object.entries(v).forEach(([k, x]) => k !== 'model' && strings(x)); };
-  return { out, add, block, message, tool, strings };
+  walk(root, base, 0, 0);
+  return out;
 }
-
-function parseRequest(dest: string | undefined, j: J): Parsed {
-  const w = walker('input');
-  if (dest === 'openai_chat') (j.messages ?? []).forEach(w.message);
-  else if (dest === 'openai_completions') w.block('input', j.prompt);
-  else if (dest === 'openai_responses') { if (j.instructions !== undefined) w.add('system', j.instructions); w.block('input', j.input); }
-  else if (dest === 'anthropic_messages') { if (j.system !== undefined) w.block('system', j.system); (j.messages ?? []).forEach(w.message); }
-  else w.strings(j);
-  for (const t of j.tools ?? []) w.tool(t?.function?.name ?? t?.name);
-  return { ...w.out, model: isModelId(j.model) ? j.model : undefined, stream: j.stream === true };
-}
-function parseResponse(dest: string, j: J): Parsed {
-  const w = walker('output');
-  if (dest === 'anthropic_messages') w.block('output', j.content);
-  else if (dest === 'openai_responses') w.block('output', j.output);
-  else for (const c of j.choices ?? []) { if (dest === 'openai_completions') w.add('output', c?.text); else w.message(c?.message); }
-  return { ...w.out, model: isModelId(j.model) ? j.model : undefined };
+/** The text a client receives (the mock models release at the text level). */
+function outputText(dest: string, j: J): string {
+  const parts = dest === 'anthropic_messages' ? (j?.content ?? []).map((c: J) => c?.text) : dest === 'openai_responses' ? (j?.output ?? []).flatMap((o: J) => (o?.content ?? []).map((c: J) => c?.text))
+    : (j?.choices ?? []).map((c: J) => (dest === 'openai_completions' ? c?.text : c?.message?.content));
+  return parts.filter((x: J) => typeof x === 'string').join('');
 }
 /** One streamed event: the served model, a chunk of output or tool arguments, or the terminal event. */
 function parseEvent(flavor: Flavor, data: string): { model?: string; chunk?: Seg; done?: boolean } {
@@ -114,52 +111,61 @@ async function* sseData(res: http.IncomingMessage): AsyncGenerator<string> {
   }
 }
 const post = (url: string, body: Buffer) => new Promise<http.IncomingMessage>((resolve, reject) => {
-  const r = http.request(url, { method: 'POST', headers: { 'content-type': 'application/json', 'content-length': body.length } }, resolve);
+  const r = http.request(url, { method: 'POST', agent: false, headers: { 'content-type': 'application/json', 'content-length': body.length } }, resolve);
   r.once('error', reject);
   r.end(body);
 });
-const readAll = async (res: http.IncomingMessage) => { const parts: Buffer[] = []; for await (const p of res) parts.push(p as Buffer); return Buffer.concat(parts).toString('utf8'); };
+const readAll = async (res: http.IncomingMessage) => { const parts: Buffer[] = []; for await (const p of res) parts.push(p as Buffer); return Buffer.concat(parts); };
 
 export function createMockGateway(o: GatewayOptions) {
   const engine = o.engine ?? evaluate;
-  const bundle = compileBundle(o.bundle);
+  const bundle = compileBundle(o.bundle) ?? o.bundle; // compiled once at load (C1 L4); an invalid one is decided by C1
+  const lastKnownGood = o.lastKnownGood === undefined ? undefined : compileBundle(o.lastKnownGood) ?? o.lastKnownGood;
   const digest = (b: Buffer | string) => `hm1:${o.digestKey.keyId}:${crypto.createHmac('sha256', o.digestKey.secret).update(b).digest('hex')}`;
+  const span = Math.max(1, o.maxDetectorSpan ?? 64);
   let seq = 0;
+  /** Policies of the bundle that will actually be evaluated (the last-known-good when it is in use). */
+  const policiesFor = (c: RequestContext, now: string) => { const r = selectBundle(bundle, lastKnownGood, c.tenantId, now); return r.ok ? applicablePolicies(r.compiled, c, now).map((x) => x.policy) : null; };
 
-  /** One C1 evaluation under the gateway's deadline: a hung engine times out, a throwing one is an engine error. */
+  /** One C1 evaluation under the policy deadline: hung or slow (also synchronous) engines time out, throwing ones are engine errors. */
   async function decide(context: RequestContext): Promise<Evaluation> {
-    const input: EvaluationInput = { bundle: o.bundle, lastKnownGood: o.lastKnownGood, context, clock: { now: o.now() }, accessMode: o.accessMode };
-    const ms = Math.min(DEFAULT_DEADLINE_MS, ...(bundle ? applicablePolicies(bundle, context, input.clock.now).map((x) => x.policy.evaluationTimeoutMs) : []));
+    const t0 = performance.now();
+    const micros = () => Math.round((performance.now() - t0) * 1000);
+    const now = o.now();
+    const input: EvaluationInput = { bundle, lastKnownGood, context, clock: { now, elapsedMicros: micros }, accessMode: o.accessMode };
+    const ms = Math.min(DEFAULT_DEADLINE_MS, ...(policiesFor(context, now) ?? []).map((p) => p.evaluationTimeoutMs));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<'timeout'>((r) => { timer = setTimeout(() => r('timeout'), ms); });
     try {
       const e = await Promise.race([Promise.resolve().then(() => engine(input)), deadline]);
-      return e === 'timeout' ? failureEvaluation(input, 'timeout', ms * 1000) : e;
+      return e === 'timeout' || micros() > ms * 1000 ? failureEvaluation(input, 'timeout', micros()) : e;
     } catch {
-      return failureEvaluation(input, 'engine_error');
+      return failureEvaluation(input, 'engine_error', micros());
     } finally { clearTimeout(timer); }
   }
-  /** Strictest release mode of the applicable stream policies; unknown policy state buffers everything. */
-  function windowSize(context: RequestContext): number {
-    if (!bundle) return Infinity;
-    const modes = applicablePolicies(bundle, context, o.now()).map((x) => x.policy.release ?? 'pass_through');
+  /** Strictest release mode of the stream policies that will be evaluated; an unusable bundle buffers everything. */
+  function windowSize(c: RequestContext): number {
+    const ps = policiesFor(c, o.now());
+    if (!ps) return Infinity;
+    const modes = ps.map((p) => p.release ?? 'pass_through');
     return modes.includes('buffer_full') ? Infinity : modes.includes('buffer_window') ? (o.windowChunks ?? 4) : 1;
   }
 
   async function handle(req: GatewayRequest): Promise<GatewayResult> {
-    const id = o.credentials[req.credential]; // claimed identity headers are never read
+    // Own properties only: '__proto__' or 'constructor' is never a credential or a route. Claimed identity headers are never read.
+    const id = Object.hasOwn(o.credentials, req.credential) ? o.credentials[req.credential] : undefined;
     if (!id) return { status: 401, released: [], record: null, decisions: [], origin: CONFORMANCE_MARKER };
     const receivedAt = o.now();
     const requestRef = `${o.gatewayId}-req-${++seq}`;
     const raw = Buffer.isBuffer(req.body) ? req.body : Buffer.from(req.body, 'utf8');
-    const route = ROUTES[req.path];
+    const route = ROUTES.get(req.path);
     const provider = (route && Object.keys(o.providers).find((k) => o.providers[k].flavor === route.flavor)) || 'unrouted';
     let parsed: Parsed = { stream: false, segs: [], tools: [], opaque: true };
-    const oversized = raw.length > o.maxInspectBytes;
-    if (!oversized) { try { parsed = parseRequest(route?.dest, JSON.parse(raw.toString('utf8'))); } catch { /* opaque: fails closed below */ } }
+    const oversized = raw.length > o.maxInspectBytes; // bytes, not characters
+    if (!oversized) { try { parsed = inspect(JSON.parse(raw.toString('utf8')), 'input'); } catch { /* opaque: fails closed below */ } }
     const decisions: PolicyDecision[] = [];
     const base = { tenantId: id.tenantId, requestRef, workloadId: id.workloadId, teamIds: id.teamIds, actorType: id.actorType, actorRef: id.actorRef, provider,
-      destination: `${provider}:${route?.dest ?? 'unknown'}`, modelRequested: parsed.model ?? 'unknown', inputBytes: raw.length };
+      destination: `${provider}:${route?.dest ?? 'unknown'}`, modelRequested: parsed.model, inputBytes: raw.length };
     const finish = (status: number, released: string[], dispatch: GatewayRequestRecord['dispatch'], rel: GatewayRequestRecord['released'], output?: { text: string; model?: string }): GatewayResult => ({
       status, released, decisions, origin: CONFORMANCE_MARKER,
       record: {
@@ -170,30 +176,42 @@ export function createMockGateway(o: GatewayOptions) {
     });
     const run = async (c: RequestContext) => { const e = await decide(c); decisions.push(...e.decisions); return e.verdict === 'allow'; };
     const findings = (segs: Seg[]) => segs.flatMap((s) => o.detect(s.text, s.location));
+    const dlpGap = (opaque: boolean) => (opaque ? { unavailable: ['dlp' as const] } : {});
 
-    // Pre-dispatch (§3.2 steps 2-3): redact, approval and block all stop here (redaction is slice C4).
-    const unavailable = parsed.opaque ? { unavailable: ['dlp' as const] } : {};
-    if (!(await run({ ...base, phase: 'pre_request', tools: parsed.tools, findings: oversized ? [] : findings(parsed.segs), ...unavailable }))) return finish(403, [], 'not_dispatched', 'none');
+    // Pre-dispatch (§3.2 steps 2-3): an unreadable model is MODEL_UNKNOWN; redact, approval and block all stop here.
+    if (!(await run({ ...base, phase: 'pre_request', tools: parsed.tools, findings: findings(parsed.segs), ...dlpGap(parsed.opaque) }))) return finish(403, [], 'not_dispatched', 'none');
     const target = o.providers[provider];
     if (!route || !target) return finish(404, [], 'not_dispatched', 'none');
     let res: http.IncomingMessage;
     try { res = await post(target.url + req.path, raw); } catch { return finish(502, [], 'unknown', 'none'); }
-    if (res.statusCode !== 200) { await readAll(res).catch(() => ''); return finish(502, [], 'dispatched', 'none'); }
+    if (res.statusCode !== 200) { await readAll(res).catch(() => null); return finish(502, [], 'dispatched', 'none'); }
 
     if (!parsed.stream) { // Pre-release (§3.2 step 6): nothing leaves before the output decision.
-      let out: Parsed;
-      try { out = parseResponse(route.dest, JSON.parse(await readAll(res))); } catch { return finish(502, [], 'dispatched', 'none'); }
-      const text = out.segs.map((s) => s.text).join('');
-      const ok = await run({ ...base, phase: 'pre_response', modelServed: out.model, tools: out.tools, findings: findings(out.segs), ...(out.opaque ? { unavailable: ['dlp' as const] } : {}) });
+      let j: J, body: Buffer;
+      try { body = await readAll(res); j = JSON.parse(body.toString('utf8')); } catch { return finish(502, [], 'dispatched', 'none'); }
+      const big = body.length > o.maxInspectBytes;
+      const out: Parsed = big ? { stream: false, segs: [], tools: [], opaque: true, model: isModelId(j?.model) ? j.model : undefined } : inspect(j, 'output');
+      const text = outputText(route.dest, j);
+      const ok = await run({ ...base, phase: 'pre_response', modelServed: out.model, tools: out.tools, findings: findings(out.segs), ...dlpGap(out.opaque) });
       return ok ? finish(200, [text], 'dispatched', 'full', { text, model: out.model }) : finish(403, [], 'dispatched', 'none', { text, model: out.model });
     }
-    // Streaming: each window is decided BEFORE it is released; a released window cannot be withdrawn later.
+    // Streaming: each window is decided BEFORE it is released, on its joined text per location plus the carried
+    // overlap of the previous window (a marker split across chunks or windows is caught). Released windows cannot be withdrawn.
     const size = windowSize({ ...base, phase: 'stream_chunk', findings: [] });
     const released: string[] = [];
+    const carry = new Map<Location, string>();
     let pending: Seg[] = [], windowNo = 0, served: string | undefined, received = '', ended = false, blocked = false, failed = false;
-    const flush = async () => {
-      if (pending.length === 0) return true;
-      const ok = await run({ ...base, phase: 'stream_chunk', sequence: windowNo++, modelServed: served, findings: findings(pending) });
+    const flush = async (force = false) => {
+      if (pending.length === 0 && !force) return true;
+      let found: DlpFinding[] = [], opaque = false;
+      for (const location of [...new Set(pending.map((s) => s.location))]) {
+        const prior = carry.get(location) ?? '';
+        const text = prior + pending.filter((s) => s.location === location).map((s) => s.text).join('');
+        if (Buffer.byteLength(text) > o.maxInspectBytes) opaque = true;
+        else found = [...found, ...o.detect(text, location).filter((f) => f.end > prior.length)];
+        carry.set(location, text.slice(-(span - 1)));
+      }
+      const ok = await run({ ...base, phase: 'stream_chunk', sequence: windowNo++, modelServed: served, findings: found, ...dlpGap(opaque) });
       if (ok) released.push(...pending.map((s) => s.text));
       pending = [];
       return ok;
@@ -210,7 +228,8 @@ export function createMockGateway(o: GatewayOptions) {
       }
     } catch { failed = true; }
     if (!blocked && !failed && !ended) failed = true; // the stream stopped without its terminal event
-    if (!blocked && !failed && !(await flush())) blocked = true;
+    // The last window; an empty stream still gets its output-phase decision (served model re-checked).
+    if (!blocked && !failed && !(await flush(windowNo === 0))) blocked = true;
     res.destroy();
     const rel = blocked || failed ? (released.length ? 'partial' : 'none') : 'full';
     return finish(blocked ? 403 : failed ? 502 : 200, released, 'dispatched', rel, { text: received, model: served });

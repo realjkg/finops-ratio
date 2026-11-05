@@ -67,7 +67,7 @@ export const PLATFORM_CONTRACT_MARKERS = [
   'entitlement/1', 'policy/1', 'policy-bundle/1', 'policy-decision/1', 'gateway-request/1', 'connector-declaration/1', 'ratio-platform-contracts',
 ];
 
-/** The marker every test-only conformance mock carries (src/platform/conformance/mockProviders.ts, ADR-0001 slice C3). */
+/** The marker every test-only conformance mock carries (CONFORMANCE_MARKER in the C3 mock providers, ADR-0001). */
 export const TEST_ONLY_MARKERS = ['ratio-conformance-test-only'];
 
 export const CLIENT_FORBIDDEN = [
