@@ -1,0 +1,12 @@
+RED evidence, platform slice C3 (mock providers, mock gateway and conformance suite, ADR-0001 §13). Base 54964d7 (C1 head, PR #183). Tests committed before the code.
+Command: npx vitest run src/platform/conformance scripts/check-next-bundle.test.mjs --cache=false (src/platform/conformance/{mockProviders,mockGateway}.ts absent; scripts/check-next-bundle.mjs at base)
+     × the conformance marker fails in a client file and in a server file
+ FAIL  src/platform/conformance/conformance.test.ts [ src/platform/conformance/conformance.test.ts ]
+Error: Cannot find module './mockGateway' imported from src/platform/conformance/conformance.test.ts
+ FAIL  src/platform/conformance/guard.test.ts [ src/platform/conformance/guard.test.ts ]
+Error: Cannot find module './mockProviders' imported from src/platform/conformance/guard.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  scripts/check-next-bundle.test.mjs > B8 test-only conformance mocks stay out of every bundle (ADR-0001 slice C3) > the conformance marker fails in a client file and in a server file
+AssertionError: expected undefined to deeply equal [ 'ratio-conformance-test-only' ]
+ Test Files  3 failed (3)
+      Tests  1 failed | 32 passed (33)
