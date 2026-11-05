@@ -51,6 +51,12 @@ async function inDraft(fn: (c: PoolClient) => Promise<void>): Promise<void> {
     c.release();
   }
 }
+/** The rows of a statement that must succeed (inside the scenario's transaction). */
+async function rows(c: PoolClient, sql: string, params: unknown[] = []) {
+  const r = await attempt(c, sql, params);
+  if (!r.ok) throw new Error(`expected success, got ${r.code}`);
+  return r.rows;
+}
 /** Switches the transaction to `role` with `tenant` (empty = none), both transaction-local. */
 async function as(c: PoolClient, role: 'ratio_worker' | 'ratio_reader', tenant: string) {
   expect(await attempt(c, `SET LOCAL ROLE ${role}`)).toMatchObject({ ok: true });
@@ -60,14 +66,14 @@ async function as(c: PoolClient, role: 'ratio_worker' | 'ratio_reader', tenant: 
 describe('draft 0020 on Postgres: tenant isolation (RLS)', () => {
   it('ratio_worker with tenant A sees only tenant A\'s connections and evidence refs', () => inDraft(async (c) => {
     await as(c, 'ratio_worker', A);
-    expect((await attempt(c, 'SELECT tenant_id, connection_id, connector_id FROM ratio.platform_connections ORDER BY connection_id')).rows)
+    expect((await rows(c, 'SELECT tenant_id, connection_id, connector_id FROM ratio.platform_connections ORDER BY connection_id')))
       .toEqual([{ tenant_id: A, connection_id: 'usage-file', connector_id: 'provider-a-usage-file' }]);
-    expect((await attempt(c, 'SELECT DISTINCT tenant_id FROM ratio.platform_evidence_refs')).rows).toEqual([{ tenant_id: A }]);
+    expect((await rows(c, 'SELECT DISTINCT tenant_id FROM ratio.platform_evidence_refs'))).toEqual([{ tenant_id: A }]);
   }));
   it('without a tenant setting the worker sees and writes nothing', () => inDraft(async (c) => {
     await as(c, 'ratio_worker', '');
-    expect((await attempt(c, 'SELECT count(*)::int AS n FROM ratio.platform_connections')).rows).toEqual([{ n: 0 }]);
-    expect((await attempt(c, 'SELECT count(*)::int AS n FROM ratio.platform_evidence_refs')).rows).toEqual([{ n: 0 }]);
+    expect((await rows(c, 'SELECT count(*)::int AS n FROM ratio.platform_connections'))).toEqual([{ n: 0 }]);
+    expect((await rows(c, 'SELECT count(*)::int AS n FROM ratio.platform_evidence_refs'))).toEqual([{ n: 0 }]);
     expect(await attempt(c, CONN, [A, 'x', 'provider-a-usage-file', decl(), 'configured-not-verified', 'configured'])).toMatchObject({ ok: false, code: '42501' });
   }));
   it('tenant A cannot insert or change tenant B\'s rows, nor link evidence to a connection only B has', () => inDraft(async (c) => {
@@ -79,8 +85,8 @@ describe('draft 0020 on Postgres: tenant isolation (RLS)', () => {
     expect(await attempt(c, REF, [A, 'b-only', 'sync_run', 'evidence/x.json'])).toMatchObject({ ok: false, code: '23503' });
     expect(await attempt(c, CONN, [A, 'second', 'provider-a-usage-file', decl(), 'configured-not-verified', 'configured'])).toMatchObject({ ok: true, rowCount: 1 });
     await as(c, 'ratio_worker', B);
-    expect((await attempt(c, `SELECT managed_state FROM ratio.platform_connections WHERE connection_id = 'usage-file'`)).rows).toEqual([{ managed_state: 'extraction-completed' }]);
-    expect((await attempt(c, 'SELECT count(*)::int AS n FROM ratio.platform_connections')).rows).toEqual([{ n: 2 }]);
+    expect((await rows(c, `SELECT managed_state FROM ratio.platform_connections WHERE connection_id = 'usage-file'`))).toEqual([{ managed_state: 'extraction-completed' }]);
+    expect((await rows(c, 'SELECT count(*)::int AS n FROM ratio.platform_connections'))).toEqual([{ n: 2 }]);
   }));
   it('evidence refs are append-only for the worker, and the reader has no access to either table', () => inDraft(async (c) => {
     await as(c, 'ratio_worker', A);
