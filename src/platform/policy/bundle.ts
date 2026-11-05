@@ -19,8 +19,8 @@ export const RESERVED_PREFIX = 'refused:';
 /** A tool the gateway could not identify: never listable (a bundle naming one is refused), refused by the access decision. */
 export const UNIDENTIFIED_PREFIX = 'unidentified:';
 const toolIdsOf = (b: PolicyBundle) => b.policies.flatMap((p) => p.rules.flatMap((r) => (r.condition.kind === 'tool' ? r.condition.tools : [])));
-/** Advisory (non-gating): tool ids without a gateway namespace (fn:, mcp:, type:), which never match a gateway identity. */
-export const unnamespacedTools = (c: CompiledBundle) => [...new Set(toolIdsOf(c.bundle).filter((t) => !/^(fn|mcp|type)(-h)?:/.test(t)))];
+/** Advisory (non-gating): tool ids without a gateway namespace (fn:, mcp:, type:, container:, skill:, prompt:), which never match a gateway identity. */
+export const unnamespacedTools = (c: CompiledBundle) => [...new Set(toolIdsOf(c.bundle).filter((t) => !/^(fn|mcp|type|container|skill|prompt)(-h)?:/.test(t)))];
 const COMPILED = new WeakSet<object>();
 const freeze = <T>(x: T): T => { if (x && typeof x === 'object' && !Object.isFrozen(x)) { Object.values(x).forEach(freeze); Object.freeze(x); } return x; };
 type Versioned = { id: string; version: number; effectiveFrom: string; effectiveTo?: string };

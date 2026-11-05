@@ -39,8 +39,8 @@ describe('M1: object keys and non-string scalars are inspected', () => {
     ['a marker as a metadata key', chat('q', { metadata: { [SECRET]: 'v' } })], ['a PAN as a JSON number in tool arguments', args(`{"card":${PAN}}`)],
     ['a PAN as a JSON number in metadata', `{"model":"model-x","metadata":{"card":${PAN}},"messages":[{"role":"user","content":"q"}]}`],
     ['a 17-digit number ending in a PAN (beyond float precision) in metadata', `{"model":"model-x","metadata":{"card":9${PAN}},"messages":[{"role":"user","content":"q"}]}`],
-  ])('%s is blocked before dispatch', async (_n, body) => {
-    expect(await go('/v1/chat/completions', body)).toMatchObject({ ...blocked, codes: ['DLP_PAYMENT_CARD'] });
+  ])('%s is blocked before dispatch', async (n, body) => { // an unlisted top-level key is also an unidentified tool (round 5)
+    expect(await go('/v1/chat/completions', body)).toMatchObject({ ...blocked, codes: [...(n.includes('top-level') ? U : []), 'DLP_PAYMENT_CARD'] });
   });
 });
 describe('M2 / L1: tools identified by name, else by type; unidentifiable tools are never on an allowlist', () => {
@@ -145,7 +145,7 @@ describe('round 4: tools declared outside tools, history identities, item and bl
     ['redacted_thinking in history (accepted availability cost, L5)', M, msgs({}, { type: 'redacted_thinking', data: 'QUJD' })], ['web_search_tool_result in history (L5)', M, msgs({}, { type: 'web_search_tool_result', tool_use_id: 's', content: [] })],
   ])('%s is uninspectable: DLP unavailable', async (_n, path, body) => expect(await go(path, body)).toMatchObject({ ...blocked, codes: ['DLP_UNAVAILABLE'] }));
   it('known items and blocks stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly at creation', async () => {
-    expect((await go(R, { model: 'model-x', tool_choice: 'auto', parallel_tool_calls: true, max_tool_calls: 2, function_call: 'auto', input: [{ type: 'message', role: 'user', content: 'q' }, { type: 'function_call', call_id: 'c', name: 'search', arguments: '{}' }, { type: 'function_call_output', call_id: 'c', output: 'ok' }, { type: 'mcp_call', server_label: 'wiki', name: 'run', arguments: '{}', output: 'ok' }] })).status).toBe(200);
+    expect((await go(R, { model: 'model-x', tool_choice: 'auto', parallel_tool_calls: true, max_tool_calls: 2, input: [{ type: 'message', role: 'user', content: 'q' }, { type: 'function_call', call_id: 'c', name: 'search', arguments: '{}' }, { type: 'function_call_output', call_id: 'c', output: 'ok' }, { type: 'mcp_call', server_label: 'wiki', name: 'run', arguments: '{}', output: 'ok' }, { type: 'custom_tool_call', call_id: 'k', name: 'sh', input: 'ls' }, { type: 'custom_tool_call_output', call_id: 'k', output: 'ok' }, { type: 'mcp_list_tools', server_label: 'wiki', tools: [] }] })).status).toBe(200);
     expect((await go(M, msgs({}, { type: 'server_tool_use', id: 's', name: 'web_search', input: {} }, { type: 'mcp_tool_use', id: 'm', name: 'run', server_name: 'wiki', input: {} }))).status).toBe(200);
     expect(await go('/v1/completions', { model: 'model-x', prompt: [Number(PAN), 7] })).toMatchObject({ ...blocked, codes: ['DLP_PAYMENT_CARD'] });
     const real = JSON.parse;
@@ -170,7 +170,7 @@ describe('round 5: custom tools, per-surface parameter lists, mcp_list_tools', (
     ['a container without id or skills, no tool policy', M, msgs({ container: {} }), undefined, 403, U],
   ])('%s', async (_n, path, body, b, status, codes) => expect(await go(path, body, b ? { bundle: b } : {})).toMatchObject({ status, codes }));
   const BASE: Record<string, [string, Record<string, unknown>]> = { openai_chat: [C, chat('q')], openai_responses: [R, { model: 'model-x', input: 'q' }], anthropic_messages: [M, msgs({})], openai_completions: [L, { model: 'model-x', prompt: 'q' }] };
-  it.each([[C, 'extensions'], [C, 'capabilities'], [C, 'actions'], [C, 'extra_body'], [M, 'skills'], [M, 'extensions'], [R, 'skills'], [L, 'tools']])('%s: the unlisted parameter %s is unidentified (blocked in enforce)', async (path, p) => {
+  it.each([[C, 'extensions'], [C, 'capabilities'], [C, 'actions'], [C, 'extra_body'], [M, 'skills'], [M, 'extensions'], [R, 'skills'], [L, 'tools'], [L, '']])('%s: the unlisted parameter %s is unidentified (blocked in enforce)', async (path, p) => {
     const body = { ...Object.values(BASE).find(([x]) => x === path)![1], [p]: [{ id: 'x' }] };
     expect(await go(path, body)).toMatchObject({ status: 403, codes: U });
     expect((await go(path, body, { accessMode: 'monitor' })).status).toBe(200);

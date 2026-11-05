@@ -109,3 +109,30 @@ Command: npx vitest run --cache=false src/platform/policy src/platform/conforman
      × unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)
  Test Files  2 failed | 7 passed (9)
       Tests  15 failed | 257 passed (272)
+
+REVIEW ROUND 5 (challenger review of #184 at e2ea5ee: M1, L1 orchestrator decision: per-surface parameter lists, L2, L3). Tests committed
+before the fixes in 7dad05a, with the lists module surfaceParams.ts (data, not used by the gateway until the fix) and the guard module list.
+The M50 test (failureEvaluation, off flags, invalid context) passes before the fix: it guards that mutation.
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance
+     × Messages {type: custom, name: shell} under an fn:shell denylist (M1)
+     × Responses {type: custom, name: shell} under an fn:shell denylist
+     × Messages {type: custom, name: search} under an fn:search allowlist
+     × a Responses custom_tool_call history item
+     × a Responses mcp_list_tools item is mcp:<server_label> (L2)
+     × tools listed by mcp_list_tools are not function identities
+     × chat web_search_options is type:web_search
+     × a Messages skill under a skill denylist
+     × a Messages container id as a string
+     × a Responses stored prompt is prompt:<id>
+     × a container without id or skills, no tool policy
+     × /v1/chat/completions: the unlisted parameter extensions is unidentified (blocked in enforce)
+     × /v1/chat/completions: the unlisted parameter capabilities is unidentified (blocked in enforce)
+     × /v1/chat/completions: the unlisted parameter actions is unidentified (blocked in enforce)
+     × /v1/chat/completions: the unlisted parameter extra_body is unidentified (blocked in enforce)
+     × /v1/messages: the unlisted parameter skills is unidentified (blocked in enforce)
+     × /v1/messages: the unlisted parameter extensions is unidentified (blocked in enforce)
+     × /v1/responses: the unlisted parameter skills is unidentified (blocked in enforce)
+     × every listed parameter that is not tool-affecting adds no unidentified tool, on each surface
+     × unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)
+ Test Files  2 failed | 7 passed (9)
+      Tests  20 failed | 273 passed (293)

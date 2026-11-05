@@ -9,6 +9,7 @@ import http from 'node:http';
 import { isId, isModelId, type ActorType, type DlpFinding, type GatewayRequestRecord, type PolicyDecision } from '../contracts';
 import { applicablePolicies, compileBundle, evaluate, failureEvaluation, selectBundle, UNIDENTIFIED_PREFIX, type Evaluation, type EvaluationInput, type RequestContext } from '../policy';
 import { CONFORMANCE_MARKER } from './mockProviders';
+import { paramClass } from './surfaceParams';
 
 type Location = DlpFinding['location'];
 type Flavor = 'openai' | 'anthropic';
@@ -63,17 +64,16 @@ export function requireSourceText(p: (text: string, r: Reviver) => unknown = JSO
   if (s !== '1') throw new Error('JSON.parse source text access is required (Node >= 21): numbers must keep their digits');
 }
 const ident = (kind: string, n: string) => (isId(`${kind}:${n}`) ? `${kind}:${n}` : `${kind}-h:${crypto.createHash('sha256').update(n).digest('hex').slice(0, 16)}`);
+const named = (kind: string, n: unknown, unidentified: string) => (typeof n === 'string' ? ident(kind, n) : unidentified);
 /**
- * Every identity of a tool, namespaced so none collides: function tools (type function or none, and named calls) by
+ * Every identity of a tool, namespaced so none collides: function tools (type function, custom or none, and named calls) by
  * `fn:<name>` (all names given), mcp tools by `mcp:<server_label>`, other typed tools by `type:<type>` (a name there is
- * not an identity). With no identity, `unidentified:<requestRef>`, which no policy can list. Anthropic `mcp_servers` entries
- * are `mcp:<name>`; any other top-level parameter that may declare tools is unidentified (refused in enforce).
+ * not an identity). With no identity, `unidentified:<requestRef>`, which no policy can list.
  */
 const toolIds = (t: J, unidentified: string): string[] => {
-  const type = typeof t?.type === 'string' && !['function', 'tool_use', 'function_call'].includes(t.type) ? t.type : undefined;
-  const named = (kind: string, n: unknown) => [typeof n === 'string' ? ident(kind, n) : unidentified];
-  if (type?.startsWith('mcp')) return named('mcp', t.server_label ?? t.server_name); // mcp tools, mcp_call and mcp_tool_use history items
-  if (type === 'server_tool_use') return named('type', t.name); // a server tool call in history names its tool
+  const type = typeof t?.type === 'string' && !['function', 'tool_use', 'function_call', 'custom', 'custom_tool_call'].includes(t.type) ? t.type : undefined;
+  if (type?.startsWith('mcp')) return [named('mcp', t.server_label ?? t.server_name, unidentified)]; // mcp tools and mcp_* history items
+  if (type === 'server_tool_use') return [named('type', t.name, unidentified)]; // a server tool call in history names its tool
   if (type) return [ident('type', type)];
   const names = [t?.function?.name, t?.name].filter((n): n is string => typeof n === 'string');
   return names.length ? names.map((n) => ident('fn', n)) : [unidentified];
@@ -85,8 +85,22 @@ const toolIds = (t: J, unidentified: string): string[] => {
  * tool definitions) objects are data and are walked.
  */
 const TEXT_BLOCKS = new Set(['text', 'input_text', 'output_text', 'refusal', 'thinking', 'tool_use', 'tool_result', 'function_call', 'function_call_output',
-  'message', 'mcp_call', 'server_tool_use', 'mcp_tool_use']);
-const TOOLISH = /tool|function|mcp|server|plugin|connector/i, NOT_DECLARING = new Set(['tools', 'functions', 'tool_choice', 'parallel_tool_calls', 'function_call', 'max_tool_calls']);
+  'message', 'mcp_call', 'server_tool_use', 'mcp_tool_use', 'custom_tool_call', 'custom_tool_call_output', 'mcp_list_tools']);
+/**
+ * Identities a top-level request parameter adds, by its class on the surface (surfaceParams.ts): any unlisted parameter is
+ * unidentified; `mcp_servers` entries are `mcp:<name>`; tool-affecting ones are `type:web_search`, `prompt:<id>`, or
+ * `container:<id>` and `skill:<skill_id>` (unidentified when they name nothing).
+ */
+function paramIds(dest: string, k: string, x: J, unidentified: string): string[] {
+  const c = paramClass(dest, k);
+  if (!c) return [unidentified];
+  if (k === 'mcp_servers') return [x].flat().map((s: J) => named('mcp', s?.name, unidentified));
+  if (c !== 'affecting') return [];
+  if (k === 'web_search_options') return ['type:web_search'];
+  if (k === 'prompt') return [named('prompt', x?.id, unidentified)];
+  const ids = [...(typeof x === 'string' || typeof x?.id === 'string' ? [ident('container', x?.id ?? x)] : []), ...[x?.skills ?? []].flat().map((s: J) => named('skill', s?.skill_id, unidentified))];
+  return ids.length ? ids : [unidentified];
+}
 const BINARY = ['image_url', 'image', 'input_audio', 'audio', 'file', 'file_data', 'source', 'data'];
 const inspectable = (b: J) => !b || typeof b !== 'object' || Array.isArray(b) || b instanceof Num || (typeof b.type === 'string' ? TEXT_BLOCKS.has(b.type) : !BINARY.some((k) => k in b));
 /**
@@ -94,7 +108,7 @@ const inspectable = (b: J) => !b || typeof b !== 'object' || Array.isArray(b) ||
  * token ids as one segment), with bounded depth and segments and bounded nested-JSON decoding (deeper JSON-in-strings,
  * exponent-form or split digits are slice C4).
  */
-function inspect(root: J, base: Location, unidentified: string): Parsed {
+function inspect(root: J, base: Location, unidentified: string, dest?: string): Parsed {
   const out: Parsed = { stream: root?.stream === true, segs: [], tools: [], opaque: false, model: isModelId(root?.model) ? root.model : undefined };
   const add = (location: Location, text: string) => out.segs.push({ location, text });
   const id = (x: string) => { if (!out.tools.includes(x)) out.tools.push(x); };
@@ -115,13 +129,12 @@ function inspect(root: J, base: Location, unidentified: string): Parsed {
     if (!v || typeof v !== 'object') return; // booleans and null carry no text
     if (typeof v.type === 'string' && MEDIA.test(v.type)) { out.opaque = true; return; }
     const here: Location = v.role === 'system' || v.role === 'developer' ? 'system' : v.role === 'tool' || v.type === 'tool_result' || v.type === 'function_call_output' ? 'tool_result' : loc;
-    if (v.role === undefined && (['tool_use', 'function_call', 'server_tool_use', 'mcp_tool_use'].includes(v.type) || 'arguments' in v || (v.type === 'function' && v.function))) tool(v);
+    if (v.role === undefined && (['tool_use', 'function_call', 'server_tool_use', 'mcp_tool_use', 'custom_tool_call', 'mcp_list_tools'].includes(v.type) || 'arguments' in v || (v.type === 'function' && v.function))) tool(v);
     for (const [k, x] of Object.entries(v)) {
       add(here, k);
       if (k === 'model' && depth === 0) continue;
-      if ((k === 'tools' || k === 'functions') && Array.isArray(x)) for (const t of x) tool(t);
-      if (depth === 0 && k === 'mcp_servers') for (const s of Array.isArray(x) ? x : [x]) id(typeof s?.name === 'string' ? ident('mcp', s.name) : unidentified);
-      else if (depth === 0 && TOOLISH.test(k) && !NOT_DECLARING.has(k)) id(unidentified);
+      if ((k === 'tools' || k === 'functions') && Array.isArray(x) && v.type !== 'mcp_list_tools') for (const t of x) tool(t); // listed MCP tools are the server's
+      if (depth === 0 && dest && x !== null) for (const i of paramIds(dest, k, x, unidentified)) id(i);
       const blocks = (k === 'content' && (v.role !== undefined || v.type === 'tool_result' || v.type === 'message')) || (k === 'output' && v.type === 'function_call_output')
         || (depth === 0 && (k === 'system' || (k === 'input' && Array.isArray(x))));
       if (blocks && !(Array.isArray(x) ? x : [x]).every(inspectable)) out.opaque = true;
@@ -220,7 +233,7 @@ export function createMockGateway(o: GatewayOptions) {
     const provider = (route && Object.keys(o.providers).find((k) => o.providers[k].flavor === route.flavor)) || 'unrouted';
     let parsed: Parsed = { stream: false, segs: [], tools: [], opaque: true };
     const oversized = raw.length > o.maxInspectBytes; // bytes, not characters
-    if (!oversized) { try { parsed = inspect(parse(raw.toString('utf8')), 'input', `${UNIDENTIFIED_PREFIX}${requestRef}`); } catch { /* opaque: fails closed below */ } }
+    if (!oversized) { try { parsed = inspect(parse(raw.toString('utf8')), 'input', `${UNIDENTIFIED_PREFIX}${requestRef}`, route?.dest); } catch { /* opaque: fails closed below */ } }
     const decisions: PolicyDecision[] = [];
     const base = { tenantId: id.tenantId, requestRef, workloadId: id.workloadId, teamIds: id.teamIds, actorType: id.actorType, actorRef: id.actorRef, provider,
       destination: `${provider}:${route?.dest ?? 'unknown'}`, modelRequested: parsed.model, inputBytes: raw.length };

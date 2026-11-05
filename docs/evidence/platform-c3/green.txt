@@ -116,32 +116,19 @@ Test edits after RED (strengthened only): the server_tool_use case uses a type:w
 message item, mcp_call, server_tool_use and mcp_tool_use; the source-text case also patches JSON.parse to check creation. One round-2 expectation is now
 exact for the access decision: "a tool without name or type" reports TOOL_UNIDENTIFIED and TOOL_NOT_ALLOWED.
 Command: npx vitest run --cache=false src/platform/policy src/platform/conformance scripts/check-next-bundle.test.mjs --reporter=verbose (round-4 lines)
-  ✓ Messages mcp_servers under an fn:search allowlist (M1)
-  ✓ Messages mcp_servers allowed as mcp:evil
-  ✓ a nameless mcp_servers entry, no tool policy
-  ✓ an unknown tool-declaring parameter (plugins), no tool policy
-  ✓ fn:search + mcp:evil under fn:search + mcp:wiki
-  ✓ a bundle listing the unidentified sentinel is refused (L2)
-  ✓ server_tool_use in history is type:web_search (L4)
-  ✓ mcp_tool_use in history is mcp:<server_name>
-  ✓ a Responses mcp_call item is mcp:<server_label>
-  ✓ an unidentified tool is recorded, not enforced, in monitor mode
-  ✓ a Responses input item of unknown type (L3) is uninspectable: DLP unavailable
-  ✓ a typeless Responses input item with data is uninspectable: DLP unavailable
-  ✓ function_call_output.output parts of unknown type is uninspectable: DLP unavailable
-  ✓ a tool_result content block of unknown type (N49) is uninspectable: DLP unavailable
-  ✓ a top-level system block of unknown type (N50) is uninspectable: DLP unavailable
-  ✓ redacted_thinking in history (accepted availability cost, L5) is uninspectable: DLP unavailable
-  ✓ web_search_tool_result in history (L5) is uninspectable: DLP unavailable
-  ✓ known items and blocks stay inspectable; a token-id array with a PAN is found (N38); source-text access is checked loudly at creation
-  ✓ a bundle naming an unidentified: tool is refused (L2)
-  ✓ an unidentified tool is refused by the access decision (enforce: block)
-  ✓ an unidentified tool is refused by the access decision (monitor: allow)
-  ✓ unnamespacedTools lists tool ids that never match a gateway identity (L1, advisory)
-  Test Files  10 passed (10)
-  Tests  305 passed (305)
+  (round-4 listing condensed in round 5: 22 round-4 tests listed at commit 336f70c; 305 passed; reproducible with the command above)
 Mutation check, round 4 (one at a time, policy + conformance + check-next-bundle tests): reviewer set rv183d-mut-c3 (53, five anchors adapted: N19, N26,
   N37, N40, N50): 52/53 killed, incl. the reviewer survivors N38, N49, N50. R4-1..R4-21 new (mcp_servers, unknown tool parameters, non-declaring keys,
   bundle sentinel, TOOL_UNIDENTIFIED, unnamespacedTools, history identities, Responses positions, text block types, source-text check): 20/21 killed.
   Not killed, equivalent: rv-N13 (no route means provider "unrouted", which has no target; 404 either way); R4-20 (a source-text fallback in parse is
   unreachable: the gateway refuses to start without source text).
+
+REVIEW ROUND 5 (challenger review of #184 at e2ea5ee: M1, L1 orchestrator decision, L2, L3). Same tests as the round-5 RED section of red.txt;
+fixes added. Test edits after RED (strengthened or made exact): the round-4 control case adds custom_tool_call, custom_tool_call_output and
+mcp_list_tools items and drops function_call from its Responses body (not a Responses parameter); the unlisted-parameter table adds the empty key
+on legacy Completions; "a marker as a top-level key" now also reports TOOL_UNIDENTIFIED (an unlisted top-level key).
+Command: npx vitest run --cache=false src/platform/policy src/platform/conformance scripts/check-next-bundle.test.mjs: all 20 round-5 RED tests pass
+  Test Files  10 passed (10)
+  Tests  327 passed (327)
+Mutation check, round 5 (one at a time): reviewer sets rv184e-mut-c1 56/56 killed (M50 by the new test), rv184e-mut-fix 6/6, rv184e-mut-c3 62/63
+  (13 anchors re-anchored to the new code; N53 and N54 now target the list classification); R5-1..R5-17 new 17/17. Not killed: rv-N13, equivalent.
