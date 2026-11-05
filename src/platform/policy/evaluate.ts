@@ -7,7 +7,7 @@
 // Work per evaluation is bounded by the contract maxima (256 policies x 512 rules, 4096 entitlements x 256 models,
 // 1000 findings, 256 teams and tools): O(P*R + E*M + F) with per-category finding summaries.
 import { isCount, isId, isIsoInstant, validatePolicyDecision, POLICY_PHASES, type Entitlement, type Policy, type PolicyCondition, type PolicyDecision } from '../contracts';
-import { capabilityOn, type PlatformFlags } from '../flags';
+import { capabilityOn, parsePlatformBlock, type PlatformFlags } from '../flags';
 import { compileBundle, current, RESERVED_PREFIX, selectBundle, type BundleFailure, type CompiledBundle, type Selected } from './bundle';
 import { validateRequestContext, type RequestContext } from './context';
 
@@ -24,7 +24,7 @@ export interface EvaluationInput {
   lastKnownGood?: unknown;
   context: unknown;
   clock: Clock;
-  /** The instance's D7 flags (required): they set the access mode via accessModeFor; off means policy is disabled. */
+  /** Required: parsePlatformBlock output from the TRUSTED engagement config, never per-request input. Invalid: refused (block). */
   flags: PlatformFlags;
   /** Optional assertion: when given, it must equal accessModeFor(flags), or the input is refused. */
   accessMode?: Mode;
@@ -161,10 +161,10 @@ export function sealEvaluation(source: Evaluation['source'], decisions: PolicyDe
 }
 
 function resolveMode(i: EvaluationInput, problems: string[]): Mode | 'off' | undefined {
-  const f: unknown = i.flags;
-  if (typeof f !== 'object' || f === null || Array.isArray(f)) { problems.push('$.flags: required, the platform flags object'); return undefined; }
-  const m = accessModeFor(f as PlatformFlags);
-  if (m !== 'off' && i.accessMode !== undefined && i.accessMode !== m) { problems.push('$.accessMode: does not match the platform flags'); return undefined; }
+  const r = i.flags === undefined ? { ok: false as const, problems: ['flags: required'] } : parsePlatformBlock(i.flags, 'flags');
+  if (!r.ok) { problems.push(...r.problems.map((p) => `$.${p}`)); return undefined; }
+  const m = accessModeFor(r.flags);
+  if (i.accessMode !== undefined && i.accessMode !== m) { problems.push('$.accessMode: does not match the platform flags'); return undefined; }
   return m;
 }
 /** One strict read of the input: the context is cloned before validation, so getters are read once and never again. */
@@ -228,10 +228,9 @@ function policyFailure(p: Policy, f: 'timeout' | 'engine_error'): Part {
 export function evaluate(i: EvaluationInput): Evaluation {
   try {
     const s = snapshot(i);
-    if (s.mode === 'off') return disabled(i, s);
-    if (s.problems.length || !s.c || !s.mode) return refusal(i, s);
-    const { c } = s;
-    const mode: Mode = s.mode;
+    if (s.mode === 'off' && !s.problems.length) return disabled(i, s);
+    if (s.problems.length || !s.c || !s.mode || s.mode === 'off') return refusal(i, s);
+    const { c, mode } = { c: s.c, mode: s.mode };
     const now = s.now as string;
     const r = selectBundle(i.bundle, i.lastKnownGood, c.tenantId, now);
     if (!r.ok) return bundleFailure(mode, c, now, r);
@@ -264,10 +263,9 @@ export function failureEvaluation(i: EvaluationInput, f: 'timeout' | 'engine_err
   let s: Snapshot = { problems: [] };
   try {
     s = snapshot(i);
-    if (s.mode === 'off') return disabled(i, s);
-    if (s.problems.length || !s.c || !s.mode) return refusal(i, s);
-    const { c } = s;
-    const mode: Mode = s.mode;
+    if (s.mode === 'off' && !s.problems.length) return disabled(i, s);
+    if (s.problems.length || !s.c || !s.mode || s.mode === 'off') return refusal(i, s);
+    const { c, mode } = { c: s.c, mode: s.mode };
     const now = s.now as string;
     const latency = isCount(latencyMicros) ? latencyMicros : 0;
     const r = selectBundle(i.bundle, i.lastKnownGood, c.tenantId, now);

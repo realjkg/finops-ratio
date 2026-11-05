@@ -43,7 +43,7 @@ describe('L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock);
   it.each([[{ enabled: true, enforce: true }], [{ enabled: 1, enforcement: 1 }], [{ enabled: true, enforcement: 'true' }], [{ enabled: false, enforcement: true }], [Object.create({ enabled: true, enforcement: true })], ['on'], [null], [undefined]])(
     'junk flags %j are refused and block (never POLICY_DISABLED)', (flags) => expect([run({ flags }).verdict, access(run({ flags }))]).toEqual(['block', 'CONTEXT_INVALID']));
   it('an asserted accessMode that disagrees with the flags (also with off flags) is refused; off flags with an invalid context are refused', () => {
-    expect([accessModeFor(FLAGS.enforce), accessModeFor(FLAGS.monitor)]).toEqual(['enforce', 'monitor']);
+    expect([accessModeFor(FLAGS.enforce), accessModeFor(FLAGS.monitor), accessModeFor(Object.create(FLAGS.enforce))]).toEqual(['enforce', 'monitor', 'off']);
     for (const over of [{ accessMode: 'monitor' }, { flags: {}, accessMode: 'enforce' }, { flags: { enabled: true }, accessMode: 'monitor' }]) expect([run(over).verdict, access(run(over))]).toEqual(['block', 'CONTEXT_INVALID']);
     expect([run({ flags: {} }, { ...ctx(), prompt: 'x' } as never).verdict, access(run({ flags: {} }, { ...ctx(), prompt: 'x' } as never))]).toEqual(['block', 'CONTEXT_INVALID']);
   });

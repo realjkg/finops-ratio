@@ -19,7 +19,7 @@ export const RESERVED_PREFIX = 'refused:';
 const COMPILED = new WeakSet<object>();
 const freeze = <T>(x: T): T => { if (x && typeof x === 'object' && !Object.isFrozen(x)) { Object.values(x).forEach(freeze); Object.freeze(x); } return x; };
 type Versioned = { id: string; version: number; effectiveFrom: string; effectiveTo?: string };
-/** Of each id, the highest version effective on `day` (YYYY-MM-DD); versions not yet effective, or ended, are ignored. */
+/** Per id, the highest version effective on `day` (YYYY-MM-DD). Gap: no effective version, no rule. Revival: a lower open-ended version applies again after a higher one ends. */
 export function current<T>(xs: readonly T[], of: (x: T) => Versioned, day: string): T[] {
   const live = xs.filter((x) => { const v = of(x); return v.effectiveFrom <= day && (v.effectiveTo === undefined || day < v.effectiveTo); });
   const top = new Map<string, number>();
