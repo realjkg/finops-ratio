@@ -1,0 +1,112 @@
+GREEN evidence, platform slice C1 (pure policy evaluation library, ADR-0001 §13). Same tests as red.txt, implementation added.
+Test edits after RED (reviewed, no assertion weakened): (1) the log-only row of the per-action table now also expects DEFAULT_ALLOW,
+because a log-only rule does not act and the policy default is recorded; (2) table rows typed for tsc (no behavior change).
+
+Command: npx vitest run src/platform/policy --cache=false --reporter=verbose
+  (round 0 listing condensed in round 1: 74 tests passed: evaluate.test.ts 65, properties.test.ts 6, boundary.test.ts 3;
+   the full list is reproducible with the command above at commit 54964d7)
+ Test Files  3 passed (3)
+      Tests  74 passed (74)
+
+Gates on the implementation tree (Linux container, Node v22.23.4):
+  npm run lint: exit 0 | npx tsc --noEmit: exit 0 | npx tsc -p tsconfig.worker.json --noEmit: exit 0
+  npx vitest run --cache=false: exit 0, Test Files  312 passed (312), Tests  5251 passed (5251)
+  npm run build: exit 0 | npm run check:bundle: exit 0, {"type":"ratio.bundle-check","pass":true,"stats":{"clientFiles":147,"serverFiles":171},"problems":[]} | git diff --check: clean
+
+Mutation check (one mutation at a time, npx vitest run src/platform/policy; KILLED = a test failed):
+  M1  KILLED   deny-wins removed (an allow grant overrides a deny)  <- allow and deny
+  M2  KILLED   served-model re-check removed  <- a served-model fallback
+  M3  KILLED   last-known-good used without approval  <- is refused when not approved
+  M4  KILLED   last-known-good used outside its own validity  <- is refused when itself expired
+  M5  KILLED   monitor treated as enforce in the verdict  <- re-checks the served model before release, and records a monitor-mode violation without bl
+  M6  KILLED   fail-open on a measured timeout  <- a policy that overran its own timeout (measured with the injected clock) is a timeout, and
+  M7  KILLED   policy failures always continue with a gap (fail-open)  <- timeout: enforcing policies deny; a monitor policy configured to continue does so with a v
+  M8  KILLED   engine error inside evaluation allows  <- an engine error inside evaluation (a throwing clock) fails closed
+  M9  KILLED   expired bundle accepted  <- a bundle that is expired denies every decision
+  M10 KILLED   other-tenant bundle accepted  <- a bundle that is of another tenant denies every decision
+  M11 KILLED   first matched rule wins instead of the most severe  <- the most severe matched rule wins over an allow exception; a default block applies when no
+  M12 KILLED   required DLP unavailable ignored  <- required DLP unavailable denies a policy with a DLP condition; entitlements unavailable de
+  M13 KILLED   entitlements unavailable ignored  <- required DLP unavailable denies a policy with a DLP condition; entitlements unavailable de
+  M14 KILLED   minimum confidence off by one (>= to >)  <- a matched block rule yields block (hard control)
+  M15 KILLED   workload scope ignored  <- a policy for another workload does not apply
+  M16 KILLED   entitlement effective dates ignored  <- an expired grant
+  M17 KILLED   redact classed as log-only control  <- a matched redact rule yields redact (hard control)
+  M18 KILLED   unreadable bundle decided in the access mode (monitor fails open)  <- an unreadable bundle is one enforced, denied decision under a placeholder id
+  M19 KILLED   content key accepted in the request context  <- refuses a content key: block, no decision, no echoed value
+  19/19 killed
+
+CodeQL round (PR #183, alert "Incomplete string escaping or encoding", high, evaluate.ts:153): problem paths were re-rooted with
+String.replace('$', ...), which CodeQL reads as incomplete escaping. The rewrite is intentional (only the leading root '$' of each
+problem path), now written as a prefix slice. Added guard test (passes before and after; behavior unchanged):
+  ✓ src/platform/policy/evaluate.test.ts > input refusal, no content > names a refused context key under $.context (each problem path is re-rooted once)
+  Tests  75 passed (75)
+
+
+REVIEW ROUND 1 (challenger review of #183 at 13009d6). Same tests as the round-1 RED section of red.txt; fixes added.
+Command: npx vitest run src/platform/policy --cache=false --reporter=verbose (review.test.ts lines below)
+  (28 review.test.ts tests listed at commit 11008a1; condensed in round 2, reproducible with the command above)
+  Test Files  4 passed (4)
+  Tests  104 passed (104)
+P9 at the contract maxima (256 policies x 512 rules, 4096 entitlements x 256 models, 1000 findings, 256 teams), 3 runs, load ~5:
+  compileBundle 1072-1209 ms (once per bundle); evaluate 821-921 ms (257 decisions); raw (uncompiled) bundle 1.7-2.5 s.
+Mutation check, round 1 (one at a time, npx vitest run src/platform/policy): reviewer set R-M1..R-M25 adapted to the new code, N1..N18 new.
+  killed: R-M1, R-M2, R-M3, R-M4, R-M5, R-M6, R-M8, R-M9, R-M10, R-M11, R-M12, R-M13, R-M14, R-M15, R-M16, R-M17, R-M18, R-M19, R-M20, R-M21, R-M24, R-M25, N1, N2, N3, N4, N5, N6, N7, N8, N9, N10, N11, N12, N13, N14, N15, N16, N17, N18
+  40/42 killed. Survivors are equivalent mutants: R-M7 (a log-only class has only allow actions and default allow, so the
+  override is redundant by construction; removed in this round) and R-M22 (validated user/service refs are ps1:/svc: on both sides,
+  so actorRef equality implies the actor type; the explicit check is kept as defense in depth).
+
+REVIEW ROUND 2 (challenger review of #183 at 3073bd8). Same tests as the round-2 RED section of red.txt; fixes added.
+Test edits after RED (strengthened only): the unknown-phase refusal now uses a policy for another phase (mutation R2-4 survived first);
+existing tests moved from accessMode to the required D7 flags (FLAGS.enforce / FLAGS.monitor fixtures), same assertions.
+Command: npx vitest run src/platform/policy --cache=false --reporter=verbose (review2.test.ts lines)
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > deny v1 now, v2 from Dec 1 (2026-10-02T12:00:00Z): model-z ENTITLEMENT_DENIED
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > deny v1 now, v2 from Dec 1 (2026-11-30T23:59:59.999Z): model-z ENTITLEMENT_DENIED
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > deny v1 now, v2 from Dec 1 (2026-12-01T00:00:00Z): model-z ENTITLEMENT_DENIED
+  ✓ M1: per id, the highest version EFFECTIVE at now is evaluated > a future DLP policy version does not remove the current one; a future grant does not caus...
+  ✓ M2: a refusal is at least as strict as the normal path > monitor access + an enforce-mode policy for the phase: 1001 findings blocks, recorded CONTEXT_IN...
+  ✓ M2: a refusal is at least as strict as the normal path > monitor access + an enforce-mode policy for the phase: 1 card + 257 tools blocks, recorded CONTE...
+  ✓ M2: a refusal is at least as strict as the normal path > monitor access + an enforce-mode policy for the phase: 257 teams blocks, recorded CONTEXT_INVALID
+  ✓ M2: a refusal is at least as strict as the normal path > only when every applicable policy is monitor (or none applies) does a monitor refusal record and...
+  ✓ L1/L2: flags are required and bound through capabilityOn; off is a recorded allow > off flags never block: one recorded POLICY_DISABLED allow, nothing en...
+  ✓ L1/L2: flags are required and bound through capabilityOn; off is a recorded allow > a flags/accessMode mismatch or junk flags are refused (enforce with t...
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs openai/gpt-4: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs models/gpt-4: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs ft:gpt-4:org::abc: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs ft:gpt-4-turbo:org::abc: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4- vs gpt-4-turbo: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs gpt-4.1: denied true
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs gpt-4o: denied false
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs gpt-40: denied false
+  ✓ L3 families, L4 placeholders, L5 compile > deny gpt-4 vs openai/gpt-4o: denied false
+  ✓ L3 families, L4 placeholders, L5 compile > refusal placeholders cannot be forged: the reserved refused: prefix is refused in contexts and bundles
+  ✓ L3 families, L4 placeholders, L5 compile > a compiled bundle is frozen and independent of the raw input, which stays mutable
+  Test Files  5 passed (5)
+  Tests  124 passed (124)
+Mutation check, round 2 (one at a time): reviewer set rv183b-mut-c1 (39, anchors adapted to the new code) + R2-1..R2-14 new: 53/53 killed
+  (R2-4 after the strengthened test). Killed: rv-M1, rv-M2, rv-M3, rv-M4, rv-M5, rv-M6, rv-M8, rv-M9, rv-M10, rv-M11, rv-M12, rv-M13, rv-M14, rv-M15, rv-M17, rv-M18, rv-M19, rv-M20, rv-M21, rv-M24
+  rv-M26, rv-M27, rv-M28, rv-M29, rv-M30, rv-M31, rv-M32, rv-M33, rv-M34, rv-M35, rv-M36, rv-M37, rv-M38, rv-M39, rv-M40, rv-M41, rv-M42, rv-M43, rv-M44, R2-1
+  R2-2, R2-3, R2-5, R2-6, R2-7, R2-8, R2-9, R2-10, R2-11, R2-12, R2-13, R2-14, R2-4.
+
+REVIEW ROUND 3 (challenger review of #183 at 5ea2d49). Same tests as the round-3 RED section of red.txt; fix added.
+Test edit after RED (strengthened only): accessModeFor(Object.create(FLAGS.enforce)) is "off" (mutation rv-M35 survived first).
+Command: npx vitest run src/platform/policy --cache=false --reporter=verbose (round-3 lines)
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > valid off...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > valid off...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > valid off...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > valid off...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > junk flag...
+  ✓ L1/L2 + round 3 M1: flags must be valid D7 flags (parsePlatformBlock); only valid off flags without a contrary assertion are a recorded allow > an assert...
+  ✓ L3 families, L4 placeholders, L5 compile > a refusal also weighs the last-known-good (M32b) and never copies a refused: tenant into its record (M43)
+  Test Files  5 passed (5)
+  Tests  136 passed (136)
+Mutation check, round 3 (one at a time): reviewer set rv183c-mut-c1 (48, two anchors adapted) + R3-1..R3-4 new: 52/52 killed (rv-M35 after
+  the strengthened test). Killed: rv-M1, rv-M2, rv-M3, rv-M4, rv-M5, rv-M6, rv-M8, rv-M9, rv-M10, rv-M11, rv-M12, rv-M13, rv-M14, rv-M15, rv-M17, rv-M18, rv-M19, rv-M20, rv-M21, rv-M24, rv-M29, rv-M30
+  rv-M36, rv-M37, rv-M40, rv-M41, rv-M42, rv-M44, rv-M26, rv-M27, rv-M28, rv-M28b, rv-M28c, rv-M31, rv-M32, rv-M32b, rv-M32c, rv-M33, rv-M34, rv-M35b, rv-M35c, rv-M38, rv-M39, rv-M39b
+  rv-M43, rv-M45, rv-M46, R3-1, R3-2, R3-3, R3-4, rv-M35.

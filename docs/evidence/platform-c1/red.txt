@@ -1,0 +1,95 @@
+RED evidence, platform slice C1 (pure policy evaluation library, ADR-0001 §13). Base 6c809af. Tests committed before the implementation.
+Command: npx vitest run src/platform/policy --cache=false (src/platform/policy/{context,evaluate,index}.ts absent; tsconfig.worker.json at base)
+     × has exactly these modules, importing only each other and the contracts
+     × the worker typecheck covers the library, and the fixtures are labeled SYNTHETIC
+ FAIL  src/platform/policy/evaluate.test.ts [ src/platform/policy/evaluate.test.ts ]
+Error: Cannot find module './evaluate' imported from src/platform/policy/evaluate.test.ts
+ FAIL  src/platform/policy/properties.test.ts [ src/platform/policy/properties.test.ts ]
+Error: Cannot find module './evaluate' imported from src/platform/policy/properties.test.ts
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+ FAIL  src/platform/policy/boundary.test.ts > policy library boundary > has exactly these modules, importing only each other and the contracts
+AssertionError: expected [] to deeply equal [ 'context.ts', 'evaluate.ts', …(1) ]
+ FAIL  src/platform/policy/boundary.test.ts > policy library boundary > the worker typecheck covers the library, and the fixtures are labeled SYNTHETIC
+AssertionError: expected [ 'src/ingest/**/*.ts', …(2) ] to include 'src/platform/policy/*.ts'
+ Test Files  3 failed (3)
+      Tests  2 failed | 1 passed (3)
+
+REVIEW ROUND 1 (challenger review of #183 at 13009d6: M1, M2, L1-L7). Tests committed before the fixes.
+Command: npx vitest run src/platform/policy --cache=false (evaluate.ts/context.ts at 13009d6)
+     × deny model-x blocks model-x@20261001
+     × deny model-x blocks model-x-2026-10-01
+     × deny model-x blocks MODEL-X
+     × deny model-x blocks Model-X.v2
+     × deny model-x blocks model-x:ft
+     × re-checks a dated served id against the family deny before release
+     × a refused context (duplicate tools) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (257 teams) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (1001 findings) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a 129-character requestRef) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a symbol key) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a throwing getter) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (a proxy) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a refused context (null) is recorded as a denied engine_error with CONTEXT_INVALID
+     × a missing model is MODEL_UNKNOWN: blocked in enforce, recorded and allowed in monitor; a not_in model rule holds
+     × an unreadable bundle and a failed evaluation follow the access mode (monitor never enforces)
+     × a clock that throws is recorded under the epoch with CLOCK_INVALID, and blocks in enforce
+     × the access mode is bound to the D7 flags by one helper; a mismatch is refused (enforce)
+     × only the highest version of an entitlement or policy id is evaluated
+     × a dropped (contract-invalid) decision fails the evaluation closed (M20)
+     × a compiled bundle gives the same result as the raw one; a look-alike object is not trusted as compiled
+     × reads each input getter once (a strict copy is validated and evaluated)
+     × hostile inputs never throw, never allow in enforce mode, and always record a decision
+     × P9: at the contract maxima a compiled bundle evaluates within a bounded time (recorded in green.txt)
+     × an unreadable bundle is one denied decision under a placeholder id, in the access mode (monitor: verdict allow)
+     × refuses a content key: block, one recorded denied decision, no echoed value
+     × refuses a bad clock: block, one recorded denied decision, no echoed value
+     × refuses an email as actor: block, one recorded denied decision, no echoed value
+     × refuses a bad finding: block, one recorded denied decision, no echoed value
+     × random junk as input never throws and never allows
+⎯⎯⎯⎯⎯⎯ Failed Tests 30 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  3 failed | 1 passed (4)
+      Tests  30 failed | 74 passed (104)
+
+EVIDENCE TOOLING (review round 1: L6 EOF blank line; coordinator: fixed port 3410 collides between concurrent evidence runs). Tests first.
+Command: npx vitest run scripts/evidence --cache=false (collect-pr-evidence.mjs and evidenceLib.mjs at 13009d6)
+     × shows NOT RUN and PENDING as such, the merge-base note, fixture errors and N/A totals
+     × picks a free port pair by default, so a busy 3410 (another evidence run) does not refuse; an explicit busy --port still does
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+AssertionError: collect-pr-evidence: port 3410 is in use (the Playwright suites need --port and --port+1); pass --port <free port>
+AssertionError: expected false to be true // Object.is equality
+      Tests  2 failed | 47 passed (49)
+
+REVIEW ROUND 2 (challenger review of #183 at 3073bd8: M1, M2, L1-L5; decisions: supersession effective at now, refusal at least as strict,
+flags required and off = recorded allow). Tests committed before the fixes, on the merge of main (2785747).
+Command: npx vitest run src/platform/policy --cache=false
+     × an unreadable bundle is one denied decision under a placeholder id, in the access mode (enforce: verdict block)
+     × an unreadable bundle is one denied decision under a placeholder id, in the access mode (monitor: verdict allow)
+     × deny v1 now, v2 from Dec 1 (2026-10-02T12:00:00Z): model-z ENTITLEMENT_DENIED
+     × deny v1 now, v2 from Dec 1 (2026-11-30T23:59:59.999Z): model-z ENTITLEMENT_DENIED
+     × a future DLP policy version does not remove the current one; a future grant does not cause an outage
+     × monitor access + an enforce-mode policy for the phase: 1001 findings blocks, recorded CONTEXT_INVALID
+     × monitor access + an enforce-mode policy for the phase: 1 card + 257 tools blocks, recorded CONTEXT_INVALID
+     × monitor access + an enforce-mode policy for the phase: 257 teams blocks, recorded CONTEXT_INVALID
+     × only when every applicable policy is monitor (or none applies) does a monitor refusal record and allow
+     × off flags never block: one recorded POLICY_DISABLED allow, nothing enforced
+     × deny gpt-4 vs openai/gpt-4: denied true
+     × deny gpt-4 vs models/gpt-4: denied true
+     × deny gpt-4 vs ft:gpt-4:org::abc: denied true
+     × deny gpt-4 vs ft:gpt-4-turbo:org::abc: denied true
+     × deny gpt-4- vs gpt-4-turbo: denied true
+     × refusal placeholders cannot be forged: the reserved refused: prefix is refused in contexts and bundles
+⎯⎯⎯⎯⎯⎯ Failed Tests 16 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  2 failed | 3 passed (5)
+      Tests  16 failed | 108 passed (124)
+
+REVIEW ROUND 3 (challenger review of #183 at 5ea2d49: M1, L3). Tests committed before the fix. The M32b/M43 tests pass before the fix (mutation killers).
+Command: npx vitest run src/platform/policy --cache=false
+     × junk flags {"enabled":true,"enforce":true} are refused and block (never POLICY_DISABLED)
+     × junk flags {"enabled":1,"enforcement":1} are refused and block (never POLICY_DISABLED)
+     × junk flags {"enabled":true,"enforcement":"true"} are refused and block (never POLICY_DISABLED)
+     × junk flags {"enabled":false,"enforcement":true} are refused and block (never POLICY_DISABLED)
+     × junk flags {} are refused and block (never POLICY_DISABLED)
+     × an asserted accessMode that disagrees with the flags (also with off flags) is refused; off flags with an invalid context are refused
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 6 ⎯⎯⎯⎯⎯⎯⎯
+ Test Files  1 failed | 4 passed (5)
+      Tests  6 failed | 130 passed (136)

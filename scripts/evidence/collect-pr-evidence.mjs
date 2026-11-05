@@ -3,7 +3,7 @@
 // it changes no CI workflow or governance file and adds no dependency.
 //
 //   node scripts/evidence/collect-pr-evidence.mjs --base <sha|ref> --head <sha> --pr <n>
-//        [--out dir] [--logs dir] [--port n] [--gate-timeout minutes] [--migration-smoke] [--plan-only]
+//        [--out dir] [--logs dir] [--port n (default: a free ephemeral pair)] [--gate-timeout minutes] [--migration-smoke] [--plan-only]
 //
 // Runs in the current directory (the checkout under test), so it can be run from another checkout
 // (mac-evidence.sh does). Refuses (exit 3) unless the tree is clean, HEAD equals --head, the ports are
@@ -74,7 +74,14 @@ if (git('status', '--porcelain')) stop(EXIT.REFUSED, 'working tree is not clean 
 if (git('rev-parse', 'HEAD') !== headSha) stop(EXIT.REFUSED, `HEAD is not --head (${headSha}); check out that commit first`);
 const leftover = git('worktree', 'list', '--porcelain').split('\n').filter((l) => l.startsWith('worktree ') && /ratio-evidence-rollback-/.test(l)).map((l) => l.slice(9));
 if (leftover.length) stop(EXIT.REFUSED, `a previous evidence rollback worktree is still registered: ${leftover.join(', ')}\nfix: ${leftover.map((p) => `git worktree remove --force ${JSON.stringify(p)}`).join('; ')}; git worktree prune`);
-const port = Number(args.port ?? 3410);
+// Default: a free ephemeral pair from the OS (a fixed default collided between concurrent evidence runs); --port overrides.
+const ephemeral = () => new Promise((resolve) => { const s = net.createServer(); s.once('error', () => resolve(0)); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => resolve(p)); }); });
+async function freePair() {
+  for (let i = 0; i < 20; i++) { const p = await ephemeral(); if (p && p < 65535 && (await portFree(p + 1))) return p; }
+  return 0;
+}
+const port = args.port !== undefined ? Number(args.port) : await freePair();
+if (!port) stop(EXIT.REFUSED, 'no free port pair found; pass --port <free port>');
 for (const p of [port, port + 1]) if (!(await portFree(p))) stop(EXIT.REFUSED, `port ${p} is in use (the Playwright suites need --port and --port+1); pass --port <free port>`);
 const mergeBase = git('merge-base', baseSha, headSha);
 const OUT = path.resolve(args.out ?? `docs/evidence/pr-${args.pr}`);
@@ -146,7 +153,7 @@ informational.push(!platformManifest && !platformProblems.length ? { name: PLATF
 if (browser.env) ev.env.browser = browser.source;
 if (PLAN_ONLY) {
   const show = (g) => ({ name: g.name, command: g.command ?? g.steps.map((a) => a.join(' ')).join(' && '), envKeys: g.env ? Object.keys(g.env).sort() : null, skip: g.skip ?? null, na: g.na ?? null, db: g.db ?? null });
-  say(JSON.stringify({ head: headSha, base: baseSha, mergeBase, migrationsChanged: migrations.length, gates: plan.map(show), informational: informational.map(show) }, null, 2));
+  say(JSON.stringify({ head: headSha, base: baseSha, mergeBase, port, migrationsChanged: migrations.length, gates: plan.map(show), informational: informational.map(show) }, null, 2));
   process.exit(EXIT.OK);
 }
 

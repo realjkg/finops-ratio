@@ -3,6 +3,7 @@
 // each gate gets, and the migration safety rules (including an inherited production RATIO_ENV).
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -69,6 +70,18 @@ describe('collect-pr-evidence refusals', () => {
 });
 
 describe('collect-pr-evidence plan', () => {
+  it('picks a free port pair by default, so a busy 3410 (another evidence run) does not refuse; an explicit busy --port still does', async () => {
+    const { dir, base, head } = repo();
+    const blocker = net.createServer();
+    await new Promise((r) => { blocker.once('error', r); blocker.listen(3410, '127.0.0.1', r); }); // already busy is fine too
+    try {
+      const p = plan(collect(dir, ['--base', base, '--head', head, '--pr', '1', '--plan-only']));
+      expect(Number.isInteger(p.port) && p.port !== 3410).toBe(true);
+      const r = collect(dir, ['--base', base, '--head', head, '--pr', '1', '--plan-only', '--port', '3410']);
+      expect(r.status).toBe(3);
+      expect(r.stderr).toMatch(/port 3410 is in use/);
+    } finally { await new Promise((r) => blocker.close(r)); }
+  });
   it('uses the merge-base when --base has moved on (a migration added on main later is not counted as the PR\'s)', () => {
     const { dir, git, base, head } = repo();
     git('checkout', '-q', 'main');
