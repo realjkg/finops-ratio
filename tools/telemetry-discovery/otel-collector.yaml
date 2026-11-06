@@ -1,0 +1,230 @@
+# Ratio telemetry discovery kit: OpenTelemetry Collector template.
+# Status: synthetic-validated, runtime validation pending. Pinned target: otelcol-contrib 0.114.0
+# (see versions.json). Validate with the pinned binary before trusting any line:
+#   otelcol-contrib validate --config otel-collector.yaml
+#
+# Design rules
+#   * Content capture is off at the SDK. This file is the second line of defense: attributes are
+#     ALLOWLISTED (keep_keys) on resources, spans, span events, logs and data points; bodies,
+#     status messages and exception text are cleared. Nothing relies on matching attribute names
+#     against a deny pattern.
+#   * Usage events (logs with event.name = ratio.ai_usage) are never sampled. They pass through no
+#     batch processor (an in-memory batch acknowledges before data is durable) and are exported
+#     through a persistent, file-backed queue. Unsampled does not mean lossless: the queue is
+#     finite, can fill, and only protects data after the Collector has acknowledged it. Events
+#     lost before acknowledgment are the producer's responsibility (durable outbox), and every
+#     rejection is visible in the Collector's own counters.
+#   * Span-derived metrics come from all spans RECEIVED before tail sampling. That is not
+#     necessarily every request: SDK sampling, exporter loss and instrumentation gaps happen
+#     earlier.
+#   * Tail sampling holds traces for a configured decision window (decision_wait). Late spans and
+#     capacity limits change outcomes, and a multi-instance deployment needs trace-ID-consistent
+#     routing (for example a loadbalancing exporter keyed on traceID) in front of this tier.
+#   * Local test only: binds to 127.0.0.1 and writes under ./collector-out (relative to the
+#     working directory). No credentials appear in this file.
+
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+  file_storage/usage:
+    directory: ./collector-out/queue
+    timeout: 2s
+    fsync: true
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+  prometheus:
+    config:
+      scrape_configs:
+        # NVIDIA dcgm-exporter (default port 9400) with Kubernetes pod mapping enabled (VERIFY labels).
+        - job_name: dcgm-exporter
+          scrape_interval: 15s
+          honor_labels: true
+          sample_limit: 5000
+          label_limit: 30
+          label_value_length_limit: 128
+          static_configs:
+            - targets: ["127.0.0.1:9400"]
+          metric_relabel_configs:
+            - source_labels: [__name__]
+              regex: DCGM_FI_(DEV_GPU_UTIL|PROF_GR_ENGINE_ACTIVE|DEV_FB_USED|DEV_POWER_USAGE)
+              action: keep
+        # Proposed GPU allocation exporter (kubelet pod-resources): ratio_gpu_allocated_fraction and
+        # ratio_gpu_capacity. Not an existing component; see prometheus-rules.yml.
+        - job_name: ratio-gpu-allocation
+          scrape_interval: 15s
+          sample_limit: 5000
+          static_configs:
+            - targets: ["127.0.0.1:9401"]
+        # LiteLLM proxy metrics (VERIFY path, port and edition). Identity labels dropped at scrape time.
+        - job_name: litellm
+          scrape_interval: 15s
+          sample_limit: 5000
+          label_value_length_limit: 128
+          static_configs:
+            - targets: ["127.0.0.1:4000"]
+          metric_relabel_configs:
+            - regex: (end_user|user|user_email|hashed_api_key|api_key_alias|requester_ip_address)
+              action: labeldrop
+        # Kit textfile (ratio_ai.prom), served by the runtime harness.
+        - job_name: ratio-fixture
+          scrape_interval: 15s
+          sample_limit: 2000
+          metrics_path: /ratio_ai.prom
+          static_configs:
+            - targets: ["127.0.0.1:9109"]
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+
+  # Keep only usage events in the usage pipeline; everything else (including GenAI content
+  # events such as gen_ai.user.message) is dropped. VERIFY: newer SDKs may put the event name
+  # in the LogRecord EventName field rather than an attribute.
+  filter/usage_only:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'attributes["event.name"] != "ratio.ai_usage"'
+
+  transform/allowlist_traces:
+    error_mode: ignore
+    trace_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.version", "service.instance.id"])
+      - context: span
+        statements:
+          - keep_keys(attributes, ["gen_ai.operation.name", "gen_ai.provider.name", "gen_ai.system", "gen_ai.request.model", "gen_ai.response.model", "gen_ai.usage.input_tokens", "gen_ai.usage.output_tokens", "error.type", "server.address", "http.response.status_code", "ratio.workload_id", "ratio.team"])
+          - set(status.message, "")
+      - context: spanevent
+        statements:
+          - keep_keys(attributes, ["exception.type"])
+
+  transform/allowlist_usage_logs:
+    error_mode: ignore
+    log_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.version", "service.instance.id"])
+      - context: log
+        statements:
+          - set(body, "")
+          - keep_keys(attributes, ["event.name", "ratio.usage.actorRef", "ratio.usage.actorType", "ratio.usage.attempt", "ratio.usage.dedupKey", "ratio.usage.eventId", "ratio.usage.evidenceRef", "ratio.usage.modelRequested", "ratio.usage.modelServed", "ratio.usage.occurredAt", "ratio.usage.provider", "ratio.usage.providerRequestId", "ratio.usage.receivedAt", "ratio.usage.schemaVersion", "ratio.usage.serviceTier", "ratio.usage.sku", "ratio.usage.sourceConnectionId", "ratio.usage.status", "ratio.usage.supersedes", "ratio.usage.tenantId", "ratio.usage.tokenUsage.accountingProfile", "ratio.usage.tokenUsage.cacheWrite", "ratio.usage.tokenUsage.cachedInput", "ratio.usage.tokenUsage.input", "ratio.usage.tokenUsage.output", "ratio.usage.tokenUsage.reasoning", "ratio.usage.usageBasis", "ratio.usage.workloadId"])
+
+  transform/allowlist_metrics:
+    error_mode: ignore
+    metric_statements:
+      - context: resource
+        statements:
+          - keep_keys(attributes, ["service.name", "service.version", "service.instance.id"])
+      - context: datapoint
+        statements:
+          - keep_keys(attributes, ["team", "workload", "provider", "model_served", "token_type", "currency", "Hostname", "gpu", "UUID", "modelName", "GPU_I_PROFILE", "GPU_I_ID", "namespace", "pod", "container", "sharing_mode", "gen_ai.operation.name", "gen_ai.provider.name", "gen_ai.response.model", "ratio.workload_id", "span.name", "span.kind", "status.code", "service.name"])
+
+  tail_sampling:
+    decision_wait: 10s
+    num_traces: 50000
+    expected_new_traces_per_sec: 100
+    policies:
+      - name: keep-errors
+        type: status_code
+        status_code:
+          status_codes: [ERROR]
+      - name: keep-slow
+        type: latency
+        latency:
+          threshold_ms: 5000
+      - name: sample-rest
+        type: probabilistic
+        probabilistic:
+          sampling_percentage: 10
+
+  batch/traces:
+    send_batch_size: 512
+    timeout: 2s
+  batch/metrics:
+    send_batch_size: 1024
+    timeout: 5s
+
+connectors:
+  # Health and latency metrics: no token type, currency, user, request, trace or agent-run labels.
+  spanmetrics:
+    histogram:
+      explicit:
+        buckets: [100ms, 250ms, 500ms, 1s, 2s, 5s, 10s, 30s]
+    dimensions:
+      - name: gen_ai.operation.name
+      - name: gen_ai.provider.name
+      - name: gen_ai.response.model
+      - name: ratio.workload_id
+    exclude_dimensions: [span.kind]
+  forward/sampling: {}
+
+exporters:
+  debug:
+    verbosity: basic
+  file/traces:
+    path: ./collector-out/traces.jsonl
+  file/usage:
+    path: ./collector-out/usage-events.jsonl
+  # Durable usage delivery to the harness sink (in production: the Ratio ingestion endpoint,
+  # roadmap slice C5, with credentials from the environment).
+  otlphttp/usage_sink:
+    endpoint: http://127.0.0.1:9411
+    encoding: json
+    compression: none
+    timeout: 5s
+    sending_queue:
+      enabled: true
+      storage: file_storage/usage
+      num_consumers: 1
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 5s
+      max_elapsed_time: 0   # 0 = retry until delivered; alert on queue size instead of dropping
+  prometheus:
+    endpoint: 127.0.0.1:8889
+    resource_to_telemetry_conversion:
+      enabled: false
+  # Optional trace analytics or evaluation backend (for example self-hosted Langfuse via OTLP;
+  # VERIFY path and auth). Never in the request path; receives only sampled, allowlisted traces.
+  # otlphttp/traces_backend:
+  #   endpoint: ${env:TRACE_BACKEND_OTLP_ENDPOINT}
+  #   headers:
+  #     authorization: ${env:TRACE_BACKEND_AUTHORIZATION}
+
+service:
+  extensions: [health_check, file_storage/usage]
+  telemetry:
+    logs:
+      level: info
+    metrics:
+      level: detailed
+      address: 127.0.0.1:8888
+  pipelines:
+    traces/ingest:
+      receivers: [otlp]
+      processors: [memory_limiter, transform/allowlist_traces]
+      exporters: [spanmetrics, forward/sampling]
+    traces/sampled:
+      receivers: [forward/sampling]
+      processors: [tail_sampling, batch/traces]
+      exporters: [file/traces, debug]
+    logs/usage:
+      receivers: [otlp]
+      processors: [memory_limiter, filter/usage_only, transform/allowlist_usage_logs]
+      exporters: [otlphttp/usage_sink, file/usage]
+    metrics:
+      receivers: [otlp, prometheus, spanmetrics]
+      processors: [memory_limiter, transform/allowlist_metrics, batch/metrics]
+      exporters: [prometheus]

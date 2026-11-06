@@ -1,0 +1,1 @@
+{"allocationId": "alloc-shared-df7673306aeb8f023a1154a6", "estimate": true, "note": "re-allocates a stage-1 share; never sum stage-1 and stage-2 shares", "reallocates": {"allocationId": "alloc-gpu-11e4578b315f512403046203", "targetKind": "workload", "targetRef": "selfhosted-llm"}, "schemaVersion": "ratio.allocation-chain/0-draft", "weights": {"input": "1", "output": "1"}}

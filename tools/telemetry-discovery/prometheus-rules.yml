@@ -1,0 +1,59 @@
+# Ratio telemetry discovery kit: Prometheus recording and alerting rules.
+# Status: synthetic-validated, runtime validation pending. Pinned target: Prometheus 2.55.1.
+#   promtool check rules prometheus-rules.yml
+#   promtool test rules prometheus-rules.test.yml
+#
+# Dashboard signals only. The financial system of record is the decimal ledger (usage events,
+# financial records and allocations), never these float series.
+#
+# GPU-seconds are ALLOCATED capacity x duration, not utilization. They come from a proposed
+# allocation exporter (kubelet pod-resources) that publishes, per physical GPU:
+#   ratio_gpu_capacity{Hostname, gpu}                                             1 per physical GPU
+#   ratio_gpu_allocated_fraction{Hostname, gpu, namespace, pod, sharing_mode}     exclusive 1, MIG profile
+#                                                                                 share (e.g. 3/7),
+#                                                                                 time-sliced 1/replicas
+# That exporter does not exist yet; these rules define the contract it must meet.
+groups:
+  - name: ratio-gpu
+    interval: 1m
+    rules:
+      # Allocated GPU-seconds per pod over the last hour (allocation stage 1).
+      - record: ratio:gpu_allocated_seconds:1h
+        expr: 3600 * sum by (Hostname, namespace, pod) (avg_over_time(ratio_gpu_allocated_fraction[1h]))
+      # Capacity no pod has claimed right now, per physical GPU (explicit idle bucket).
+      - record: ratio:gpu_unclaimed_fraction
+        expr: |
+          sum by (Hostname, gpu) (ratio_gpu_capacity)
+            - (sum by (Hostname, gpu) (ratio_gpu_allocated_fraction) or sum by (Hostname, gpu) (ratio_gpu_capacity) * 0)
+      # Engine activity of claimed capacity: diagnostic only, never a cost adjustment.
+      - record: ratio:gpu_engine_active:avg5m
+        expr: avg by (Hostname, namespace, pod) (avg_over_time(DCGM_FI_PROF_GR_ENGINE_ACTIVE{pod!=""}[5m]))
+  - name: ratio-ai-usage
+    interval: 1m
+    rules:
+      - record: ratio:ai_tokens:rate5m
+        expr: sum by (team, provider, model_served, token_type) (rate(ratio_ai_tokens_total[5m]))
+  - name: ratio-telemetry-alerts
+    interval: 1m
+    rules:
+      - alert: RatioGpuCapacityOverclaimed
+        expr: sum by (Hostname, gpu) (ratio_gpu_allocated_fraction) > 1
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Claims on {{ $labels.Hostname }} GPU {{ $labels.gpu }} exceed one GPU; check the time-slicing or MIG configuration"
+      - alert: RatioGpuReservedButInactive
+        expr: ratio:gpu_engine_active:avg5m < 0.10
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Diagnostic only: capacity held by {{ $labels.namespace }}/{{ $labels.pod }} is mostly inactive"
+      - alert: RatioGpuTelemetryGap
+        expr: absent_over_time(DCGM_FI_DEV_GPU_UTIL[5m])
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No DCGM samples for 5 minutes; allocation will show a no-telemetry bucket"

@@ -1,0 +1,18 @@
+{
+  "note": "Pinned runtime dependencies for the telemetry discovery kit. No container images are used, so there are no image digests; binaries are pinned by version and verified against each release's published checksum file by `runtime_validate.py fetch-tools`, which records the archive and binary SHA-256 values in tools-lock.json.",
+  "python": {"minimum": "3.9", "dependencies": "standard library only"},
+  "otelcol-contrib": {
+    "version": "0.114.0",
+    "releaseUrl": "https://github.com/open-telemetry/opentelemetry-collector-releases/releases/download/v{version}",
+    "archive": "otelcol-contrib_{version}_{os}_{arch}.tar.gz",
+    "checksums": "opentelemetry-collector-releases_otelcol-contrib_checksums.txt"
+  },
+  "prometheus": {
+    "version": "2.55.1",
+    "releaseUrl": "https://github.com/prometheus/prometheus/releases/download/v{version}",
+    "archive": "prometheus-{version}.{os}-{arch}.tar.gz",
+    "checksums": "sha256sums.txt",
+    "uses": "promtool only"
+  },
+  "node": {"note": "contract-conformance.test.ts runs under the repository's own pinned toolchain (package-lock.json)"}
+}

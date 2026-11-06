@@ -1,0 +1,116 @@
+[
+  {
+    "basis": "contract",
+    "currency": "USD",
+    "effectiveFrom": "2026-11-01",
+    "entries": [
+      {
+        "category": "input",
+        "model": "model-large",
+        "price": "2.5",
+        "serviceTier": "standard",
+        "sku": "pa-large-in",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "cachedInput",
+        "model": "model-large",
+        "price": "1.25",
+        "serviceTier": "standard",
+        "sku": "pa-large-cin",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "output",
+        "model": "model-large",
+        "price": "10",
+        "serviceTier": "standard",
+        "sku": "pa-large-out",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "input",
+        "model": "model-small",
+        "price": "0.15",
+        "serviceTier": "standard",
+        "sku": "pa-small-in",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "cachedInput",
+        "model": "model-small",
+        "price": "0.075",
+        "serviceTier": "standard",
+        "sku": "pa-small-cin",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "output",
+        "model": "model-small",
+        "price": "0.6",
+        "serviceTier": "standard",
+        "sku": "pa-small-out",
+        "unit": "per_1m_tokens"
+      }
+    ],
+    "provenance": {
+      "kind": "owner_entry",
+      "reference": "fixture:synthetic-not-sourced",
+      "retrievedOn": "2026-11-01"
+    },
+    "provider": "provider-a",
+    "rateCardId": "rc-fixture-provider-a",
+    "schemaVersion": "rate-card/1",
+    "tenantId": "tenant-fixture",
+    "version": 1
+  },
+  {
+    "basis": "contract",
+    "currency": "EUR",
+    "effectiveFrom": "2026-11-01",
+    "entries": [
+      {
+        "category": "input",
+        "model": "model-medium",
+        "price": "3",
+        "serviceTier": "standard",
+        "sku": "pb-med-in",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "cachedInput",
+        "model": "model-medium",
+        "price": "0.3",
+        "serviceTier": "standard",
+        "sku": "pb-med-cin",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "cacheWrite",
+        "model": "model-medium",
+        "price": "3.75",
+        "serviceTier": "standard",
+        "sku": "pb-med-cw",
+        "unit": "per_1m_tokens"
+      },
+      {
+        "category": "output",
+        "model": "model-medium",
+        "price": "15",
+        "serviceTier": "standard",
+        "sku": "pb-med-out",
+        "unit": "per_1m_tokens"
+      }
+    ],
+    "provenance": {
+      "kind": "owner_entry",
+      "reference": "fixture:synthetic-not-sourced",
+      "retrievedOn": "2026-11-01"
+    },
+    "provider": "provider-b",
+    "rateCardId": "rc-fixture-provider-b",
+    "schemaVersion": "rate-card/1",
+    "tenantId": "tenant-fixture",
+    "version": 1
+  }
+]

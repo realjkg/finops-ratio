@@ -1,0 +1,432 @@
+{
+  "kitVersion": "0.2.0",
+  "kitStatus": "synthetic-validated, runtime validation pending",
+  "note": "Exact expected outcome per scenario: [status, code] for every check. Any difference, including an unexpected WARN, fails the run.",
+  "selfTestChecks": 38,
+  "scenarios": {
+    "bypass": {
+      "message": "Expected discrepancy detected in the synthetic bypass scenario.",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "PASS",
+          ""
+        ],
+        "PRICING": [
+          "PASS",
+          ""
+        ],
+        "GPU_CAPACITY": [
+          "PASS",
+          ""
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "PASS",
+          ""
+        ],
+        "RECONCILIATION": [
+          "WARN",
+          "GATEWAY_COVERAGE_DISCREPANCY"
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "PASS",
+          ""
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    },
+    "baseline": {
+      "message": "Negative control: no findings.",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "PASS",
+          ""
+        ],
+        "PRICING": [
+          "PASS",
+          ""
+        ],
+        "GPU_CAPACITY": [
+          "PASS",
+          ""
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "PASS",
+          ""
+        ],
+        "RECONCILIATION": [
+          "PASS",
+          ""
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "PASS",
+          ""
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    },
+    "delay": {
+      "message": "Expected discrepancy from late-arriving events (delay control); cause stays not established.",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "PASS",
+          ""
+        ],
+        "PRICING": [
+          "PASS",
+          ""
+        ],
+        "GPU_CAPACITY": [
+          "PASS",
+          ""
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "PASS",
+          ""
+        ],
+        "RECONCILIATION": [
+          "WARN",
+          "GATEWAY_COVERAGE_DISCREPANCY"
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "PASS",
+          ""
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    },
+    "delay-resolved": {
+      "message": "Delay control resolves once the as-of time follows the late arrivals.",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "PASS",
+          ""
+        ],
+        "PRICING": [
+          "PASS",
+          ""
+        ],
+        "GPU_CAPACITY": [
+          "PASS",
+          ""
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "PASS",
+          ""
+        ],
+        "RECONCILIATION": [
+          "PASS",
+          ""
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "PASS",
+          ""
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    },
+    "alias-unmapped": {
+      "message": "Expected mapping gap from an unmapped dated served-model id (alias control).",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "WARN",
+          "ROUTE_MAPPING_GAP"
+        ],
+        "PRICING": [
+          "WARN",
+          "UNPRICED_USAGE"
+        ],
+        "GPU_CAPACITY": [
+          "PASS",
+          ""
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "PASS",
+          ""
+        ],
+        "RECONCILIATION": [
+          "WARN",
+          "GATEWAY_COVERAGE_DISCREPANCY"
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "PASS",
+          ""
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    },
+    "alias-mapped": {
+      "message": "Alias control resolves with a versioned served-model mapping.",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "PASS",
+          ""
+        ],
+        "PRICING": [
+          "PASS",
+          ""
+        ],
+        "GPU_CAPACITY": [
+          "PASS",
+          ""
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "PASS",
+          ""
+        ],
+        "RECONCILIATION": [
+          "PASS",
+          ""
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "PASS",
+          ""
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    },
+    "accounting-mismatch": {
+      "message": "Expected discrepancy from a mis-set accounting profile (accounting control).",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "PASS",
+          ""
+        ],
+        "PRICING": [
+          "PASS",
+          ""
+        ],
+        "GPU_CAPACITY": [
+          "PASS",
+          ""
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "PASS",
+          ""
+        ],
+        "RECONCILIATION": [
+          "WARN",
+          "OBSERVED_EXCEEDS_BILLED"
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "WARN",
+          "SOURCE_ESTIMATE_DRIFT"
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    },
+    "overclaim": {
+      "message": "Expected capacity over-claim refusal (time-slicing without a replica config).",
+      "checks": {
+        "FOCUS_COLUMNS": [
+          "PASS",
+          ""
+        ],
+        "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "CONTENT_CANARIES": [
+          "PASS",
+          ""
+        ],
+        "ATTEMPTS": [
+          "PASS",
+          ""
+        ],
+        "ROUTING": [
+          "PASS",
+          ""
+        ],
+        "PRICING": [
+          "PASS",
+          ""
+        ],
+        "GPU_CAPACITY": [
+          "FAIL",
+          "CAPACITY_OVERCLAIM"
+        ],
+        "GPU_ALLOCATION_EXACT": [
+          "SKIP",
+          "BLOCKED_BY_CAPACITY_FAILURE"
+        ],
+        "RECONCILIATION": [
+          "PASS",
+          ""
+        ],
+        "INVOICE_SUM": [
+          "PASS",
+          ""
+        ],
+        "SOURCE_ESTIMATE_DRIFT": [
+          "PASS",
+          ""
+        ],
+        "METRIC_CARDINALITY": [
+          "PASS",
+          ""
+        ]
+      }
+    }
+  }
+}

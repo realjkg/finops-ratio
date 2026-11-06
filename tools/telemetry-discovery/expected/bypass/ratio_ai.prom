@@ -1,0 +1,14 @@
+# HELP ratio_ai_tokens_total Billable tokens by team/provider/model/category; categories are disjoint (input excludes cached input). Fixture data; display only, not a financial record.
+# TYPE ratio_ai_tokens_total counter
+ratio_ai_tokens_total{model_served="model-large",provider="provider-a",team="team-alpha",token_type="input"} 44599
+ratio_ai_tokens_total{model_served="model-large",provider="provider-a",team="team-alpha",token_type="invalid"} 3584
+ratio_ai_tokens_total{model_served="model-large",provider="provider-a",team="team-alpha",token_type="output"} 10634
+ratio_ai_tokens_total{model_served="model-medium",provider="provider-b",team="team-beta",token_type="input"} 47368
+ratio_ai_tokens_total{model_served="model-medium",provider="provider-b",team="team-beta",token_type="invalid"} 36864
+ratio_ai_tokens_total{model_served="model-medium",provider="provider-b",team="team-beta",token_type="output"} 9691
+ratio_ai_tokens_total{model_served="model-small",provider="provider-a",team="team-alpha",token_type="input"} 1200
+ratio_ai_tokens_total{model_served="model-small",provider="provider-a",team="team-alpha",token_type="output"} 150
+ratio_ai_tokens_total{model_served="selfhosted-llm-8b",provider="hosted_vllm",team="team-alpha",token_type="input"} 17210
+ratio_ai_tokens_total{model_served="selfhosted-llm-8b",provider="hosted_vllm",team="team-alpha",token_type="output"} 3187
+ratio_ai_tokens_total{model_served="selfhosted-llm-8b",provider="hosted_vllm",team="team-beta",token_type="input"} 7223
+ratio_ai_tokens_total{model_served="selfhosted-llm-8b",provider="hosted_vllm",team="team-beta",token_type="output"} 2518

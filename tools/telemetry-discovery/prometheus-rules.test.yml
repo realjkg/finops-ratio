@@ -1,0 +1,109 @@
+# Unit tests for prometheus-rules.yml (promtool test rules prometheus-rules.test.yml).
+# Status: written for Prometheus 2.55.1; not yet executed (runtime validation pending).
+# Values are chosen to be exact in binary floating point (1, 0.5, 0.0625) so expectations are exact.
+rule_files:
+  - prometheus-rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  - name: allocated capacity x duration, unclaimed capacity, token rate, inactivity diagnostic
+    interval: 15s
+    input_series:
+      - series: 'ratio_gpu_capacity{Hostname="n1",gpu="0"}'
+        values: '1+0x300'
+      - series: 'ratio_gpu_capacity{Hostname="n1",gpu="1"}'
+        values: '1+0x300'
+      - series: 'ratio_gpu_capacity{Hostname="n1",gpu="2"}'
+        values: '1+0x300'
+      - series: 'ratio_gpu_capacity{Hostname="n1",gpu="3"}'
+        values: '1+0x300'
+      # pod p1 holds two whole GPUs; p2 and p3 time-share GPU 2 (replicas = 2); GPU 3 is unclaimed
+      - series: 'ratio_gpu_allocated_fraction{Hostname="n1",gpu="0",namespace="ns",pod="p1",sharing_mode="exclusive"}'
+        values: '1+0x300'
+      - series: 'ratio_gpu_allocated_fraction{Hostname="n1",gpu="1",namespace="ns",pod="p1",sharing_mode="exclusive"}'
+        values: '1+0x300'
+      - series: 'ratio_gpu_allocated_fraction{Hostname="n1",gpu="2",namespace="ns",pod="p2",sharing_mode="time-sliced"}'
+        values: '0.5+0x300'
+      - series: 'ratio_gpu_allocated_fraction{Hostname="n1",gpu="2",namespace="ns",pod="p3",sharing_mode="time-sliced"}'
+        values: '0.5+0x300'
+      - series: 'DCGM_FI_PROF_GR_ENGINE_ACTIVE{Hostname="n1",gpu="0",namespace="ns",pod="p1"}'
+        values: '0.0625+0x300'
+      - series: 'DCGM_FI_DEV_GPU_UTIL{Hostname="n1",gpu="0",namespace="ns",pod="p1"}'
+        values: '50+0x300'
+      - series: 'ratio_ai_tokens_total{team="team-alpha",provider="provider-a",model_served="model-large",token_type="input"}'
+        values: '0+15x300'
+    promql_expr_test:
+      - expr: ratio:gpu_allocated_seconds:1h
+        eval_time: 1h
+        exp_samples:
+          - labels: 'ratio:gpu_allocated_seconds:1h{Hostname="n1",namespace="ns",pod="p1"}'
+            value: 7200
+          - labels: 'ratio:gpu_allocated_seconds:1h{Hostname="n1",namespace="ns",pod="p2"}'
+            value: 1800
+          - labels: 'ratio:gpu_allocated_seconds:1h{Hostname="n1",namespace="ns",pod="p3"}'
+            value: 1800
+      - expr: ratio:gpu_unclaimed_fraction
+        eval_time: 1h
+        exp_samples:
+          - labels: 'ratio:gpu_unclaimed_fraction{Hostname="n1",gpu="0"}'
+            value: 0
+          - labels: 'ratio:gpu_unclaimed_fraction{Hostname="n1",gpu="1"}'
+            value: 0
+          - labels: 'ratio:gpu_unclaimed_fraction{Hostname="n1",gpu="2"}'
+            value: 0
+          - labels: 'ratio:gpu_unclaimed_fraction{Hostname="n1",gpu="3"}'
+            value: 1
+      - expr: ratio:ai_tokens:rate5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'ratio:ai_tokens:rate5m{team="team-alpha",provider="provider-a",model_served="model-large",token_type="input"}'
+            value: 1
+      - expr: ratio:gpu_engine_active:avg5m
+        eval_time: 1h
+        exp_samples:
+          - labels: 'ratio:gpu_engine_active:avg5m{Hostname="n1",namespace="ns",pod="p1"}'
+            value: 0.0625
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: RatioGpuReservedButInactive
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              Hostname: n1
+              namespace: ns
+              pod: p1
+            exp_annotations:
+              summary: "Diagnostic only: capacity held by ns/p1 is mostly inactive"
+      - eval_time: 40m
+        alertname: RatioGpuCapacityOverclaimed
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: RatioGpuTelemetryGap
+        exp_alerts: []
+
+  - name: over-claimed time-slicing and a DCGM telemetry gap
+    interval: 1m
+    input_series:
+      # both replicas report a full GPU because no replica configuration was applied
+      - series: 'ratio_gpu_allocated_fraction{Hostname="n1",gpu="6",namespace="ns",pod="a",sharing_mode="time-sliced"}'
+        values: '1+0x20'
+      - series: 'ratio_gpu_allocated_fraction{Hostname="n1",gpu="6",namespace="ns",pod="b",sharing_mode="time-sliced"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: RatioGpuCapacityOverclaimed
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              Hostname: n1
+              gpu: "6"
+            exp_annotations:
+              summary: "Claims on n1 GPU 6 exceed one GPU; check the time-slicing or MIG configuration"
+      - eval_time: 10m
+        alertname: RatioGpuTelemetryGap
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "No DCGM samples for 5 minutes; allocation will show a no-telemetry bucket"
