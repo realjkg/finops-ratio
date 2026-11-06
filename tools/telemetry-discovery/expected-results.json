@@ -1,8 +1,8 @@
 {
-  "kitVersion": "0.3.0",
+  "kitVersion": "0.4.0",
   "kitStatus": "synthetic-validated, runtime validation pending",
-  "note": "Exact expected outcome per scenario: [status, code] for every check. Any difference, including an unexpected WARN, fails the run.",
-  "selfTestChecks": 43,
+  "note": "Exact expected outcome per scenario: [status, code] for every check and the assessment of every KPI observation. Any difference, including an unexpected WARN or a changed KPI assessment, fails the run.",
+  "selfTestChecks": 50,
   "scenarios": {
     "bypass": {
       "message": "Expected discrepancy detected in the synthetic bypass scenario.",
@@ -58,7 +58,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "within_appetite",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "meets_target",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "below_target",
+        "INGESTION_LAG_P95@tenant": "meets_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "below_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "within_appetite",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "warning",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "breach",
+        "UNPRICED_USAGE_EVENTS@tenant": "within_appetite",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "meets_target"
       }
     },
     "baseline": {
@@ -115,7 +154,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "within_appetite",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "meets_target",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "below_target",
+        "INGESTION_LAG_P95@tenant": "meets_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "meets_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "within_appetite",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "warning",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "within_appetite",
+        "UNPRICED_USAGE_EVENTS@tenant": "within_appetite",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "meets_target"
       }
     },
     "delay": {
@@ -172,7 +250,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "within_appetite",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "meets_target",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "below_target",
+        "INGESTION_LAG_P95@tenant": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "below_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "within_appetite",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "warning",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "breach",
+        "UNPRICED_USAGE_EVENTS@tenant": "within_appetite",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "meets_target"
       }
     },
     "delay-resolved": {
@@ -229,7 +346,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "within_appetite",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "meets_target",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "below_target",
+        "INGESTION_LAG_P95@tenant": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "meets_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "within_appetite",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "warning",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "within_appetite",
+        "UNPRICED_USAGE_EVENTS@tenant": "within_appetite",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "meets_target"
       }
     },
     "alias-unmapped": {
@@ -286,7 +442,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "within_appetite",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "meets_target",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "below_target",
+        "INGESTION_LAG_P95@tenant": "meets_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "below_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "warning",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "warning",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "breach",
+        "UNPRICED_USAGE_EVENTS@tenant": "warning",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "meets_target"
       }
     },
     "alias-mapped": {
@@ -343,7 +538,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "within_appetite",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "meets_target",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "below_target",
+        "INGESTION_LAG_P95@tenant": "meets_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "meets_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "within_appetite",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "warning",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "within_appetite",
+        "UNPRICED_USAGE_EVENTS@tenant": "within_appetite",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "meets_target"
       }
     },
     "accounting-mismatch": {
@@ -400,7 +634,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "within_appetite",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "meets_target",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "below_target",
+        "INGESTION_LAG_P95@tenant": "meets_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "below_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "within_appetite",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "warning",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "warning",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "within_appetite",
+        "UNPRICED_USAGE_EVENTS@tenant": "within_appetite",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "meets_target"
       }
     },
     "overclaim": {
@@ -457,7 +730,46 @@
         "METRIC_CARDINALITY": [
           "PASS",
           ""
+        ],
+        "KPI_SCORECARD": [
+          "PASS",
+          ""
         ]
+      },
+      "kpis": {
+        "ADOPTION_RATE@ou-code-review": "meets_target",
+        "ADOPTION_RATE@ou-support-triage": "below_target",
+        "ALLOCATION_COVERAGE@EUR": "meets_target",
+        "ALLOCATION_COVERAGE@USD": "below_target",
+        "ATTRIBUTION_COMPLETENESS@tenant": "meets_target",
+        "BUDGET_USED@ou-code-review": "not_assessable",
+        "BUDGET_USED@ou-support-triage": "meets_target",
+        "CAPACITY_OVERCLAIM_INTERVALS@tenant": "breach",
+        "CONTENT_EXPOSURE_FINDINGS@tenant": "within_appetite",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-code-review": "not_assessable",
+        "COST_PER_SUCCESSFUL_OUTCOME@ou-support-triage": "not_assessable",
+        "FALLBACK_RATE@tenant": "meets_target",
+        "GPU_UNCLAIMED_SHARE@USD": "not_assessable",
+        "INGESTION_LAG_P95@tenant": "meets_target",
+        "OUTCOME_SUCCESS_RATE@ou-code-review": "below_target",
+        "OUTCOME_SUCCESS_RATE@ou-support-triage": "meets_target",
+        "PROMPT_INSPECTION_GAP@tenant": "not_assessable",
+        "RECONCILIATION_MATCHED_SHARE@EUR": "meets_target",
+        "RECONCILIATION_MATCHED_SHARE@USD": "meets_target",
+        "REQUEST_SUCCESS_RATE@tenant": "below_target",
+        "RETRY_RATE@tenant": "meets_target",
+        "ROUTE_MAPPING_GAPS@tenant": "within_appetite",
+        "SENSITIVE_DATA_TRANSFERS_ALLOWED@tenant": "not_assessable",
+        "SOURCE_ESTIMATE_DRIFT@tenant": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@EUR": "within_appetite",
+        "UNATTRIBUTED_SPEND_SHARE@USD": "not_assessable",
+        "UNAUTHORIZED_MODEL_ACCESS@tenant": "not_assessable",
+        "UNOBSERVED_BILLED_SHARE@EUR": "within_appetite",
+        "UNOBSERVED_BILLED_SHARE@USD": "within_appetite",
+        "UNPRICED_USAGE_EVENTS@tenant": "within_appetite",
+        "USAGE_TELEMETRY_COMPLETENESS@tenant": "below_target",
+        "VALUE_TO_COST@ou-code-review": "not_assessable",
+        "VALUE_TO_COST@ou-support-triage": "not_assessable"
       }
     }
   }

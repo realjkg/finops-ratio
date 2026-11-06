@@ -54,6 +54,38 @@ Examples:
 
 v1 records keep their contract shapes. `envelope-coverage.json` maps how far each v1 contract covers the six elements and where it falls short. Most often, v1 has no produced instant, no completeness status and no configuration hash outside rate-card valuations. One gap is closed without a contract change: `estimated_invocation` records now fill v1's existing optional `configSha256` field. The remaining gaps are inputs to a separate contract proposal, which is an owner decision.
 
+## Value-delivery KPIs (kit 0.4)
+
+The kit inspects value delivery in three tiers. Each KPI value is a `ratio.kpi-observation/0-draft` record that carries the common envelope, so every number shows its source records, method and configuration hashes, and completeness and certainty. `out/kpi_scorecard.md` is the readable view. The catalog (`kpi_catalog.json`, version 1) and the business case (`business_case.json`) are versioned configuration inputs, so their hashes appear in every observation. Both are synthetic stand-ins; targets are "Set in demo configuration".
+
+| Tier | Ties to | KPIs |
+|---|---|---|
+| Outcome | The business case, per registered outcome unit | Value / cost; cost per successful outcome (against the baseline); outcome success rate; adoption rate (against the eligible population); budget used (effective cost basis) |
+| Operational | Service targets | Billed cost matched to observed usage; allocation coverage; usage telemetry completeness; attribution completeness; request success rate; retry rate; declared fallback rate; GPU unclaimed share; ingestion lag (p95) |
+| Risk | Risk appetite, with warning and breach thresholds | Billed cost not observed by the gateway (cause not established); unattributed spend share; unpriced usage events; route mapping gaps; content exposure findings; GPU capacity over-claims; source estimate drift; prompts not inspected; sensitive data transfers allowed; unauthorized model access |
+
+Each KPI is mapped to the eight program capabilities in the catalog.
+
+Outcome KPIs follow Ratio's existing outcome rules (`src/outcomes/durable.ts`, `src/lib/vocabulary.ts`):
+- **When Value / cost exists:** only with an approved registration (requester and approver differ), verified measured financial benefit, a full cost (allocated model cost plus all four supplemental categories) and equal comparison periods. Otherwise it is `N/A` with the same blockers the product uses, and the recommendation is `review`.
+- **Recommendation:** when the ratio exists, the approved stop / change / continue / expand ladder applies.
+- **Productivity:** estimated productivity is reported but never converted to cash.
+- **Target:** 3× is a policy target configured for this workspace, not a financial standard.
+- **One cost basis:** workload cost is effective cost throughout. API cost is allocated to workloads by observed usage (`allocation/1`, `api-cost-by-observed-usage`), and billed usage the gateway never saw stays unallocated (`GATEWAY_UNOBSERVED_USAGE`), never spread across workloads.
+- **Mixed currencies:** a cost that spans currencies with no approved conversion policy blocks the ratio.
+- **Incomplete ledger:** if any cost path a workload used was not allocated (for example, blocked GPU allocation), the cost ledger is incomplete and cost KPIs are unavailable rather than optimistic.
+
+Indicators without a data source (prompt inspection, DLP outcomes, model entitlement) report `unknown`, not zero, with `SOURCE_NOT_INSTRUMENTED` until gateway policy decisions are ingested (roadmap slice C5).
+
+Every KPI assessment in every scenario is pinned in `expected-results.json`. Two pairs of scenarios show what the indicators reveal:
+- **Delay vs. bypass:** both breach "billed cost not observed by the gateway", but only the delay control also misses the ingestion-lag target. That second signal is why the coverage indicator says "cause not established".
+- **Over-claim:** it makes allocation coverage collapse, and Value / cost moves to `review` (cost ledger incomplete).
+
+In the bypass fixture:
+- Support triage's Value / cost is 3.15× (`continue`), and its adoption is below target at 0.3.
+- Code review's Value / cost is `N/A` with three blockers: supplemental costs missing, no verified financial benefit, and mixed currency.
+- These are synthetic illustrations, not findings.
+
 ## Files
 
 | File | Purpose |
@@ -66,6 +98,7 @@ v1 records keep their contract shapes. `envelope-coverage.json` maps how far eac
 | `prometheus-rules.yml`, `prometheus-rules.test.yml` | Recording and alerting rules, with promtool unit tests |
 | `runtime_validate.py` | Runtime harness, gates G1 to G10, writes `runtime-evidence.json` |
 | `versions.json` | Pinned tool versions and download sources; no container images are used |
+| `kpi_scorecard.md` (generated in `out/`) | Readable scorecard of every KPI observation, grouped by tier |
 | `envelope-coverage.json` | How the draft envelope and each v1 contract cover the six required elements |
 | `MANIFEST.sha256` | Hashes of every kit file; checked by gate G1 |
 
@@ -84,7 +117,7 @@ v1 records keep their contract shapes. `envelope-coverage.json` maps how far eac
 
 ## Recorded results (cloud session, no binaries)
 
-- `python3 -I ratio_telemetry_check.py self-test`: `self-test: OK (43 checks)`
+- `python3 -I ratio_telemetry_check.py self-test`: `self-test: OK (50 checks)`
 - All 8 scenarios met their exact expectations.
 - `npx vitest run tools/telemetry-discovery/contract-conformance.test.ts`: 8 passed.
 - `python3 -I runtime_validate.py offline`: G1 and G2 PASS.

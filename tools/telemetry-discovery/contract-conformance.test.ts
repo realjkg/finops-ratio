@@ -28,7 +28,7 @@ describe('telemetry discovery kit goldens conform to the v1 contracts', () => {
 
   it('GPU and shared-capacity allocations are valid allocation/1', () => {
     const rows = lines('records/allocations.jsonl');
-    expect(rows.length).toBe(2);
+    expect(rows.length).toBe(4);
     expect(failures(rows, validateAllocation)).toEqual([]);
   });
 
