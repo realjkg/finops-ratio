@@ -34,6 +34,26 @@ The kit emits v1 records unchanged (`ai-usage-event/1`, `ai-financial-record/1`,
 
 The draft sidecars are not part of `ai-usage-event/1` and do not extend it.
 
+## Common envelope (kit 0.3)
+
+Every draft record and `report.json` carries six elements, and the `ENVELOPE` check enforces them in every scenario:
+
+| Element | Fields | Rule |
+|---|---|---|
+| Record identity and schema version | `schemaVersion` (`ratio.*/0-draft`), `recordId` | `recordId` is deterministic and never depends on `producedAt` |
+| Tenant and source scope | `tenantId`, `sourceScope.sourceConnectionIds`, plus `provider`, `providerAccount` or `resourceId` where relevant | At least one source connection |
+| Observed and produced timestamps | `observed.at` or a half-open `observed.periodStart`/`periodEnd`, and `producedAt` (UTC) | `producedAt` is never before the observed time. Goldens use a fixed clock; runs default to now; `--produced-at` overrides. |
+| References to source records | `sourceRefs[]`, each `{kind, id}` or `{kind, ids, count}` | Every v1 reference must resolve to an emitted record, with no duplicate ids |
+| Method and configuration version | `method.id`, `method.version`, `method.kitVersion`, `method.configSha256`, `method.configs` (SHA-256 per configuration file), `method.configRefs` | Every configuration input is hashed |
+| Completeness or uncertainty status | `status.completeness` (`complete` \| `partial` \| `unknown`), `status.certainty` (`exact` \| `within_tolerance` \| `estimated` \| `unresolved`), `status.reasons[]` | Reason codes are required unless a record is both complete and exact |
+
+Examples:
+- A reconciliation link that matches exactly is still `partial` with `USAGE_MISSING_SAME_MODEL` when a same-model attempt reported no usage.
+- An unresolved difference is `unresolved` with `CAUSE_NOT_ESTABLISHED`.
+- Gateway estimates and token-weighted splits are always `estimated`.
+
+v1 records keep their contract shapes. `envelope-coverage.json` maps how far each v1 contract covers the six elements and where it falls short. Most often, v1 has no produced instant, no completeness status and no configuration hash outside rate-card valuations. One gap is closed without a contract change: `estimated_invocation` records now fill v1's existing optional `configSha256` field. The remaining gaps are inputs to a separate contract proposal, which is an owner decision.
+
 ## Files
 
 | File | Purpose |
@@ -46,6 +66,7 @@ The draft sidecars are not part of `ai-usage-event/1` and do not extend it.
 | `prometheus-rules.yml`, `prometheus-rules.test.yml` | Recording and alerting rules, with promtool unit tests |
 | `runtime_validate.py` | Runtime harness, gates G1 to G10, writes `runtime-evidence.json` |
 | `versions.json` | Pinned tool versions and download sources; no container images are used |
+| `envelope-coverage.json` | How the draft envelope and each v1 contract cover the six required elements |
 | `MANIFEST.sha256` | Hashes of every kit file; checked by gate G1 |
 
 ## Scenarios (exact expected outcomes)
@@ -63,9 +84,9 @@ The draft sidecars are not part of `ai-usage-event/1` and do not extend it.
 
 ## Recorded results (cloud session, no binaries)
 
-- `python3 -I ratio_telemetry_check.py self-test`: `self-test: OK (38 checks)`
+- `python3 -I ratio_telemetry_check.py self-test`: `self-test: OK (43 checks)`
 - All 8 scenarios met their exact expectations.
-- `npx vitest run tools/telemetry-discovery/contract-conformance.test.ts`: 7 passed.
+- `npx vitest run tools/telemetry-discovery/contract-conformance.test.ts`: 8 passed.
 - `python3 -I runtime_validate.py offline`: G1 and G2 PASS.
 - G3 to G10 have **not run**. Downloading the pinned binaries was not permitted in that session.
 

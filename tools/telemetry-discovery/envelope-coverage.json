@@ -1,0 +1,58 @@
+{
+  "kitStatus": "synthetic-validated, runtime validation pending",
+  "requiredElements": {
+    "identity": "record identity and schema version",
+    "scope": "tenant and source scope",
+    "timestamps": "observed and produced timestamps",
+    "sourceRefs": "references to source records",
+    "method": "method and configuration version",
+    "status": "completeness or uncertainty status"
+  },
+  "draftRecords": {
+    "coverage": "all six required on every ratio.*/0-draft record and on report.json",
+    "fields": {
+      "identity": ["schemaVersion", "recordId (deterministic; independent of producedAt)"],
+      "scope": ["tenantId", "sourceScope.sourceConnectionIds", "sourceScope.provider / providerAccount / resourceId where relevant"],
+      "timestamps": ["observed.at or observed.periodStart/periodEnd (half-open, UTC)", "producedAt (never before the observed time)"],
+      "sourceRefs": ["sourceRefs[] of {kind, id} or {kind, ids, count}; v1 references must resolve"],
+      "method": ["method.id", "method.version", "method.kitVersion", "method.configSha256", "method.configs (SHA-256 per configuration file)", "method.configRefs"],
+      "status": ["status.completeness: complete | partial | unknown", "status.certainty: exact | within_tolerance | estimated | unresolved", "status.reasons[] (required unless complete and exact)"]
+    },
+    "enforcedBy": ["ENVELOPE check in ratio_telemetry_check.py (every scenario)", "contract-conformance.test.ts"]
+  },
+  "v1Contracts": {
+    "note": "v1 shapes are unchanged by this kit. Gaps below are inputs to a separate, owner-reviewed contract proposal; the kit never adds fields to v1 records.",
+    "ai-usage-event/1": {
+      "identity": {"coverage": "full", "fields": ["schemaVersion", "eventId", "dedupKey"]},
+      "scope": {"coverage": "partial", "fields": ["tenantId", "sourceConnectionId", "provider"], "gap": "no providerAccount; only derivable from the connection's configuration"},
+      "timestamps": {"coverage": "partial", "fields": ["occurredAt", "receivedAt"], "gap": "receivedAt is ingestion time; no instant at which the normalized record was produced"},
+      "sourceRefs": {"coverage": "full", "fields": ["evidenceRef", "providerRequestId", "dedupKey", "supersedes"]},
+      "method": {"coverage": "partial", "fields": ["tokenUsage.accountingProfile (name/version)"], "gap": "no normalizer or mapping version and no configuration hash"},
+      "status": {"coverage": "partial", "fields": ["usageBasis", "status", "absent tokenUsage = unknown"], "gap": "no explicit completeness status or reason codes"}
+    },
+    "ai-financial-record/1": {
+      "identity": {"coverage": "full", "fields": ["schemaVersion", "recordId", "kind"]},
+      "scope": {"coverage": "full", "fields": ["tenantId", "sourceConnectionId", "provider", "providerAccount"]},
+      "timestamps": {"coverage": "partial", "fields": ["periodStart", "periodEnd"], "gap": "dates only; no observed or produced instant"},
+      "sourceRefs": {"coverage": "full", "fields": ["evidenceRef", "linkedUsageEventIds", "supersedes"]},
+      "method": {"coverage": "partial", "fields": ["rateCardRef", "rateBasis", "configSha256 (optional; the kit now sets it on estimated_invocation records)"], "gap": "no method id or version for billed and effective imports"},
+      "status": {"coverage": "partial", "fields": ["kind (billed, effective, estimated_invocation)", "rateBasis"], "gap": "no completeness status, for example a billing period still open"}
+    },
+    "allocation/1": {
+      "identity": {"coverage": "full", "fields": ["schemaVersion", "allocationId"]},
+      "scope": {"coverage": "partial", "fields": ["tenantId"], "gap": "no source connection ids"},
+      "timestamps": {"coverage": "partial", "fields": ["periodStart", "periodEnd"], "gap": "dates only; no produced instant"},
+      "sourceRefs": {"coverage": "partial", "fields": ["evidenceRef"], "gap": "no structured link to the financial records or allocation it splits (the kit uses the allocation-chain draft)"},
+      "method": {"coverage": "partial", "fields": ["methodology.ruleSetId", "methodology.version", "shares[].ruleId"], "gap": "no configuration hash"},
+      "status": {"coverage": "partial", "fields": ["unallocated", "unallocatedReasons"], "gap": "no certainty flag; a token-weighted estimate looks the same as a measured split"}
+    },
+    "rate-card/1": {
+      "identity": {"coverage": "full", "fields": ["schemaVersion", "rateCardId", "version"]},
+      "scope": {"coverage": "partial", "fields": ["tenantId", "provider"], "gap": "no source connection id"},
+      "timestamps": {"coverage": "partial", "fields": ["effectiveFrom", "effectiveTo", "provenance.retrievedOn"], "gap": "dates only; no produced instant"},
+      "sourceRefs": {"coverage": "full", "fields": ["provenance.kind", "provenance.reference"]},
+      "method": {"coverage": "full", "fields": ["basis", "version"], "note": "a rate card is itself configuration"},
+      "status": {"coverage": "none", "gap": "no completeness status, for example models or categories not priced"}
+    }
+  }
+}

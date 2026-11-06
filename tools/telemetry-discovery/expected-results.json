@@ -1,8 +1,8 @@
 {
-  "kitVersion": "0.2.0",
+  "kitVersion": "0.3.0",
   "kitStatus": "synthetic-validated, runtime validation pending",
   "note": "Exact expected outcome per scenario: [status, code] for every check. Any difference, including an unexpected WARN, fails the run.",
-  "selfTestChecks": 38,
+  "selfTestChecks": 43,
   "scenarios": {
     "bypass": {
       "message": "Expected discrepancy detected in the synthetic bypass scenario.",
@@ -12,6 +12,10 @@
           ""
         ],
         "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "ENVELOPE": [
           "PASS",
           ""
         ],
@@ -68,6 +72,10 @@
           "PASS",
           ""
         ],
+        "ENVELOPE": [
+          "PASS",
+          ""
+        ],
         "CONTENT_CANARIES": [
           "PASS",
           ""
@@ -118,6 +126,10 @@
           ""
         ],
         "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "ENVELOPE": [
           "PASS",
           ""
         ],
@@ -174,6 +186,10 @@
           "PASS",
           ""
         ],
+        "ENVELOPE": [
+          "PASS",
+          ""
+        ],
         "CONTENT_CANARIES": [
           "PASS",
           ""
@@ -224,6 +240,10 @@
           ""
         ],
         "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "ENVELOPE": [
           "PASS",
           ""
         ],
@@ -280,6 +300,10 @@
           "PASS",
           ""
         ],
+        "ENVELOPE": [
+          "PASS",
+          ""
+        ],
         "CONTENT_CANARIES": [
           "PASS",
           ""
@@ -333,6 +357,10 @@
           "PASS",
           ""
         ],
+        "ENVELOPE": [
+          "PASS",
+          ""
+        ],
         "CONTENT_CANARIES": [
           "PASS",
           ""
@@ -383,6 +411,10 @@
           ""
         ],
         "CONTRACT_V1": [
+          "PASS",
+          ""
+        ],
+        "ENVELOPE": [
           "PASS",
           ""
         ],

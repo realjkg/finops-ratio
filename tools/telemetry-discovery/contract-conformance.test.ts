@@ -58,6 +58,45 @@ describe('telemetry discovery kit goldens conform to the v1 contracts', () => {
     }
   });
 
+  it('every draft record carries the common envelope, and its source references resolve', () => {
+    const ids = (rel: string, key: string) => new Set((lines(rel) as Record<string, string>[]).map((r) => r[key]));
+    const known: Record<string, Set<string>> = {
+      'ai-usage-event/1': ids('records/usage_events.jsonl', 'eventId'),
+      'ai-financial-record/1': ids('records/financial_records.jsonl', 'recordId'),
+      'allocation/1': ids('records/allocations.jsonl', 'allocationId'),
+    };
+    const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+    type Ref = { kind: string; id?: string; ids?: string[] };
+    type Env = {
+      schemaVersion: string; recordId: string; tenantId: string; producedAt: string;
+      sourceScope: { sourceConnectionIds: string[] }; observed: { at?: string; periodStart?: string; periodEnd?: string };
+      sourceRefs: Ref[]; method: { id: string; version: number; configSha256: string };
+      status: { completeness: string; certainty: string; reasons: string[] };
+    };
+    const problems: string[] = [];
+    const seen = new Set<string>();
+    for (const f of fs.readdirSync(path.join(ROOT, 'proposals'))) {
+      for (const r of lines(path.join('proposals', f)) as Env[]) {
+        const end = r.observed?.at ?? r.observed?.periodEnd ?? '';
+        if (seen.has(r.recordId)) problems.push(`${f}: duplicate ${r.recordId}`);
+        seen.add(r.recordId);
+        if (!r.recordId || !r.tenantId || !(r.sourceScope?.sourceConnectionIds?.length > 0)) problems.push(`${f}: identity or scope`);
+        if (!instant.test(end) || !instant.test(r.producedAt) || r.producedAt < end) problems.push(`${f}: observed/produced`);
+        if (!(r.method?.version > 0) || !/^[0-9a-f]{64}$/.test(r.method?.configSha256 ?? '')) problems.push(`${f}: method`);
+        if (!['complete', 'partial', 'unknown'].includes(r.status?.completeness) ||
+            !['exact', 'within_tolerance', 'estimated', 'unresolved'].includes(r.status?.certainty)) problems.push(`${f}: status`);
+        if (!(r.sourceRefs?.length > 0)) problems.push(`${f}: no sourceRefs`);
+        for (const ref of r.sourceRefs ?? []) {
+          for (const id of ref.ids ?? (ref.id ? [ref.id] : [])) {
+            if (known[ref.kind] && !known[ref.kind].has(id)) problems.push(`${f}: unresolved ${ref.kind} ${id}`);
+          }
+        }
+      }
+    }
+    expect(seen.size).toBeGreaterThan(0);
+    expect(problems).toEqual([]);
+  });
+
   it('no golden file carries content canaries or email addresses', () => {
     const walk = (d: string): string[] => fs.readdirSync(d, { withFileTypes: true })
       .flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]));

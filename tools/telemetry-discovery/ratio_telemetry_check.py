@@ -55,7 +55,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 getcontext().prec = 60
 
-KIT_VERSION = "0.2.0"
+KIT_VERSION = "0.3.0"
 KIT_STATUS = "synthetic-validated, runtime validation pending"
 HERE = Path(__file__).resolve().parent
 TIE_BREAK = "largest remainder; ties broken by target key in ascending code-point order"
@@ -223,6 +223,15 @@ def short_id(*parts: str) -> str:
     return hashlib.sha256("\x1f".join(parts).encode()).hexdigest()[:24]
 
 
+def fin_record_id(kind: str, i: int, row: Dict[str, str]) -> str:
+    return f"fin-{kind}-" + short_id(str(i), row["SkuId"], row["ChargePeriodStart"])
+
+
+FIXTURE_PRODUCED_AT = "2026-11-08T00:00:00Z"  # deterministic production clock for goldens and self-test only
+CONN_FOCUS, CONN_GPU = "conn-focus-fixture", "conn-gpu-telemetry-fixture"
+VALUATION_CONFIGS = ["accounting_profiles.json", "connection.json", "rate_cards.json", "routes.json"]
+
+
 # ---------------------------------------------------------------------------
 # Pseudonymization: tenant-scoped HMAC with a key-version id (ps1:<keyId>:<hex>)
 # ---------------------------------------------------------------------------
@@ -267,6 +276,7 @@ RX = {
     "agt": re.compile(r"^agt:[A-Za-z0-9._-]{1,128}$"),
     "reason": re.compile(r"^[A-Z][A-Z0-9_]{0,63}$"),
     "currency": re.compile(r"^(USD|EUR|GBP|JPY|CAD|AUD|CHF)$"),  # subset; the TS validator checks full ISO 4217
+    "sha256": re.compile(r"^[0-9a-f]{64}$"),
 }
 USAGE_KEYS = {"schemaVersion", "eventId", "tenantId", "sourceConnectionId", "dedupKey", "supersedes", "occurredAt",
               "receivedAt", "workloadId", "actorRef", "actorType", "provider", "modelRequested", "modelServed", "sku",
@@ -373,6 +383,120 @@ def v_allocation(a: Dict[str, Any]) -> List[str]:
         _chk(p, all(_is("reason", x) for x in a["unallocatedReasons"]), "reason codes")
         _chk(p, len({(s["targetKind"], s["targetRef"]) for s in shares}) == len(shares), "duplicate target")
     return p
+
+
+# ---------------------------------------------------------------------------
+# Common envelope for every draft sidecar and the kit report
+#   schemaVersion + recordId      record identity and schema version (recordId never depends on producedAt)
+#   tenantId + sourceScope        tenant and the source connections (plus provider account or resource) it covers
+#   observed + producedAt         when the fact happened ({at} or half-open {periodStart, periodEnd}) and when
+#                                 this record was produced
+#   sourceRefs                    the source records it was derived from (each must resolve)
+#   method                        method id and version, kit version, and SHA-256 of every configuration input
+#   status                        completeness and certainty, with reason codes
+# v1 records keep their own contract shapes; see envelope-coverage.json for how far each covers these six.
+# ---------------------------------------------------------------------------
+DRAFT_SCHEMA = re.compile(r"^ratio\.[a-z-]+/0-draft$")
+ENVELOPE_KEYS = ("schemaVersion", "recordId", "tenantId", "sourceScope", "observed", "producedAt", "sourceRefs",
+                 "method", "status")
+COMPLETENESS = ("complete", "partial", "unknown")
+CERTAINTY = ("exact", "within_tolerance", "estimated", "unresolved")
+REF_KINDS = ("ai-usage-event/1", "ai-financial-record/1", "allocation/1", "rate-card/1", "source-row", "fixture-file")
+
+
+def make_method(inp: "Inputs", method_id: str, version: int, configs: List[str],
+                refs: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    hashes = {n: inp.file_sha[n] for n in sorted(configs)}
+    m: Dict[str, Any] = {"id": method_id, "version": version, "kitVersion": KIT_VERSION,
+                         "configSha256": hashlib.sha256("".join(f"{n}:{h}\n" for n, h in hashes.items())
+                                                        .encode()).hexdigest(),
+                         "configs": hashes}
+    if refs:
+        m["configRefs"] = refs
+    return m
+
+
+def make_status(completeness: str, certainty: str, reasons: List[str]) -> Dict[str, Any]:
+    return {"completeness": completeness, "certainty": certainty, "reasons": sorted(set(reasons))}
+
+
+def ref(kind: str, ids: List[str]) -> Dict[str, Any]:
+    uniq = sorted({i for i in ids if i})
+    return {"kind": kind, "id": uniq[0]} if len(uniq) == 1 else {"kind": kind, "ids": uniq, "count": len(uniq)}
+
+
+def envelope(schema: str, prefix: str, key: List[str], tenant: str, scope: Dict[str, Any], observed: Dict[str, str],
+             produced_at: str, refs: List[Dict[str, Any]], method: Dict[str, Any], status: Dict[str, Any],
+             payload: Dict[str, Any]) -> Dict[str, Any]:
+    rec: Dict[str, Any] = {"schemaVersion": schema, "recordId": f"{prefix}-" + short_id(schema, *key),
+                           "tenantId": tenant, "sourceScope": scope, "observed": observed, "producedAt": produced_at,
+                           "sourceRefs": [r for r in refs if r.get("id") or r.get("ids")], "method": method,
+                           "status": status}
+    clash = set(rec) & set(payload)
+    if clash:
+        raise MappingError("ENVELOPE_PAYLOAD_COLLISION", str(sorted(clash)))
+    rec.update(payload)
+    return rec
+
+
+def day_period(day: str) -> Dict[str, str]:
+    return {"periodStart": f"{day}T00:00:00Z", "periodEnd": f"{next_day(day)}T00:00:00Z"}
+
+
+def v_envelope(r: Dict[str, Any]) -> List[str]:
+    p: List[str] = []
+    missing = [k for k in ENVELOPE_KEYS if k not in r]
+    if missing:
+        return [f"missing envelope keys {missing}"]
+    _chk(p, isinstance(r["schemaVersion"], str) and bool(DRAFT_SCHEMA.match(r["schemaVersion"])),
+         "schemaVersion is not a ratio.*/0-draft schema")
+    _chk(p, _is("id", r["recordId"]) and _is("id", r["tenantId"]), "recordId or tenantId not an id")
+    sc = r["sourceScope"]
+    _chk(p, isinstance(sc, dict) and isinstance(sc.get("sourceConnectionIds"), list) and
+         len(sc["sourceConnectionIds"]) > 0 and all(_is("id", x) for x in sc["sourceConnectionIds"]),
+         "sourceScope.sourceConnectionIds")
+    ob, end = r["observed"], None
+    if isinstance(ob, dict) and set(ob) == {"at"}:
+        _chk(p, _is("instant", ob["at"]), "observed.at not a UTC instant")
+        end = ob["at"]
+    elif isinstance(ob, dict) and set(ob) == {"periodStart", "periodEnd"}:
+        _chk(p, _is("instant", ob["periodStart"]) and _is("instant", ob["periodEnd"])
+             and ob["periodStart"] < ob["periodEnd"], "observed period invalid")
+        end = ob["periodEnd"]
+    else:
+        p.append("observed must be {at} or {periodStart, periodEnd}")
+    _chk(p, _is("instant", r["producedAt"]), "producedAt not a UTC instant")
+    if end and _is("instant", end) and _is("instant", r["producedAt"]):
+        _chk(p, r["producedAt"] >= end, "producedAt before the observed time")
+    refs = r["sourceRefs"]
+    _chk(p, isinstance(refs, list) and len(refs) > 0, "sourceRefs empty")
+    for x in refs if isinstance(refs, list) else []:
+        ids = [x["id"]] if "id" in x else x.get("ids", [])
+        _chk(p, x.get("kind") in REF_KINDS, f"sourceRef kind {x.get('kind')!r}")
+        _chk(p, len(ids) > 0 and all(_is("id", i) for i in ids) and ("ids" not in x or x.get("count") == len(ids)),
+             "sourceRef ids")
+    m = r["method"]
+    _chk(p, isinstance(m, dict) and _is("id", m.get("id")) and isinstance(m.get("version"), int)
+         and m.get("version", 0) > 0 and m.get("kitVersion") == KIT_VERSION and _is("sha256", m.get("configSha256"))
+         and isinstance(m.get("configs"), dict) and all(_is("sha256", v) for v in m["configs"].values()), "method")
+    s = r["status"]
+    ok = (isinstance(s, dict) and s.get("completeness") in COMPLETENESS and s.get("certainty") in CERTAINTY
+          and isinstance(s.get("reasons"), list) and all(_is("reason", x) for x in s["reasons"]))
+    _chk(p, ok, "status")
+    if ok and (s["completeness"] != "complete" or s["certainty"] in ("estimated", "unresolved")):
+        _chk(p, len(s["reasons"]) > 0, "status needs reason codes unless complete and exact")
+    return p
+
+
+def unresolved_refs(records: List[Dict[str, Any]], known: Dict[str, set]) -> List[str]:
+    out = []
+    for r in records:
+        for x in r.get("sourceRefs", []):
+            if x["kind"] in known:
+                for i in ([x["id"]] if "id" in x else x["ids"]):
+                    if i not in known[x["kind"]]:
+                        out.append(f"{r['recordId']}: unresolved {x['kind']} {i}")
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +815,8 @@ STATUS_MAP = {"success": "succeeded", "failure": "failed", "cancelled": "cancell
 class Inputs:
     def __init__(self, fixtures: Path):
         rd = lambda p: load_json_precise((fixtures / p).read_text())  # noqa: E731
+        self.file_sha = {p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                         for p in sorted(fixtures.iterdir()) if p.is_file()}
         self.rows = [load_json_precise(l) for l in (fixtures / "gateway_spend_logs.jsonl").read_text().splitlines()
                      if l.strip()]
         self.cards = rd("rate_cards.json")
@@ -725,7 +851,7 @@ def billable_quantities(usage: Dict[str, int], prof: Dict[str, Any]) -> Dict[str
     return {k: v for k, v in q.items() if v}
 
 
-def normalize(inp: Inputs, pz: Pseudonymizer) -> Dict[str, Any]:
+def normalize(inp: Inputs, pz: Pseudonymizer, produced_at: str) -> Dict[str, Any]:
     conn, routes = inp.conn, inp.routes
     canon = routes.get("servedModelCanonical", {})
     events, valuations, src_est, corr, quarantine = [], [], [], [], []
@@ -808,18 +934,35 @@ def normalize(inp: Inputs, pz: Pseudonymizer) -> Dict[str, Any]:
         route_class = ("UNMAPPED_ALIAS" if alias is None else "NO_SERVED_MODEL" if not served else
                        "PRIMARY" if served == alias["primary"] else
                        "DECLARED_FALLBACK" if served in alias["fallbacks"] else "UNDECLARED_SERVED_MODEL")
-        c = {"schemaVersion": "ratio.usage-correlation/0-draft", "eventId": ev["eventId"],
-             "routeMapVersion": routes["routeMapVersion"], "routeClass": route_class,
-             "servedModelCanonical": served}
+        scope: Dict[str, Any] = {"sourceConnectionIds": [conn["sourceConnectionId"]], "provider": provider}
+        if provider in conn["providerAccounts"]:
+            scope["providerAccount"] = conn["providerAccounts"][provider]
+        row_refs = [ref("ai-usage-event/1", [ev["eventId"]]), ref("source-row", [ev["evidenceRef"]])]
+        c: Dict[str, Any] = {"eventId": ev["eventId"], "routeMapVersion": routes["routeMapVersion"],
+                             "routeClass": route_class, "servedModelCanonical": served}
+        reasons: List[str] = []
         if meta.get("trace_id"):
             c["traceId"] = meta["trace_id"]               # correlation only: not an id, key or credential
+        else:
+            reasons.append("TRACE_ID_MISSING")
         if meta.get("logical_request_id"):
             c["logicalRequestId"] = meta["logical_request_id"]
-        for k in ("workflow", "agent_run"):
+        else:
+            reasons.append("LOGICAL_REQUEST_ID_MISSING")
+        for k, name in (("workflow", "workflow"), ("agent_run", "agentRun")):
             if k in tags:
-                c[{"workflow": "workflow", "agent_run": "agentRun"}[k]] = tags[k]
-        corr.append(c)
+                c[name] = tags[k]
+            else:
+                reasons.append(f"{k.upper()}_TAG_MISSING")
+        if route_class in ("UNDECLARED_SERVED_MODEL", "UNMAPPED_ALIAS", "NO_SERVED_MODEL"):
+            reasons.append("ROUTE_MAPPING_GAP")
+        corr.append(envelope("ratio.usage-correlation/0-draft", "corr", [ev["eventId"]], ev["tenantId"], scope,
+                             {"at": occurred}, produced_at, row_refs,
+                             make_method(inp, "usage-correlation", 1, ["routes.json"],
+                                         {"routeMapVersion": routes["routeMapVersion"]}),
+                             make_status("partial" if reasons else "complete", "exact", reasons), c))
         # rate-card valuation as a linked ai-financial-record/1 (never part of the usage event)
+        val_rec: Optional[Dict[str, Any]] = None
         if qty and provider in PRICES:
             missing = [k for k in qty if (provider, served, k) not in inp.price]
             if missing:
@@ -829,7 +972,7 @@ def normalize(inp: Inputs, pz: Pseudonymizer) -> Dict[str, Any]:
                 amount = sum((Decimal(n) * contract_decimal(inp.price[(provider, served, k)][1]["price"], "price")
                               / Decimal(1_000_000) for k, n in qty.items()), Decimal(0))
                 day = occurred[:10]
-                valuations.append({
+                val_rec = {
                     "schemaVersion": "ai-financial-record/1", "recordId": "fin-est-" + short_id(ev["eventId"]),
                     "tenantId": ev["tenantId"], "sourceConnectionId": ev["sourceConnectionId"],
                     "kind": "estimated_invocation", "amount": canonical(amount), "currency": card["currency"],
@@ -837,14 +980,26 @@ def normalize(inp: Inputs, pz: Pseudonymizer) -> Dict[str, Any]:
                     "providerAccount": conn["providerAccounts"][provider], "model": served,
                     "rateBasis": card["basis"],
                     "rateCardRef": {"rateCardId": card["rateCardId"], "version": card["version"]},
+                    # existing optional v1 field: hash of the configuration that produced this valuation
+                    "configSha256": make_method(inp, "rate-card-valuation", 1, VALUATION_CONFIGS)["configSha256"],
                     "linkedUsageEventIds": [ev["eventId"]], "evidenceRef": f"valuation:rate-card:{ev['eventId']}",
-                    **({"workloadId": ev["workloadId"]} if "workloadId" in ev else {})})
+                    **({"workloadId": ev["workloadId"]} if "workloadId" in ev else {})}
+                valuations.append(val_rec)
         if r.get("spend") is not None:
             amt, rep = source_decimal(r["spend"], "spend")
-            src_est.append({"schemaVersion": "ratio.source-estimate/0-draft", "eventId": ev["eventId"],
-                            "source": "gateway", "amount": canonical(amt),
-                            "currency": conn["gatewayEstimateCurrency"], "sourceRepresentation": rep,
-                            "note": "never summed with billed, effective or valuation amounts"})
+            reasons = ["SOURCE_ESTIMATE_NOT_BILLING"]
+            if val_rec is None:
+                reasons.append("NO_LINKED_VALUATION")
+            elif val_rec["currency"] != conn["gatewayEstimateCurrency"]:
+                reasons.append("CURRENCY_DIFFERS_FROM_VALUATION")
+            refs = row_refs + ([ref("ai-financial-record/1", [val_rec["recordId"]])] if val_rec else [])
+            src_est.append(envelope(
+                "ratio.source-estimate/0-draft", "srcest", [ev["eventId"]], ev["tenantId"], scope, {"at": occurred},
+                produced_at, refs, make_method(inp, "source-estimate-capture", 1, ["connection.json"]),
+                make_status("complete", "estimated", reasons),
+                {"eventId": ev["eventId"], "source": "gateway", "amount": canonical(amt),
+                 "currency": conn["gatewayEstimateCurrency"], "sourceRepresentation": rep,
+                 "note": "never summed with billed, effective or valuation amounts"}))
     return {"events": events, "valuations": valuations, "sourceEstimates": src_est, "correlation": corr,
             "quarantine": quarantine, "counters": dict(counters), "billable": billable, "tags": tags_by_event}
 
@@ -858,9 +1013,8 @@ def focus_financial_records(inp: Inputs) -> List[Dict[str, Any]]:
             else next_day(day0)
         for kind, col in (("billed", "BilledCost"), ("effective", "EffectiveCost")):
             amt, _ = source_decimal(row[col], col)
-            rec = {"schemaVersion": "ai-financial-record/1", "recordId": f"fin-{kind}-" + short_id(str(i), row["SkuId"],
-                                                                                                   row["ChargePeriodStart"]),
-                   "tenantId": TENANT, "sourceConnectionId": "conn-focus-fixture", "kind": kind,
+            rec = {"schemaVersion": "ai-financial-record/1", "recordId": fin_record_id(kind, i, row),
+                   "tenantId": TENANT, "sourceConnectionId": CONN_FOCUS, "kind": kind,
                    "amount": canonical(amt), "currency": row["BillingCurrency"], "periodStart": day0,
                    "periodEnd": day1, "provider": row["ServiceProviderName"], "providerAccount": row["SubAccountId"],
                    "sku": row["SkuId"], "rateBasis": "not_applicable",
@@ -978,13 +1132,16 @@ def allocate_gpu(inp: Inputs, per: Dict[Tuple[str, str], Dict[str, Fraction]], b
     return {"hourly": hourly, "allocations": allocs}
 
 
-def allocate_shared(inp: Inputs, norm: Dict[str, Any], gpu: Dict[str, Any], weights_cfg: Dict[str, str]
-                    ) -> Dict[str, Any]:
+def allocate_shared(inp: Inputs, norm: Dict[str, Any], gpu: Dict[str, Any], weights_cfg: Dict[str, str],
+                    produced_at: str) -> Dict[str, Any]:
     own = inp.own
     shared = {w for w, v in own["workloads"].items() if v.get("shared")}
     win, wout = Fraction(weights_cfg["input"]), Fraction(weights_cfg["output"])
     tokens: Dict[Tuple[str, str], Dict[str, Fraction]] = defaultdict(lambda: defaultdict(Fraction))
     runs: Dict[Tuple[str, str], Dict[str, Fraction]] = defaultdict(lambda: defaultdict(Fraction))
+    run_ids: Dict[Tuple[str, str], Dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    scope = {"sourceConnectionIds": sorted([CONN_FOCUS, CONN_GPU, inp.conn["sourceConnectionId"]])}
+    method = make_method(inp, "shared-inference-weighted-token-share", 1, ["ownership.json"], {"weights": weights_cfg})
     for ev in norm["events"]:
         wl = own["servedBy"].get(ev.get("modelServed", ""))
         if wl not in shared or "tokenUsage" not in ev or "workloadId" not in ev:
@@ -994,7 +1151,9 @@ def allocate_shared(inp: Inputs, norm: Dict[str, Any], gpu: Dict[str, Any], weig
         w = Fraction(int(tu.get("input", "0"))) * win + Fraction(int(tu.get("output", "0"))) * wout
         tokens[(wl, hour)][ev["workloadId"]] += w
         tags = norm["tags"][ev["eventId"]]
-        runs[(wl, hour)][f"{ev['workloadId']}|{tags.get('workflow', 'unknown')}|{tags.get('agent_run', 'unknown')}"] += w
+        rk = f"{ev['workloadId']}|{tags.get('workflow', 'unknown')}|{tags.get('agent_run', 'unknown')}"
+        runs[(wl, hour)][rk] += w
+        run_ids[(wl, hour)][rk].add(ev["eventId"])
     days = defaultdict(lambda: {"source": Decimal(0), "shares": defaultdict(Decimal), "unalloc": Decimal(0)})
     run_est = []
     for h in gpu["hourly"]:
@@ -1012,14 +1171,20 @@ def allocate_shared(inp: Inputs, norm: Dict[str, Any], gpu: Dict[str, Any], weig
                 continue
             for k, v in allocate_exact(amt, dict(w), prec).items():
                 d["shares"][k] += v
-            for k, v in sorted(allocate_exact(amt, dict(runs[(wl, h["chargePeriodStart"])]), prec).items()):
+            hour = h["chargePeriodStart"]
+            aid = "alloc-shared-" + short_id(wl, hour[:10], h["basis"])
+            for k, v in sorted(allocate_exact(amt, dict(runs[(wl, hour)]), prec).items()):
                 workload, workflow, agent_run = k.split("|")
-                run_est.append({"schemaVersion": "ratio.agent-run-cost-estimate/0-draft", "estimate": True,
-                                "sharedWorkload": wl, "hour": h["chargePeriodStart"], "workloadId": workload,
-                                "workflow": workflow, "agentRun": agent_run, "amount": canonical(v),
-                                "currency": h["currency"], "basis": h["basis"],
-                                "method": {"ruleSetId": "shared-inference-weighted-token-share", "version": 1,
-                                           "weights": weights_cfg}})
+                reasons = (["TOKEN_WEIGHTED_ESTIMATE"] + (["WORKFLOW_TAG_MISSING"] if workflow == "unknown" else [])
+                           + (["AGENT_RUN_TAG_MISSING"] if agent_run == "unknown" else []))
+                run_est.append(envelope(
+                    "ratio.agent-run-cost-estimate/0-draft", "runest", [wl, hour, k, h["basis"]], TENANT,
+                    {**scope, "resourceId": h["resourceId"]},
+                    {"periodStart": hour, "periodEnd": iso(parse_ts(hour) + timedelta(hours=1))}, produced_at,
+                    [ref("allocation/1", [aid]), ref("ai-usage-event/1", list(run_ids[(wl, hour)][k]))], method,
+                    make_status("partial" if len(reasons) > 1 else "complete", "estimated", reasons),
+                    {"sharedWorkload": wl, "workloadId": workload, "workflow": workflow, "agentRun": agent_run,
+                     "amount": canonical(v), "currency": h["currency"], "basis": h["basis"]}))
     allocs, chain = [], []
     stage1 = {(a["periodStart"], a["currency"]): a for a in gpu["allocations"]}
     for (wl, day, ccy, basis), d in sorted(days.items()):
@@ -1034,12 +1199,16 @@ def allocate_shared(inp: Inputs, norm: Dict[str, Any], gpu: Dict[str, Any], weig
                        "unallocated": canonical(d["unalloc"]),
                        "unallocatedReasons": ["SHARED_CAPACITY_NO_USAGE"] if d["unalloc"] else [],
                        "evidenceRef": f"allocation:stage-2:{wl}:{day}"})
-        parent = stage1.get((day, ccy))
-        chain.append({"schemaVersion": "ratio.allocation-chain/0-draft", "allocationId": aid,
-                      "reallocates": {"allocationId": parent["allocationId"] if parent else None,
-                                      "targetKind": "workload", "targetRef": wl},
-                      "estimate": True, "weights": weights_cfg,
-                      "note": "re-allocates a stage-1 share; never sum stage-1 and stage-2 shares"})
+        parent = stage1.get((day, ccy))  # one node per day in the fixtures; production keys by resource too
+        reasons = ["TOKEN_WEIGHTED_ESTIMATE"] + (["SHARED_CAPACITY_NO_USAGE"] if d["unalloc"] else [])
+        chain.append(envelope(
+            "ratio.allocation-chain/0-draft", "chain", [aid], TENANT, scope, day_period(day), produced_at,
+            [ref("allocation/1", [aid] + ([parent["allocationId"]] if parent else []))], method,
+            make_status("partial" if d["unalloc"] else "complete", "estimated", reasons),
+            {"allocationId": aid,
+             "reallocates": {"allocationId": parent["allocationId"] if parent else None,
+                             "targetKind": "workload", "targetRef": wl},
+             "note": "re-allocates a stage-1 share; never sum stage-1 and stage-2 shares"}))
     return {"allocations": allocs, "chain": chain, "agentRunEstimates": run_est}
 
 
@@ -1051,6 +1220,8 @@ def reconcile(inp: Inputs, norm: Dict[str, Any], as_of: Optional[str]) -> Dict[s
     canon = inp.routes.get("servedModelCanonical", {})
     observed: Dict[Tuple, int] = defaultdict(int)
     excluded: Dict[Tuple, int] = defaultdict(int)
+    observed_ids: Dict[Tuple, set] = defaultdict(set)
+    billed_rows: Dict[Tuple, List[int]] = defaultdict(list)
     unmapped = 0
     missing_usage: Dict[Tuple[str, str], int] = defaultdict(int)
     for ev in norm["events"]:
@@ -1073,8 +1244,9 @@ def reconcile(inp: Inputs, norm: Dict[str, Any], as_of: Optional[str]) -> Dict[s
                 excluded[key] += 1
                 continue
             observed[key] += n
+            observed_ids[key].add(ev["eventId"])
     billed: Dict[Tuple, Tuple[int, Decimal]] = {}
-    for row in inp.focus:
+    for i, row in enumerate(inp.focus):
         if row["SkuId"] not in inp.sku:
             continue
         prov, model, cat = inp.sku[row["SkuId"]]
@@ -1084,6 +1256,7 @@ def reconcile(inp: Inputs, norm: Dict[str, Any], as_of: Optional[str]) -> Dict[s
         c, _ = source_decimal(row["BilledCost"], "BilledCost")
         pq, pc = billed.get(key, (0, Decimal(0)))
         billed[key] = (pq + q, pc + c)
+        billed_rows[key].append(i)
     rows = []
     for key in sorted(set(observed) | set(billed)):
         acct, prov, model, sku, cat, ccy, day = key
@@ -1105,7 +1278,9 @@ def reconcile(inp: Inputs, norm: Dict[str, Any], as_of: Optional[str]) -> Dict[s
                      "status": status, "code": code, "message": msg,
                      "cause": "NOT_ESTABLISHED" if status != "MATCHED" else None,
                      "context": {"eventsReceivedAfterAsOf": excluded.get(key, 0),
-                                 "eventsMissingUsageSameModel": missing_usage.get((prov, model), 0)}})
+                                 "eventsMissingUsageSameModel": missing_usage.get((prov, model), 0)},
+                     "evidence": {"observedEventIds": sorted(observed_ids.get(key, set())),
+                                  "billedFocusRows": billed_rows.get(key, [])}})
     cov: Dict[str, Dict[str, Decimal]] = defaultdict(lambda: {"billed": Decimal(0), "matched": Decimal(0)})
     for r in rows:
         b = Decimal(r["billedCost"])
@@ -1334,7 +1509,7 @@ def jsonl(path: Path, rows: List[Dict[str, Any]]) -> None:
             f.write(json.dumps(r, sort_keys=True) + "\n")
 
 
-def check(fixtures: Path, out: Path, pz: Pseudonymizer, basis: str = "effective",
+def check(fixtures: Path, out: Path, pz: Pseudonymizer, produced_at: str, basis: str = "effective",
           weights: Optional[Dict[str, str]] = None, as_of: Optional[str] = None) -> Dict[str, Any]:
     weights = weights or {"input": "1", "output": "1"}
     inp = Inputs(fixtures)
@@ -1350,7 +1525,7 @@ def check(fixtures: Path, out: Path, pz: Pseudonymizer, basis: str = "effective"
                                              "InvoiceId", "ServiceProviderName", "SubAccountId"))]
     put("FOCUS_COLUMNS", "FAIL" if missing else "PASS", "FOCUS_COLUMNS_MISSING" if missing else "",
         f"{len(inp.focus)} rows; required-column subset only (use the FOCUS validator for conformance)")
-    norm = normalize(inp, pz)
+    norm = normalize(inp, pz, produced_at)
     fin = focus_financial_records(inp)
     rep: Dict[str, Any] = {"kitVersion": KIT_VERSION, "kitStatus": KIT_STATUS, "scenario": inp.scenario,
                            "quarantine": norm["quarantine"], "counters": norm["counters"]}
@@ -1367,7 +1542,7 @@ def check(fixtures: Path, out: Path, pz: Pseudonymizer, basis: str = "effective"
         put("GPU_ALLOCATION_EXACT", "SKIP", "BLOCKED_BY_CAPACITY_FAILURE", "allocation not computed")
     else:
         gpu = allocate_gpu(inp, per, basis)
-        shared = allocate_shared(inp, norm, gpu, weights)
+        shared = allocate_shared(inp, norm, gpu, weights, produced_at)
         exact = all(sum((Decimal(v) for v in h["parts"].values()), Decimal(0)) == Decimal(h["sourceAmount"])
                     for h in gpu["hourly"])
         put("GPU_ALLOCATION_EXACT", "PASS" if exact else "FAIL", "" if exact else "ALLOCATION_NOT_EXACT",
@@ -1403,6 +1578,20 @@ def check(fixtures: Path, out: Path, pz: Pseudonymizer, basis: str = "effective"
     put("RECONCILIATION", "WARN" if codes else "PASS", "+".join(codes),
         "; ".join(sorted({r["message"] for r in recon["rows"] if r["message"]})) or
         "every billed aggregate matches observed gateway usage within tolerance")
+    links = reconciliation_links(inp, recon, produced_at)
+    sidecars = (norm["sourceEstimates"] + norm["correlation"] + links
+                + ((shared["chain"] + shared["agentRunEstimates"]) if shared else []))
+    known = {"ai-usage-event/1": {e["eventId"] for e in norm["events"]},
+             "ai-financial-record/1": {r["recordId"] for r in norm["valuations"] + fin},
+             "allocation/1": {a["allocationId"] for a in allocations}}
+    env_problems = [f"{x.get('recordId')}: {p}" for x in sidecars for p in v_envelope(x)]
+    env_problems += unresolved_refs(sidecars, known)
+    dup_ids = len(sidecars) - len({x["recordId"] for x in sidecars})
+    if dup_ids:
+        env_problems.append(f"{dup_ids} duplicate recordId(s)")
+    put("ENVELOPE", "FAIL" if env_problems else "PASS", "ENVELOPE_INVALID" if env_problems else "",
+        "; ".join(env_problems[:3]) or f"{len(sidecars)} draft records carry identity, scope, observed/produced "
+        "times, resolvable source references, method/config hashes and completeness/certainty status")
     inv = check_invoices(inp)
     bad_inv = [i for i in inv if i["status"] != "MATCHED"]
     put("INVOICE_SUM", "FAIL" if bad_inv else "PASS", "INVOICE_MISMATCH" if bad_inv else "",
@@ -1430,10 +1619,7 @@ def check(fixtures: Path, out: Path, pz: Pseudonymizer, basis: str = "effective"
     prop = out / "proposals"
     jsonl(prop / "source_estimates.jsonl", norm["sourceEstimates"])
     jsonl(prop / "usage_correlation.jsonl", norm["correlation"])
-    jsonl(prop / "reconciliation_links.jsonl", [
-        {"schemaVersion": "ratio.reconciliation-link/0-draft", **{k: r[k] for k in (
-            "providerAccount", "provider", "model", "sku", "tokenCategory", "currency", "day", "billedQuantity",
-            "observedQuantity", "quantityDifference", "status", "code", "cause")}} for r in recon["rows"]])
+    jsonl(prop / "reconciliation_links.jsonl", links)
     if shared:
         jsonl(prop / "allocation_chain.jsonl", shared["chain"])
         jsonl(prop / "agent_run_cost_estimates.jsonl", shared["agentRunEstimates"])
@@ -1442,16 +1628,78 @@ def check(fixtures: Path, out: Path, pz: Pseudonymizer, basis: str = "effective"
                 "gpu": {"hourly": gpu["hourly"] if gpu else [], "diagnostics": diag, "capacityViolations": violations[:20]},
                 "cardinality": card, "coverage": coverage(gpu, shared, recon, norm)})
     summary = summarize(rep)
-    leaks = scan_for_content(sorted(p for p in out.rglob("*") if p.is_file()), summary)
+    leaks = scan_for_content(sorted(p for p in out.rglob("*") if p.is_file()),
+                             summary + json.dumps(rep, sort_keys=True))
     put("CONTENT_CANARIES", "FAIL" if leaks else "PASS", "CONTENT_LEAK" if leaks else "",
         "; ".join(leaks[:3]) or "no canary, prompt/response content or email-shaped value in any output")
     rep["checks"] = {k: checks[k] for k in CHECK_ORDER}
-    (out / "report.json").write_text(json.dumps(rep, indent=2, sort_keys=True) + "\n")
+    rep = {**report_envelope(inp, norm, rep["checks"], produced_at, as_of, basis, weights), **rep}
+    text = json.dumps(rep, indent=2, sort_keys=True) + "\n"
+    if scan_for_content([], text):
+        raise MappingError("CONTENT_LEAK", "report.json would carry content")
+    (out / "report.json").write_text(text)
     rep["_summary"] = summarize(rep)
     return rep
 
 
-CHECK_ORDER = ["FOCUS_COLUMNS", "CONTRACT_V1", "CONTENT_CANARIES", "ATTEMPTS", "ROUTING", "PRICING", "GPU_CAPACITY",
+def reconciliation_links(inp: Inputs, recon: Dict[str, Any], produced_at: str) -> List[Dict[str, Any]]:
+    links = []
+    method = make_method(inp, "aggregate-reconciliation", 1, VALUATION_CONFIGS,
+                         {"asOf": recon["asOf"], "tolerance": recon["tolerance"]})
+    for r in recon["rows"]:
+        ev = r["evidence"]
+        reasons: List[str] = []
+        if r["status"] == "MATCHED":
+            certainty = "exact" if r["quantityDifference"] == "0" else "within_tolerance"
+            if certainty == "within_tolerance":
+                reasons.append("DIFFERENCE_WITHIN_TOLERANCE")
+        else:
+            certainty = "unresolved"
+            reasons += [r["code"], "CAUSE_NOT_ESTABLISHED"]
+        if r["context"]["eventsReceivedAfterAsOf"]:
+            reasons.append("EVENTS_AFTER_AS_OF")
+        if r["context"]["eventsMissingUsageSameModel"]:
+            reasons.append("USAGE_MISSING_SAME_MODEL")
+        partial = r["status"] != "MATCHED" or bool(r["context"]["eventsReceivedAfterAsOf"]) or \
+            bool(r["context"]["eventsMissingUsageSameModel"])
+        billed_ids = [fin_record_id("billed", i, inp.focus[i]) for i in ev["billedFocusRows"]]
+        links.append(envelope(
+            "ratio.reconciliation-link/0-draft", "recon",
+            [r["providerAccount"], r["sku"], r["tokenCategory"], r["currency"], r["day"], str(recon["asOf"])], TENANT,
+            {"sourceConnectionIds": sorted([inp.conn["sourceConnectionId"], CONN_FOCUS]), "provider": r["provider"],
+             "providerAccount": r["providerAccount"]},
+            day_period(r["day"]), produced_at,
+            [ref("ai-financial-record/1", billed_ids), ref("ai-usage-event/1", ev["observedEventIds"])], method,
+            make_status("partial" if partial else "complete", certainty, reasons),
+            {"model": r["model"], "sku": r["sku"], "tokenCategory": r["tokenCategory"], "currency": r["currency"],
+             "day": r["day"], "billedQuantity": r["billedQuantity"], "observedQuantity": r["observedQuantity"],
+             "quantityDifference": r["quantityDifference"], "reconciliationStatus": r["status"], "code": r["code"],
+             "cause": r["cause"], "excludedAfterAsOf": r["context"]["eventsReceivedAfterAsOf"]}))
+    return links
+
+
+def report_envelope(inp: Inputs, norm: Dict[str, Any], checks: Dict[str, Dict[str, str]], produced_at: str,
+                    as_of: Optional[str], basis: str, weights: Dict[str, str]) -> Dict[str, Any]:
+    starts = [e["occurredAt"] for e in norm["events"]] + [r["ChargePeriodStart"] for r in inp.focus]
+    ends = [e["occurredAt"] for e in norm["events"]] + [r["ChargePeriodEnd"] for r in inp.focus]
+    findings = [c["code"] or k for k, c in checks.items() if c["status"] != "PASS"]
+    configs = sorted(n for n in inp.file_sha if n.endswith(".json") and n not in ("invoices.json", "scenario.json"))
+    env = envelope(
+        "ratio.kit-report/0-draft", "report",
+        [inp.scenario["scenario"], *[inp.file_sha[n] for n in sorted(inp.file_sha)], str(as_of), basis,
+         json.dumps(weights, sort_keys=True)], TENANT,
+        {"sourceConnectionIds": sorted([inp.conn["sourceConnectionId"], CONN_FOCUS, CONN_GPU])},
+        {"periodStart": min(starts), "periodEnd": max(ends)}, produced_at,
+        [ref("fixture-file", sorted(inp.file_sha))],
+        make_method(inp, "telemetry-kit-check", 2, configs, {"asOf": as_of, "gpuBasis": basis, "weights": weights}),
+        make_status("complete" if all(c["status"] != "SKIP" for c in checks.values()) else "partial",
+                    "unresolved" if findings else "estimated",
+                    ["SYNTHETIC_FIXTURES", "CONTAINS_ESTIMATES"] + [f.split("+")[0] for f in findings]),
+        {"inputSha256": inp.file_sha})
+    return env
+
+
+CHECK_ORDER = ["FOCUS_COLUMNS", "CONTRACT_V1", "ENVELOPE", "CONTENT_CANARIES", "ATTEMPTS", "ROUTING", "PRICING", "GPU_CAPACITY",
                "GPU_ALLOCATION_EXACT", "RECONCILIATION", "INVOICE_SUM", "SOURCE_ESTIMATE_DRIFT", "METRIC_CARDINALITY"]
 
 
@@ -1582,7 +1830,7 @@ def self_test() -> int:
         for sc in SCENARIOS:
             base = Path(td) / sc
             generate(base / "fixtures", 42, sc)
-            rep = check(base / "fixtures", base / "out", pz)
+            rep = check(base / "fixtures", base / "out", pz, FIXTURE_PRODUCED_AT)
             reports[sc] = rep
             diffs, _ = compare_expected(rep, expected) if expected else (["no expectations"], "")
             expect(not diffs, f"scenario {sc}: exact expected outcome" + (f" ({'; '.join(diffs)})" if diffs else ""))
@@ -1614,6 +1862,34 @@ def self_test() -> int:
         corr = [json.loads(l) for l in (Path(td) / "bypass" / "out" / "proposals" / "usage_correlation.jsonl")
                 .read_text().splitlines()]
         expect(sum(1 for c in corr if c["routeClass"] == "DECLARED_FALLBACK") == 1, "declared fallback classified")
+        env_errs = v_envelope({**b, "producedAt": "2026-11-01T00:00:00Z"})
+        expect(not v_envelope(b) and env_errs == ["producedAt before the observed time"],
+               "report envelope valid; producedAt before the observed time refused")
+        side = [json.loads(l) for f in sorted((Path(td) / "bypass" / "out" / "proposals").iterdir())
+                for l in f.read_text().splitlines()]
+        sample = side[0]
+        expect(v_envelope({k: v for k, v in sample.items() if k != "sourceRefs"}) != []
+               and v_envelope({**sample, "status": {"completeness": "partial", "certainty": "exact", "reasons": []}})
+               == ["status needs reason codes unless complete and exact"]
+               and v_envelope({**sample, "method": {**sample["method"], "configSha256": "x"}}) == ["method"],
+               "envelope validator refuses missing refs, reasonless partial status and unhashed config")
+        later = Path(td) / "bypass-later"
+        check(Path(td) / "bypass" / "fixtures", later, pz, "2026-12-01T00:00:00Z")
+        side2 = [json.loads(l) for f in sorted((later / "proposals").iterdir()) for l in f.read_text().splitlines()]
+        expect([x["recordId"] for x in side] == [x["recordId"] for x in side2]
+               and all(x["producedAt"] == "2026-12-01T00:00:00Z" for x in side2),
+               "record identity is independent of production time")
+        links = [x for x in side if x["schemaVersion"] == "ratio.reconciliation-link/0-draft"]
+        expect(all(x["status"]["certainty"] == "unresolved" and "CAUSE_NOT_ESTABLISHED" in x["status"]["reasons"]
+                   for x in links if x["reconciliationStatus"] != "MATCHED")
+               and all(x["status"]["certainty"] == "estimated" for x in side
+                       if x["schemaVersion"] in ("ratio.source-estimate/0-draft", "ratio.agent-run-cost-estimate/0-draft",
+                                                 "ratio.allocation-chain/0-draft")),
+               "certainty: unresolved differences and estimates are labeled as such")
+        fins = [json.loads(l) for l in (Path(td) / "bypass" / "out" / "records" / "financial_records.jsonl")
+                .read_text().splitlines()]
+        expect(all(RX["sha256"].match(f.get("configSha256", "")) for f in fins if f["kind"] == "estimated_invocation"),
+               "valuations carry configSha256 (existing optional v1 field)")
         golden = HERE / "expected" / "bypass"
         if golden.exists():
             gen = Path(td) / "bypass" / "out"
@@ -1658,7 +1934,9 @@ def main(argv: List[str]) -> int:
     r.add_argument("--output-token-weight", default="1", help="stage-2 weight for output tokens; >1 is an estimate")
     r.add_argument("--expect", type=Path, default=HERE / "expected-results.json")
     r.add_argument("--no-expect", action="store_true")
-    r.add_argument("--fixture-key", action="store_true", help="use the deterministic fixture key (goldens)")
+    r.add_argument("--fixture-key", action="store_true",
+                   help="deterministic fixture key and production clock (goldens, harness)")
+    r.add_argument("--produced-at", help="producedAt for every record (UTC instant); default: now")
     g = sub.add_parser("golden", help="regenerate committed golden records (bypass scenario, fixture key)")
     g.add_argument("--out", type=Path, default=HERE / "expected")
     sub.add_parser("self-test")
@@ -1673,7 +1951,7 @@ def main(argv: List[str]) -> int:
     if a.cmd == "golden":
         with tempfile.TemporaryDirectory() as td:
             generate(Path(td) / "fixtures", 42, "bypass")
-            check(Path(td) / "fixtures", Path(td) / "out", fixture_pseudonymizer())
+            check(Path(td) / "fixtures", Path(td) / "out", fixture_pseudonymizer(), FIXTURE_PRODUCED_AT)
             dest = a.out / "bypass"
             if dest.exists():
                 shutil.rmtree(dest)
@@ -1685,8 +1963,11 @@ def main(argv: List[str]) -> int:
     fixtures, out = a.workdir / "fixtures", a.workdir / "out"
     generate(fixtures, a.seed, a.scenario)
     pz = fixture_pseudonymizer() if a.fixture_key else load_pseudonymizer()
-    rep = check(fixtures, out, pz, a.gpu_basis, {"input": "1", "output": a.output_token_weight})
-    norm = normalize(Inputs(fixtures), pz)
+    produced_at = a.produced_at or (FIXTURE_PRODUCED_AT if a.fixture_key else iso(datetime.now(timezone.utc)))
+    if not _is("instant", produced_at):
+        raise SystemExit("--produced-at must be a UTC instant such as 2026-11-08T00:00:00Z")
+    rep = check(fixtures, out, pz, produced_at, a.gpu_basis, {"input": "1", "output": a.output_token_weight})
+    norm = normalize(Inputs(fixtures), pz, produced_at)
     collector_payloads(norm, a.workdir / "collector-canary-payloads")
     print(rep["_summary"], end="")
     print(f"  outputs: {out}  (collector canary payloads: {a.workdir / 'collector-canary-payloads'})")
