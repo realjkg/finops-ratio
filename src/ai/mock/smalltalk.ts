@@ -9,10 +9,8 @@
 // team, workload or model, so conversation memory (which reads answer headers)
 // keeps the subject the user was discussing.
 
-import { capabilityAnswer, starterQuestions } from './answersMeta';
+import { CANNOT_DO, WHAT_I_DO, capabilityAnswer, dataLine, starterQuestions } from './answersMeta';
 import { ladder } from './answerKit';
-import { rollup } from './calc';
-import { evid, returnText, usd } from './format';
 import type { Answer, Scope, World } from './types';
 
 export type SmallTalkKind = 'greeting' | 'how_are_you' | 'thanks' | 'acknowledge' | 'farewell' | 'identity' | 'start';
@@ -90,8 +88,11 @@ export function smallTalkKinds(text: string): SmallTalkKind[] | null {
   // whose last phrase is an acknowledgment, thanks or goodbye asks something, even
   // after a greeting. "Hi Frank, how are you?" still passes.
   const clauses = text.split(QUESTION_END);
-  for (let i = 0; i < clauses.length - 1; i++) {
-    const clause = parse(normalize(clauses[i]));
+  const asked = clauses.slice(0, -1);
+  // "hi, ¿ok": the text after an opening ¿ is a question up to its closing mark.
+  for (const opened of text.split('¿').slice(1)) asked.push(opened.split(QUESTION_END)[0]);
+  for (const c of asked) {
+    const clause = parse(normalize(c));
     if (clause && clause.length > 0 && QUESTIONABLE.has(clause[clause.length - 1])) return null;
   }
   return kinds;
@@ -118,17 +119,6 @@ function greetingWord(text: string): string {
   return shown.charAt(0).toUpperCase() + shown.slice(1);
 }
 
-const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-function dataLine(world: World): string {
-  if (world.workloads.length === 0) return 'No workloads are in this view yet.';
-  const r = rollup(world.workloads);
-  const teams = world.teams.length > 0 ? ` across ${plural(world.teams.length, 'team')}` : '';
-  // R4: spend is never shown without its value ratio and evidence status.
-  const spend = r.spend > 0 ? `, ${usd(r.spend)}/mo of spend at ${returnText(r.ratio)}${evid(r.evidence)}` : '';
-  return `In this view: ${plural(world.workloads.length, 'workload')}${teams}${spend}.`;
-}
-
 /** Next questions: a drill-down on the subject under discussion, else the starter questions. */
 function suggestions(world: World, focus: Scope | null): string[] {
   if (focus && focus.kind !== 'portfolio') {
@@ -139,11 +129,11 @@ function suggestions(world: World, focus: Scope | null): string[] {
 }
 
 const IDENTITY =
-  "I'm Ratio's FinOps accountability partner. I'm a deterministic assistant, not a generative AI model: fixed rules compute every answer from the data in this view, the same question in the same conversation always gets the same answer, and I say plainly when something is outside the data.";
+  'I help leaders see what their AI spend returns: where the money goes, what value it produces and where to save. I show where every figure comes from.';
+const HOW_I_WORK =
+  "I'm a deterministic assistant, not a generative AI model: fixed rules compute every answer from the data in this view, so the same question in the same conversation always gets the same answer.";
 const HOW_ARE_YOU =
   "I'm running well, thanks for asking. I'm a deterministic assistant, so the same question in the same conversation always gets the same answer.";
-const TOPICS =
-  'I can help with ROI and Value / cost, team and workload costs, tokens and cache, alerts, outcome evidence, savings, EBITDA impact and moving a workload to a private open model.';
 
 /** The reply for a small-talk turn. `focus` is the subject from the conversation so far, if any. */
 export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: World, focus: Scope | null): Answer {
@@ -151,15 +141,27 @@ export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: Wor
   const base = { referenced: [] as string[] };
   if (kinds.includes('start')) return capabilityAnswer(world);
   if (kinds.includes('identity')) {
-    const how = kinds.includes('how_are_you') ? [HOW_ARE_YOU] : [];
-    return { ...base, header: "**I'm Frank Coster**", body: [...how, IDENTITY, TOPICS, dataLine(world)], next };
+    // The identity answer already says how Frank works, so only the courtesy is added.
+    const how = kinds.includes('how_are_you') ? ["I'm running well, thanks for asking."] : [];
+    const body = [
+      ...how,
+      IDENTITY,
+      'What I do:',
+      ...WHAT_I_DO.map((d) => `• ${d}`),
+      "What I can't do:",
+      ...CANNOT_DO.map((c) => `• ${c}`),
+      'How I work:',
+      HOW_I_WORK,
+      dataLine(world),
+    ];
+    return { ...base, header: "**I'm Frank Coster, Ratio's FinOps accountability partner**", body, next };
   }
   if (kinds.includes('greeting')) {
     const body = [
       ...(kinds.includes('how_are_you') ? [HOW_ARE_YOU] : []),
       "I'm Ratio's FinOps accountability partner. Ask me about cost, value and savings, and I'll show where every figure comes from.",
       dataLine(world),
-      'Good places to start are below, or ask "What can you answer?" for the full list.',
+      'Good places to start are below. Ask "Who are you?" to hear what I can and can\'t do, or "What can you answer?" for the full list.',
     ];
     return { ...base, header: `**${greetingWord(text)} — I'm Frank Coster**`, body, next };
   }

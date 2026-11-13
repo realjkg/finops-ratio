@@ -156,8 +156,9 @@ describe('review round 1: real follow-ups and data names win over small talk', (
   it('a goodbye after thanks says goodbye; identity plus how-are-you answers both', async () => {
     expect((await last(['thanks, bye'])).split('\n')[0]).toBe('**Goodbye**');
     const t = await last(['who are you, how are you?']);
-    expect(t.split('\n')[0]).toBe("**I'm Frank Coster**");
+    expect(t.split('\n')[0]).toBe("**I'm Frank Coster, Ratio's FinOps accountability partner**");
     expect(t).toMatch(/running well/);
+    expect(t.match(/not a generative AI model/g)).toHaveLength(1);
   });
 
   it('counts are pluralized correctly', async () => {
@@ -251,5 +252,44 @@ describe('review round 4 (Copilot): questioned phrases and R4', () => {
       expect(t, q).toMatch(/value evidence: (assumed|projected|measured|unmarked)/);
       expect(t, q).not.toMatch(/value evidence: measured/);
     }
+  });
+});
+
+describe('owner review: Frank says who he is, what he does and what he cannot do', () => {
+  const R4_RATIO = /Value \/ cost -?\d+\.\d×/;
+  const R4_EVIDENCE = /value evidence: (assumed|projected|measured|unmarked)/;
+
+  it('"who are you?" names Frank and lists what he does and what he cannot do', async () => {
+    const t = await last(['who are you?']);
+    expect(t.split('\n')[0]).toBe("**I'm Frank Coster, Ratio's FinOps accountability partner**");
+    expect(t).toContain('\nWhat I do:\n');
+    expect(t).toContain("\nWhat I can't do:\n");
+    expect(t).toMatch(/not a generative AI model/);
+    expect(t).toMatch(/approve spend/);
+    expect(t).toMatch(R4_RATIO);
+    expect(t).toMatch(R4_EVIDENCE);
+  });
+
+  it('"What can you answer?" and "where do I start?" say who Frank is and what he cannot do, with R4', async () => {
+    for (const q of ['What can you answer?', 'where do I start?', 'what do you do?']) {
+      const t = await last([q]);
+      expect(t.split('\n')[0], q).toBe('**What I can answer**');
+      expect(t, q).toContain('\nWho I am:\n');
+      expect(t, q).toContain("\nWhat I can't do:\n");
+      expect(t, q).toMatch(R4_RATIO);
+      expect(t, q).toMatch(R4_EVIDENCE);
+    }
+  });
+
+  it('the capability answer pluralizes counts', async () => {
+    const id = CTX.initiatives[0].id;
+    const one = { ...CTX, initiatives: CTX.initiatives.slice(0, 1), workloads: (CTX.workloads ?? []).filter((w) => w.id === id), omitted: [] };
+    const t = await last(['What can you answer?'], one);
+    expect(t).toMatch(/1 workload across 1 team\b/);
+    expect(t).not.toMatch(/1 workloads|1 teams/);
+  });
+
+  it.each(['hi, ¿ok', '¿hi, ok', 'hi ¿ok', 'hola ¿ok'])('an opened Spanish question is not small talk: %s', (q) => {
+    expect(smallTalkKinds(q)).toBeNull();
   });
 });

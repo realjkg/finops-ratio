@@ -1,7 +1,7 @@
 // Capability ladder, unsupported and clarify answers.
 
 import { rollup } from './calc';
-import { basisLine, usd } from './format';
+import { basisLine, evid, returnText, usd } from './format';
 import type { Answer, World } from './types';
 
 const UNSUPPORTED_HEADER = "**I can't answer that from this data**";
@@ -25,20 +25,52 @@ export function starterQuestions(world: World): string[] {
   return qs;
 }
 
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/** What is in view, with spend always paired with its Value / cost and weakest evidence status (R4). */
+export function dataLine(world: World): string {
+  if (world.workloads.length === 0) return 'No workloads are in this view yet.';
+  const r = rollup(world.workloads);
+  const teams = world.teams.length > 0 ? ` across ${plural(world.teams.length, 'team')}` : '';
+  const spend = r.spend > 0 ? `, ${usd(r.spend)}/mo of spend at ${returnText(r.ratio)}${evid(r.evidence)}` : '';
+  return `In this view: ${plural(world.workloads.length, 'workload')}${teams}${spend}.`;
+}
+
+/** One line on what Frank is, shared by the identity and capability answers. */
+export const WHO_I_AM =
+  "Frank Coster, Ratio's FinOps accountability partner. I'm a deterministic assistant, not a generative AI model: fixed rules compute every answer from the data in this view, so the same question in the same conversation always gets the same answer.";
+
+/** What Frank does, in executive terms. */
+export const WHAT_I_DO = [
+  'Show cost, value and Value / cost for the portfolio, a team, a workload or a model, with the evidence status of every figure',
+  'Rank teams, explain what drives cost and find savings',
+  'Estimate EBITDA impact and the cost of moving a workload to a private open model, with every assumption stated',
+];
+
+/** What Frank does not have or do. */
+export const CANNOT_DO = [
+  'Use data that is not in this view: revenue or EBITDA baselines, hosting costs, open-model quality, measured outcomes, forecasts, or anything per customer or per user',
+  "Act for you: I don't change budgets, approve spend or look anything up live. Approvals stay with the accountable owner",
+  'Guess: when a question is outside the data, I say so instead of making up a number',
+];
+
 export function capabilityAnswer(world: World): Answer {
   const s = sampleNames(world);
-  const r = rollup(world.workloads);
   const body = [
-    'I am a deterministic mock: no LLM, no network, and nothing live. Every answer is computed from the demo dataset and says so, with its assumptions and the evidence status of every Value / cost.',
-    `Data in hand: ${world.workloads.length} workloads${world.teams.length > 0 ? ` across ${world.teams.length} teams` : ''}, ${r.spend > 0 ? `${usd(r.spend)}/mo of spend` : 'spend'}, model list prices, alerts, savings findings. Not in the data: revenue or EBITDA baselines, hosting costs, open-model quality, measured outcomes.`,
-    'Question types:',
-    '• ROI (value, cost, ratio, evidence status, ranked contributors, weakest and strongest) for the portfolio, a team, a workload or a model',
-    '• Team ranking by cost, ROI or savings, and team to workload drill-down',
+    'Who I am:',
+    WHO_I_AM,
+    'What I can answer:',
+    '• ROI for the portfolio, a team, a workload or a model: value, cost, Value / cost, evidence status, and the strongest and weakest contributors',
+    '• Which teams cost the most, return the most or can save the most, and their workloads',
     '• Tokens, cache hit rate and unit cost; alerts; outcome evidence',
-    '• Savings by team or workload; cost drivers inside a team',
-    '• EBITDA impact after spend goes down (the identity is stated; percentages need a baseline you type)',
-    '• Public API to private open model: monthly cost, saving, break-even, payback and cost to realized savings, from labelled illustrative assumptions you can override',
-    'Drill-down ladder: portfolio → team → workload → model, token, cache and unit cost → alerts and outcome evidence. I remember the last subject for follow-ups such as "what about its workloads?" (the last 12 messages only).',
+    '• Savings and cost drivers by team or workload',
+    '• EBITDA impact when spend goes down (percentages need a baseline you type)',
+    '• Moving a workload from a public API to a private open model: monthly cost, saving, break-even and payback, from illustrative assumptions you can override',
+    "What I can't do:",
+    ...CANNOT_DO.map((c) => `• ${c}`),
+    'Follow-ups:',
+    'Go from portfolio to team to workload to model, tokens, alerts and outcome evidence. I remember the last subject for follow-ups such as "what about its workloads?" (the last 12 messages only).',
+    dataLine(world),
   ];
   return {
     header: '**What I can answer**',

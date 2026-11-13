@@ -1,9 +1,10 @@
 // One chat bubble. Role-driven styling (spec §7.3): user = right-aligned body
-// font, assistant = left-accented mono, system = full-width mono (green welcome
+// font, assistant = left-accented formatted prose, system = full-width mono (green welcome
 // / red error). Uses the shared dark surface + purple AI tokens so the panel
 // renders identically on both the executive (light) and technical (dark) surfaces.
 
 import type { AIChatMessage } from '@/store/useStore';
+import { FormattedReply } from './FormattedReply';
 
 export function ChatMessage({ message }: { message: AIChatMessage }) {
   if (message.role === 'user') {
@@ -28,9 +29,11 @@ export function ChatMessage({ message }: { message: AIChatMessage }) {
     );
   }
 
+  // Assistant replies render as readable prose (heading, paragraphs, lists,
+  // source footnote) for an executive audience; the text itself is unchanged.
   return (
-    <div className="whitespace-pre-wrap border-l-2 border-purple pl-3 font-mono text-[11px] leading-relaxed text-sub">
-      {message.content}
+    <div className="border-l-2 border-purple pl-3">
+      <FormattedReply content={message.content} />
     </div>
   );
 }
