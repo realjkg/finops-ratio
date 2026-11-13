@@ -115,7 +115,7 @@ describe('review round 7: inline code on one line is text, not a fence', () => {
   it('a one-line ```code``` span keeps its text', () => {
     const blocks = parseReply('```sql SELECT * FROM t```\nafter');
     expect(blocks).toEqual([
-      { kind: 'paragraph', inline: [{ text: '```sql SELECT * FROM t```', strong: false }] },
+      { kind: 'paragraph', inline: [{ text: 'sql SELECT * FROM t', strong: false, code: true }] },
       { kind: 'paragraph', inline: [{ text: 'after', strong: false }] },
     ]);
     expect(parseReply('```bash npm install```')[0]).toMatchObject({ kind: 'paragraph' });
@@ -131,5 +131,40 @@ describe('review round 7: inline code on one line is text, not a fence', () => {
   it('a ~~~ fence closes only on ~~~, and a fence with an info string still opens', () => {
     expect(parseReply('~~~\na ``` b\n~~~')).toEqual([{ kind: 'pre', text: 'a ``` b' }]);
     expect(parseReply('```ts\nconst a = 1;\n```')).toEqual([{ kind: 'pre', text: 'const a = 1;' }]);
+  });
+});
+
+describe('review round 9 (Copilot): code spans and tilde fences', () => {
+  it('asterisks inside a code span are literal, not bold', () => {
+    expect(parseInline('Use `2 ** 3 ** 2` here')).toEqual([
+      { text: 'Use ', strong: false },
+      { text: '2 ** 3 ** 2', strong: false, code: true },
+      { text: ' here', strong: false },
+    ]);
+    expect(parseInline('**bold** and `a**b**c`')).toEqual([
+      { text: 'bold', strong: true },
+      { text: ' and ', strong: false },
+      { text: 'a**b**c', strong: false, code: true },
+    ]);
+  });
+
+  it('a one-line ```code``` span is inline code with its full text', () => {
+    expect(parseReply('```sql SELECT * FROM t```')).toEqual([
+      { kind: 'paragraph', inline: [{ text: 'sql SELECT * FROM t', strong: false, code: true }] },
+    ]);
+  });
+
+  it('an unmatched backtick stays literal text', () => {
+    expect(parseInline('a ` b **c**')).toEqual([
+      { text: 'a ` b ', strong: false },
+      { text: 'c', strong: true },
+    ]);
+  });
+
+  it('a ~~~ fence may carry "~" in its info string', () => {
+    expect(parseReply('~~~ lang~tag\nx ~ y\n~~~\nafter')).toEqual([
+      { kind: 'pre', text: 'x ~ y' },
+      { kind: 'paragraph', inline: [{ text: 'after', strong: false }] },
+    ]);
   });
 });

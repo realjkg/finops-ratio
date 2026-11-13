@@ -11,6 +11,8 @@
 export interface Inline {
   text: string;
   strong: boolean;
+  /** An inline code span: shown literally, never parsed for **bold**. */
+  code?: boolean;
 }
 
 export type ReplyBlock =
@@ -37,24 +39,68 @@ const SOURCE = /^\s*Source:\s/;
  * and only a bare fence line closes it.
  */
 const FENCE_OPEN = /^\s{0,3}(`{3,}|~{3,})(.*)$/;
-const isOpening = (m: RegExpExecArray): boolean => !m[2].includes(m[1][0]);
+const isOpening = (m: RegExpExecArray): boolean => m[1][0] !== '`' || !m[2].includes('`');
 const isClosing = (line: string, open: string): boolean => {
   const m = /^\s{0,3}(`{3,}|~{3,})\s*$/.exec(line);
   return m !== null && m[1][0] === open[0] && m[1].length >= open.length;
 };
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
 
-/** Split **bold** runs out of a line; anything unmatched stays literal text. */
-export function parseInline(line: string): Inline[] {
-  const out: Inline[] = [];
+/** **bold** runs in text that holds no code span; anything unmatched stays literal. */
+function boldRuns(text: string, out: Inline[]): void {
   let last = 0;
-  for (const m of line.matchAll(BOLD)) {
+  for (const m of text.matchAll(BOLD)) {
     const at = m.index ?? 0;
-    if (at > last) out.push({ text: line.slice(last, at), strong: false });
+    if (at > last) out.push({ text: text.slice(last, at), strong: false });
     out.push({ text: m[1], strong: true });
     last = at + m[0].length;
   }
-  if (last < line.length) out.push({ text: line.slice(last), strong: false });
+  if (last < text.length) out.push({ text: text.slice(last), strong: false });
+}
+
+/**
+ * Split a line into code spans and **bold** runs. Code spans are found first
+ * (CommonMark: a run of N backticks closed by a run of exactly N), so asterisks
+ * inside code stay literal; an unmatched backtick run is plain text.
+ */
+export function parseInline(line: string): Inline[] {
+  const out: Inline[] = [];
+  let text = '';
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== '`') {
+      text += line[i++];
+      continue;
+    }
+    let n = 0;
+    while (line[i + n] === '`') n++;
+    let close = -1;
+    for (let j = i + n; j < line.length; ) {
+      if (line[j] !== '`') {
+        j++;
+        continue;
+      }
+      let m = 0;
+      while (line[j + m] === '`') m++;
+      if (m === n) {
+        close = j;
+        break;
+      }
+      j += m;
+    }
+    if (close < 0) {
+      text += line.slice(i, i + n);
+      i += n;
+      continue;
+    }
+    let body = line.slice(i + n, close);
+    if (body.length > 2 && body.startsWith(' ') && body.endsWith(' ') && body.trim() !== '') body = body.slice(1, -1);
+    boldRuns(text, out);
+    text = '';
+    out.push({ text: body, strong: false, code: true });
+    i = close + n;
+  }
+  boldRuns(text, out);
   return out.length > 0 ? out : [{ text: line, strong: false }];
 }
 

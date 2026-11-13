@@ -313,3 +313,21 @@ describe('review round 6: no overclaims', () => {
     }
   });
 });
+
+describe('review round 9 (Copilot): punctuation and emoji inside idioms', () => {
+  it.each([
+    ['hi 👋 there!', "**Hi — I'm Frank Coster**"],
+    ['hello — there!', "**Hello — I'm Frank Coster**"],
+    ['got… it', '**Got it**'],
+    ['got it!!', '**Got it**'],
+  ])('"%s" after an answer is small talk', async (q, header) => {
+    const r = await ask(['ROI of Sales Copilot', q]);
+    expect(r[1].split('\n')[0], q).toBe(header);
+  });
+
+  it('"how\'s it going?" after an answer is still a follow-up', async () => {
+    const r = await ask(['ROI of Sales Copilot', "how's it going?"]);
+    expect(r[1]).toContain('Sales Copilot');
+    expect(r[1].split('\n')[0]).not.toMatch(/Frank Coster|Doing well/);
+  });
+});

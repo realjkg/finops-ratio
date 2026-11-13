@@ -8,7 +8,11 @@ import { parseReply, type Inline, type ReplyBlock } from './formatReply';
 
 function Text({ inline }: { inline: Inline[] }): ReactNode {
   return inline.map((s, i) =>
-    s.strong ? (
+    s.code ? (
+      <code key={i} className="rounded bg-raised px-1 font-mono text-[12px] text-txt">
+        {s.text}
+      </code>
+    ) : s.strong ? (
       <strong key={i} className="font-semibold text-txt">
         {s.text}
       </strong>

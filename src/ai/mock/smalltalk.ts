@@ -102,12 +102,13 @@ export function smallTalkKinds(text: string): SmallTalkKind[] | null {
 const IDIOMS = /\b(?:(?:hi|hiya|hey|heya|hello),? there|appreciate it|got it)\b/g;
 
 /**
- * Lower-cased text with those idioms blanked, for the back-reference check on small
- * talk. Whitespace is collapsed first so "hi   there" matches; a real reference such
+ * Text with those idioms blanked, for the back-reference check on small talk. It is
+ * normalized exactly like the phrase parser (punctuation, emoji and extra spaces
+ * become one space), so "hi 👋 there!" and "got… it" match; a real reference such
  * as "how is it going?" is left intact.
  */
 export function withoutIdioms(lower: string): string {
-  return lower.replace(/\s+/g, ' ').replace(IDIOMS, ' ');
+  return normalize(lower).replace(IDIOMS, ' ');
 }
 
 /** The greeting word to echo back, capitalized ("good morning" -> "Good morning"). */
