@@ -331,3 +331,16 @@ describe('review round 9 (Copilot): punctuation and emoji inside idioms', () => 
     expect(r[1].split('\n')[0]).not.toMatch(/Frank Coster|Doing well/);
   });
 });
+
+describe('review round 10: the small-talk gate and the analytic path agree on back-references', () => {
+  it.each([
+    ['thanks there 🙏', "**You're welcome**"],
+    ['see you there 👋', '**Goodbye**'],
+  ])('"%s" after an answer stays small talk, never the refusal', async (q, header) => {
+    for (const s of ['ROI of Sales Copilot', 'Show the workloads in Legal']) {
+      const r = await ask([s, q]);
+      expect(r[1].split('\n')[0], `${s} / ${q}`).toBe(header);
+      expect(r[1]).not.toContain(UNSUPPORTED);
+    }
+  });
+});

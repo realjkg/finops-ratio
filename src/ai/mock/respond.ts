@@ -133,7 +133,9 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   const talk = smallTalkKinds(text);
   if (talk && !mentions.some((m) => m.scope.kind !== 'portfolio')) {
     const focus = deriveFocus(messages.slice(0, at), world);
-    const pointsBack = detectReference(withoutIdioms(lower)).kind !== 'none';
+    // Skip small talk only when the raw text and the idiom-masked text both point
+    // back: the analytic path reads the raw text, so the two must agree.
+    const pointsBack = ref.kind !== 'none' && detectReference(withoutIdioms(lower)).kind !== 'none';
     if (!(pointsBack && focus !== null)) return done(smallTalkAnswer(talk, text, world, focus), world);
   }
 
