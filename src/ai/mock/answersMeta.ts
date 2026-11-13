@@ -17,7 +17,7 @@ function sampleNames(world: World): { team: string; workload: string; model: str
 }
 
 /** Questions Frank can always answer, built from the data in hand. */
-function starterQuestions(world: World): string[] {
+export function starterQuestions(world: World): string[] {
   const s = sampleNames(world);
   const qs = ['What is the ROI of the portfolio?'];
   if (world.teams.length > 0) qs.push('Which team is driving the highest cost?', `What is the ROI of the ${s.team} team?`);

@@ -1,6 +1,7 @@
 // The router: one pure function from (messages, context) to a response. No
 // I/O, no clock, no randomness. Order of work:
-//   1. take the last user message (bounded), greeting -> legacy help
+//   1. take the last user message (bounded); "help" -> legacy help; a turn that
+//      is entirely small talk (greeting, thanks, who are you...) -> smalltalk.ts
 //   2. read entity mentions and back-references
 //   3. classify the intent (contract order in intents.ts)
 //   4. resolve the scope: named entity > remembered focus > portfolio
@@ -19,9 +20,10 @@ import { atRisk, costDriver, help, savings, summary } from './legacy';
 import { SOURCE_PREFIX, render } from './format';
 import { scopeLabel } from './calc';
 import { buildWorld, legacyContext } from './world';
+import { smallTalkAnswer, smallTalkKinds } from './smalltalk';
 import type { Answer, Scope, World } from './types';
 
-const GREETING = /^\s*(?:help|hi|hello|hey|\?)\W*$/;
+const LEGACY_HELP = /^\s*(?:help|\?)\W*$/;
 
 function reply(content: string, referenced: string[] = []): AIResponse {
   return { message: { role: 'assistant', content }, initiativesReferenced: referenced, provider: 'mock' };
@@ -116,9 +118,11 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   if (typeof raw !== 'string') return help();
   const text = raw.slice(0, MAX_TEXT);
   const lower = text.toLowerCase();
-  if (GREETING.test(lower)) return help();
+  if (LEGACY_HELP.test(lower)) return help();
 
   const world = buildWorld(context);
+  const talk = smallTalkKinds(text);
+  if (talk) return done(smallTalkAnswer(talk, text, world, deriveFocus(messages.slice(0, at), world)), world);
   const mentions = findMentions(text, world);
   const subject = pickSubject(mentions);
   const explicit = subject !== null && subject.scope.kind !== 'portfolio';
