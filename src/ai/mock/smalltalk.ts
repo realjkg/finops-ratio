@@ -1,5 +1,5 @@
 // Small talk: deterministic replies to turns that are ENTIRELY conversational
-// (greetings, how-are-you, thanks, acknowledgements, goodbyes, "who are you",
+// (greetings, how-are-you, thanks, acknowledgments, goodbyes, "who are you",
 // "where do I start"). A message that carries anything else, a question above
 // all, is not small talk and goes to the analytic router unchanged, so every
 // existing answer stays byte for byte the same.
