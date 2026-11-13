@@ -79,9 +79,9 @@ const INHERITABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 
 /** Frank's surname in any form: "Frank Coster", "Frank Costers", "frankcoster", "Coster", possessives. */
 const NAME_RX = /\b(?:frank\s*)?coster(?:(['’]s)|s)?\b/gi;
 const FRANK = "(?:frank(?:\\s*coster(?:['\u2019]s|s)?)?|coster(?:['\u2019]s|s)?)";
-/** Frank addressed by name at the start ("Coster, ...") or at the end ("..., Frank?"). */
+/** Frank addressed by name at the start ("Coster, ...") or at the end ("..., Frank?", "..., Frank 🙂"). */
 const LEADING_ADDRESS = new RegExp(`^\\s*${FRANK}\\s*,`, 'i');
-const TRAILING_ADDRESS = new RegExp(`,\\s*${FRANK}(?=\\s*[?.!]*\\s*$)`, 'i');
+const TRAILING_ADDRESS = new RegExp(`,\\s*${FRANK}[\\s\\p{P}\\p{S}\\p{M}\\p{Cf}]*$`, 'iu'); // emoji sequences included
 
 /**
  * The typed text with the words that address Frank blanked out (same length, so entity

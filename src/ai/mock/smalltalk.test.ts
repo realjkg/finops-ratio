@@ -511,6 +511,9 @@ describe('Copilot review of cc1ade4: Frank\'s name never changes which data is n
     ['Frank Coster, ROI of Frank Coster', /called "Frank Coster"/],
     ['ROI of Finance, Coster?', /called "Finance"/],
     ['What is the ROI of Acme Widgets, Frank?', /called "Acme Widgets"/],
+    ['ROI of Finance, Frank 🙂', /called "Finance"/],
+    ['ROI of Finance, Frank)', /called "Finance"/],
+    ['ROI of Finance, Frank 👍🏽❤️', /called "Finance"/],
   ])('%s: addressing Frank never hides the name asked about', async (q, rx) => {
     expect(await last([q]), q).toMatch(rx);
   });
