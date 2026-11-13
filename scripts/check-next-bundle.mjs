@@ -3,11 +3,12 @@
 // manual grep; Slice 2 makes it a script and a CI step, because a Next route
 // now legitimately imports the Postgres driver on the SERVER).
 //
-// Rules, on a Next 16 (Turbopack) production build:
+// Rules, on a Next 16 production build (Turbopack, or webpack with `next build --webpack`):
 //   1. CLIENT (.next/static/**, every file the browser can download, source
 //      maps included): no driver, ingestion, ledger, reader or worker marker.
 //   2. SERVER entries (.next/server/pages/**.js) load chunks with lines
-//      `R.c("server/chunks/<file>")`. A server .js file holding READER code
+//      `R.c("server/chunks/<file>")` (Turbopack) or `X(0,[<id>,...],...)`, which
+//      loads .next/server/chunks/<id>.js (webpack). A server .js file holding READER code
 //      must be a reader route itself (READER_ENTRIES: the costs, report-facts and
 //      engagement-report routes) or a chunk ONLY reader routes load.
 //   3. Worker-only code (S3 source, fake source, CSV parser, S3 SDK, worker
@@ -90,6 +91,17 @@ export const CLIENT_FORBIDDEN = [
 const PG_TRACE = /(^|\/)node_modules\/pg(-[a-z-]+)?\//;
 const WORKER_TRACE = /(^|\/)node_modules\/(@aws-sdk\/|csv-parse\/)/;
 const CHUNK_REF = /R\.c\("server\/(chunks\/[^"]+)"\)/g;
+/** webpack server runtime: `b.X(0,[5030,7718],()=>b(b.s=61320))` loads server/chunks/<id>.js. */
+const WEBPACK_CHUNK_REF = /\.X\(0,\s*\[([0-9,\s]+)\]/g;
+
+/** Every chunk (relative to .next/server) a server entry loads, in either bundler's syntax. */
+function chunkRefs(text) {
+  const refs = [...text.matchAll(CHUNK_REF)].map((m) => m[1]);
+  for (const m of text.matchAll(WEBPACK_CHUNK_REF)) {
+    for (const id of m[1].split(',').map((x) => x.trim()).filter(Boolean)) refs.push(`chunks/${id}.js`);
+  }
+  return refs;
+}
 
 function walk(dir, acc = []) {
   if (!fs.existsSync(dir)) return acc;
@@ -138,8 +150,8 @@ export function checkNextBundle(nextDir, { fontHashes = [] } = {}) {
   const entries = walk(path.join(serverDir, 'pages')).filter((f) => f.endsWith('.js'));
   const loadedBy = new Map(); // chunk abs path -> entries (rel)
   for (const e of entries) {
-    for (const m of fs.readFileSync(e, 'utf8').matchAll(CHUNK_REF)) {
-      const chunk = path.join(serverDir, m[1]);
+    for (const ref of chunkRefs(fs.readFileSync(e, 'utf8'))) {
+      const chunk = path.join(serverDir, ref);
       if (!loadedBy.has(chunk)) loadedBy.set(chunk, new Set());
       loadedBy.get(chunk).add(rel(e));
     }
