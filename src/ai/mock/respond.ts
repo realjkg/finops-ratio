@@ -124,9 +124,30 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   // "Costers" team) is that entity's name and is never rewritten.
   const sliced = raw.slice(0, MAX_TEXT);
   const named = findMentions(sliced, world).filter((m) => m.scope.kind !== 'portfolio');
-  const text = sliced.replace(/\b(?:frank\s*)?coster(?:(['’]s)|s)?\b/gi, (m: string, possessive: string | undefined, at: number) =>
-    named.some((n) => n.start < at + m.length && at < n.end) ? m : possessive ? "Frank's" : 'Frank',
-  );
+  // Each rewrite is recorded so a name quoted back to the user uses the words they typed.
+  const edits: Array<{ from: number; to: number; at: number; len: number }> = [];
+  let shift = 0;
+  const text = sliced.replace(/\b(?:frank\s*)?coster(?:(['’]s)|s)?\b/gi, (m: string, possessive: string | undefined, at: number) => {
+    if (named.some((n) => n.start < at + m.length && at < n.end)) return m;
+    const out = possessive ? "Frank's" : 'Frank';
+    edits.push({ from: at, to: at + m.length, at: at + shift, len: out.length });
+    shift += out.length - m.length;
+    return out;
+  });
+  const typed = (name: string): string => {
+    const i = text.indexOf(name);
+    if (edits.length === 0 || i < 0) return name;
+    const toRaw = (p: number, end: boolean): number => {
+      let raw = p;
+      for (const e of edits) {
+        if (end ? p <= e.at : p < e.at) break;
+        if (end ? p <= e.at + e.len : p < e.at + e.len) return end ? e.to : e.from;
+        raw = p + e.to - e.at - e.len;
+      }
+      return raw;
+    };
+    return sliced.slice(toRaw(i, false), toRaw(i + name.length, true));
+  };
   const lower = text.toLowerCase();
   if (LEGACY_HELP.test(lower)) return help();
 
@@ -177,10 +198,12 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   // An unrecognized name is reported plainly (before any back-reference or default scope), also next
   // to a recognized entity ("ROI of Legal and the Finance team"); it is never silently substituted.
   if (intent !== 'forecast' && intent !== 'capability') {
-    const team = unknownTeam(text, mentions);
+    const found = unknownTeam(text, mentions);
+    const team = found && typed(found);
     if (team && !explicit) return reply(unknownNameText(world, { name: team, team: true }));
     const lone = !subject && !backRef && (NAMEABLE.has(intent) || intent === 'legacy' || intent === 'savings' || intent === 'cost_driver');
-    const name = team || !(explicit || lone) ? null : unknownCapitalized(text, explicit ? mentions : []);
+    const capitalized = team || !(explicit || lone) ? null : unknownCapitalized(text, explicit ? mentions : []);
+    const name = capitalized && typed(capitalized);
     if (team) notes.push(`Note: I don't have a team called ${team}; ${only}.`);
     else if (name && explicit) notes.push(`Note: I don't have a team, workload or model called "${name}"; ${only}.`);
     else if (name) return reply(unknownNameText(world, { name, team: false }));

@@ -470,3 +470,16 @@ describe('review round 23: a team or workload named "Coster" keeps its name', ()
     expect((await last(['Frank Coster'], CUSTOM)).split('\n')[0]).toBe("**Hi — I'm Frank Coster**");
   });
 });
+
+describe('review round 24: an unknown name is quoted as the user typed it', () => {
+  it.each([
+    ['ROI of Coster Pipeline', /called "Coster Pipeline"/],
+    ['What is the ROI of the Costers team?', /team called Costers\b/],
+    ['Coster, what is the ROI of Coster Pipeline?', /called "Coster Pipeline"/],
+    ["Frank Coster's view: ROI of Coster Pipeline", /called "Coster Pipeline"/],
+  ])('%s', async (q, rx) => {
+    const t = await last([q]);
+    expect(t, q).toMatch(rx);
+    expect(t, q).not.toMatch(/called "?Frank/);
+  });
+});
