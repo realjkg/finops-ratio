@@ -203,3 +203,55 @@ describe('review round 11: a stray backtick in a long reply stays fast and loses
     expect(blocks).toHaveLength(5001);
   });
 });
+
+describe('review round 12 (Copilot): multi-line spans keep exact delimiters and spaces', () => {
+  const codeOf = (s: string) =>
+    parseReply(s).flatMap((b) => (b.kind === 'paragraph' ? b.inline.filter((x) => x.code).map((x) => x.text) : []));
+
+  it('spaces before a line break inside a span are kept (the break becomes one space)', () => {
+    expect(codeOf('run `printf "a  \nb"` now')).toEqual(['printf "a   b"']);
+  });
+
+  it('a trailing unmatched backtick of the same length does not stop the span from closing', () => {
+    expect(codeOf('see `alpha\n2 ** 3 ** 2\nomega` and a stray `')).toEqual(['alpha 2 ** 3 ** 2 omega']);
+  });
+
+  it('a new span opened on the closing line is found too', () => {
+    // CommonMark strips one space only when the content starts AND ends with one, so "x y " keeps it.
+    expect(codeOf('see `alpha\n2 ** 3 ** 2\nomega` then ``x\ny `` done')).toEqual(['alpha 2 ** 3 ** 2 omega', 'x y ']);
+    expect(codeOf('a `` x\ny `` b')).toEqual(['x y']);
+  });
+
+  it('lines not joined by a span stay separate paragraphs, with their text', () => {
+    const blocks = parseReply('one `a` two\nthree **b**');
+    expect(blocks.map((b) => b.kind)).toEqual(['paragraph', 'paragraph']);
+  });
+
+  it('adversarial stray backticks stay linear', () => {
+    const lines = Array.from({ length: 4000 }, (_, n) => `l${n} ${'`'.repeat((n % 7) + 1)} x`);
+    const t0 = performance.now();
+    parseReply(lines.join('\n'));
+    expect(performance.now() - t0).toBeLessThan(1500);
+  });
+});
+
+describe('review round 13: span matching and paragraph splitting are linear', () => {
+  it('a 1 MB reply of unclosable backtick runs renders quickly', () => {
+    const lines = Array.from({ length: 12000 }, (_, n) => `row ${n} ${'`'.repeat((n % 50) + 1)} ${'x'.repeat(50)}`);
+    const text = lines.join('\n');
+    expect(text.length).toBeGreaterThan(900_000);
+    const t0 = performance.now();
+    const blocks = parseReply(text);
+    expect(performance.now() - t0).toBeLessThan(700);
+    // Runs of equal length pair up across lines (CommonMark), so count words, not blocks: none is lost.
+    const words = blocks.flatMap((b) => (b.kind === 'paragraph' ? b.inline.map((x) => x.text) : [])).join(' ');
+    expect(words.match(/\brow \d+\b/g)).toHaveLength(12000);
+  });
+
+  it('one long line with increasing run lengths renders quickly', () => {
+    const line = Array.from({ length: 600 }, (_, n) => `${'`'.repeat(n + 1)} w`).join(' ');
+    const t0 = performance.now();
+    parseInline(line);
+    expect(performance.now() - t0).toBeLessThan(150);
+  });
+});

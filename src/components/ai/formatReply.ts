@@ -58,8 +58,14 @@ function boldRuns(text: string, out: Inline[]): void {
   if (last < text.length) out.push({ text: text.slice(last), strong: false });
 }
 
-/** Length of the first backtick run in `text` that no run of the same length closes, or 0. */
-function openTickRun(text: string): number {
+/**
+ * Code spans in `text` as [open, close) delimiter positions (CommonMark): a run of
+ * N backticks is closed by the next run of exactly N; a run with no such closer is
+ * literal text. Linear: every backtick run is collected once, and each opener finds
+ * its closer through a per-length cursor that only moves forward.
+ */
+function codeSpans(text: string): Array<{ start: number; end: number; ticks: number }> {
+  const runs: Array<{ at: number; n: number }> = [];
   for (let i = 0; i < text.length; ) {
     if (text[i] !== '`') {
       i++;
@@ -67,69 +73,48 @@ function openTickRun(text: string): number {
     }
     let n = 0;
     while (text[i + n] === '`') n++;
-    let closed = -1;
-    for (let j = i + n; j < text.length; ) {
-      if (text[j] !== '`') {
-        j++;
-        continue;
-      }
-      let m = 0;
-      while (text[j + m] === '`') m++;
-      if (m === n) {
-        closed = j;
-        break;
-      }
-      j += m;
-    }
-    if (closed < 0) return n;
-    i = closed + n;
+    runs.push({ at: i, n });
+    i += n;
   }
-  return 0;
+  const byLength = new Map<number, number[]>();
+  runs.forEach((r, k) => {
+    const list = byLength.get(r.n);
+    if (list) list.push(k);
+    else byLength.set(r.n, [k]);
+  });
+  const cursor = new Map<number, number>();
+  const spans: Array<{ start: number; end: number; ticks: number }> = [];
+  for (let k = 0; k < runs.length; k++) {
+    const { at, n } = runs[k];
+    const same = byLength.get(n) as number[];
+    let c = cursor.get(n) ?? 0;
+    while (c < same.length && same[c] <= k) c++;
+    cursor.set(n, c);
+    if (c >= same.length) continue; // no closer: literal backticks
+    const close = same[c];
+    spans.push({ start: at, end: runs[close].at + n, ticks: n });
+    k = close; // runs inside the span are code, not delimiters
+  }
+  return spans;
 }
 
 /**
- * Split a line into code spans and **bold** runs. Code spans are found first
- * (CommonMark: a run of N backticks closed by a run of exactly N), so asterisks
- * inside code stay literal; an unmatched backtick run is plain text.
+ * Split text into code spans and **bold** runs. Code spans are found first, so
+ * asterisks inside code stay literal; an unmatched backtick run is plain text.
+ * Line breaks inside a span become spaces and every other space is kept; line
+ * breaks in plain text become spaces (CommonMark soft breaks).
  */
 export function parseInline(line: string): Inline[] {
   const out: Inline[] = [];
-  let text = '';
-  let i = 0;
-  while (i < line.length) {
-    if (line[i] !== '`') {
-      text += line[i++];
-      continue;
-    }
-    let n = 0;
-    while (line[i + n] === '`') n++;
-    let close = -1;
-    for (let j = i + n; j < line.length; ) {
-      if (line[j] !== '`') {
-        j++;
-        continue;
-      }
-      let m = 0;
-      while (line[j + m] === '`') m++;
-      if (m === n) {
-        close = j;
-        break;
-      }
-      j += m;
-    }
-    if (close < 0) {
-      text += line.slice(i, i + n);
-      i += n;
-      continue;
-    }
-    let body = line.slice(i + n, close).replace(/\n/g, ' ');
+  let last = 0;
+  for (const span of codeSpans(line)) {
+    boldRuns(line.slice(last, span.start), out);
+    let body = line.slice(span.start + span.ticks, span.end - span.ticks).replace(/\n/g, ' ');
     if (body.length > 2 && body.startsWith(' ') && body.endsWith(' ') && body.trim() !== '') body = body.slice(1, -1);
-    boldRuns(text, out);
-    text = '';
     out.push({ text: body, strong: false, code: true });
-    i = close + n;
+    last = span.end;
   }
-  boldRuns(text, out);
+  boldRuns(line.slice(last), out);
   for (const seg of out) if (!seg.code) seg.text = seg.text.replace(/\n/g, ' ');
   return out.length > 0 ? out : [{ text: line, strong: false }];
 }
@@ -216,26 +201,31 @@ export function parseReply(content: string): ReplyBlock[] {
     else if (SOURCE.test(line)) blocks.push({ kind: 'source', inline: parseInline(line.trim()) });
     else if (LABEL.test(line)) blocks.push({ kind: 'label', inline: parseInline(line.trim().replace(/:$/, '')) });
     else {
-      // A code span left open on this line continues over the following plain
-      // paragraph lines (never into a list, table, fence, heading or blank
-      // line) until a backtick run of the same length closes it (CommonMark).
-      let text = line.trim();
-      const open = openTickRun(text);
-      if (open > 0) {
-        let j = i + 1;
-        const joined: string[] = [];
-        // Bounded lookahead keeps a reply with a stray backtick linear in practice.
-        while (j < lines.length && j - i <= 40 && isPlainLine(lines[j].trimEnd())) {
-          joined.push(lines[j].trim());
-          if (openTickRun([text, ...joined].join('\n')) !== open) break;
-          j++;
+      // A run of plain paragraph lines (no list, table, fence, heading, label or
+      // blank line between them) is read once. Without a backtick each line is its
+      // own paragraph, as before. With one, the exact code spans over the whole run
+      // decide where paragraphs end: at every line break outside a span, so a span
+      // can continue over lines (CommonMark). Leading indentation is dropped; spaces
+      // inside a span are kept. Each line is scanned once, so this is linear.
+      let end = i + 1;
+      while (end < lines.length && isPlainLine(lines[end].trimEnd())) end++;
+      const run = lines.slice(i, end);
+      if (!run.some((l) => l.includes('`'))) {
+        for (const l of run) blocks.push({ kind: 'paragraph', inline: parseInline(l.trim()) });
+      } else {
+        const joined = run.map((l) => l.replace(/^\s+/, '')).join('\n');
+        const spans = codeSpans(joined);
+        let from = 0;
+        let s = 0;
+        for (let at = joined.indexOf('\n'); at >= 0; at = joined.indexOf('\n', at + 1)) {
+          while (s < spans.length && spans[s].end <= at) s++;
+          if (s < spans.length && spans[s].start < at) continue; // inside a span
+          blocks.push({ kind: 'paragraph', inline: parseInline(joined.slice(from, at).trimEnd()) });
+          from = at + 1;
         }
-        if (j < lines.length && joined.length > 0 && openTickRun([text, ...joined].join('\n')) !== open) {
-          text = [text, ...joined].join('\n');
-          i = j;
-        }
+        blocks.push({ kind: 'paragraph', inline: parseInline(joined.slice(from).trimEnd()) });
       }
-      blocks.push({ kind: 'paragraph', inline: parseInline(text) });
+      i = end - 1;
     }
   }
   flush();
