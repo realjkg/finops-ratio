@@ -77,10 +77,10 @@ export function recognitionLanguage(explicit?: string): string | undefined {
 // Each browser error gets its own hint: "access was denied" is shown only when the
 // site permission really is the cause (owner report, iPhone Safari).
 export const MIC_PERMISSION_DENIED =
-  'Microphone access is blocked for this site — allow it in your browser settings (on iPhone: aA > Website Settings > Microphone), then try again.';
+  "The microphone or speech recognition is blocked for this site — allow it in your browser's site settings (on iPhone: tap the page menu in Safari's address bar > Website Settings > Microphone), then try again.";
 export const SPEECH_SERVICE_UNAVAILABLE =
-  "Voice input isn't available in this browser right now. On iPhone, check that Dictation is on (Settings > General > Keyboard), or type your question.";
-export const NO_MICROPHONE = 'No microphone was found — connect one or type your question.';
+  "Voice input isn't available in this browser right now. On iPhone, check that Siri or Dictation is turned on in Settings, or type your question.";
+export const NO_MICROPHONE = "Couldn't use the microphone — it may be missing or in use by another app. Try again or type your question.";
 export const SPEECH_SERVICE_UNREACHABLE =
   "Voice input couldn't reach the browser's speech service — check your connection or type your question.";
 export const VOICE_INPUT_FAILED = 'Voice input did not work — try again.';

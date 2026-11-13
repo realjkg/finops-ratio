@@ -9,6 +9,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* iOS Safari zooms into a focused text field whose font is below 16px and stays zoomed,
+   which pushes full-width panels off screen (owner report, Frank panel on iPhone). On
+   touch screens every text field is at least 16px, whatever the Text setting, the
+   orientation or the field's own size class; desktops keep the compact sizes. */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='button']):not([type='submit']):not([type='reset']):not([type='color']):not([type='file']):not([type='image']),
+  textarea,
+  select {
+    font-size: max(16px, 1em) !important;
+  }
+}
+
 /* Theme tokens. Values mirror src/theme/themes.ts (parity enforced by
    src/theme/tokens.test.ts); Tailwind colors read the --c-* channel triplets.
    No data-theme attribute = no user choice yet: DEFAULT_THEME (Light), or
