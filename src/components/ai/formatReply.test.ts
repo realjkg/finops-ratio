@@ -255,3 +255,23 @@ describe('review round 13: span matching and paragraph splitting are linear', ()
     expect(performance.now() - t0).toBeLessThan(150);
   });
 });
+
+describe('review round 14 (Copilot summary): wrapped list items stay in their item', () => {
+  const items = (s: string) =>
+    parseReply(s).map((b) => (b.kind === 'list' ? { list: b.items.map((i) => i.map((x) => x.text).join('')), numbers: b.ordered ? b.numbers : null } : { [b.kind]: true }));
+
+  it('an indented line continues the item above it', () => {
+    expect(items('1. Foo\n   continues here\n2. Bar')).toEqual([{ list: ['Foo continues here', 'Bar'], numbers: [1, 2] }]);
+    expect(items('- item one\n  wraps onto two\n- item two')).toEqual([{ list: ['item one wraps onto two', 'item two'], numbers: null }]);
+  });
+
+  it('an indented paragraph after a blank line stays in the item, and the list continues', () => {
+    expect(items('- a\n\n  more about a\n- b')).toEqual([{ list: ['a more about a', 'b'], numbers: null }]);
+    expect(items('1. a\n\n2. b')).toEqual([{ list: ['a', 'b'], numbers: [1, 2] }]);
+  });
+
+  it('an unindented line after a list is still its own paragraph (mock replies rely on this)', () => {
+    expect(items('• one\nIn this view: 3 workloads.')).toEqual([{ list: ['one'], numbers: null }, { paragraph: true }]);
+    expect(items('- a\n\nAfter the list.')).toEqual([{ list: ['a'], numbers: null }, { paragraph: true }]);
+  });
+});

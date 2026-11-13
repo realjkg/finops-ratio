@@ -163,7 +163,17 @@ export function parseReply(content: string): ReplyBlock[] {
       continue;
     }
     if (line.trim() === '') {
-      flush();
+      // A blank line does not end an open list: an indented paragraph or another
+      // item of the same kind may follow (a loose list). Anything else ends it.
+      if (!list) flush();
+      continue;
+    }
+
+    // An indented line that is not itself a list item continues the last item
+    // ("1. Foo" / "   continues here"). Unindented lines stay their own paragraph.
+    const open: OpenList | null = list;
+    if (open && /^(?:\s{2,}|\t)\S/.test(line) && !NUMBERED.test(line) && !BULLET.test(line)) {
+      open.items[open.items.length - 1].push({ text: ' ', strong: false }, ...parseInline(line.trim()));
       continue;
     }
 
