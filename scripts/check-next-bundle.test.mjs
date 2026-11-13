@@ -1,5 +1,5 @@
 // Tests of the `.next` bundle check (`npm run check:bundle`) on synthetic
-// build trees shaped like a Next 16 (Turbopack) production build:
+// build trees shaped like a Next 16 production build (Turbopack; B9 covers webpack):
 //   .next/static/**                         — everything the browser can download
 //   .next/server/pages/**.js                — server entries: R.c("server/chunks/<file>") lines
 //   .next/server/chunks/*.js                — server chunks
@@ -231,5 +231,61 @@ describe('B8 test-only conformance mocks stay out of every bundle (ADR-0001 slic
     const client = cleanTree();
     write(client, 'static/chunks/mock.js', 'const o="ratio-conformance-test-only"');
     expect(problemsOf(client)).toEqual(['client file static/chunks/mock.js contains ratio-conformance-test-only']);
+  });
+});
+
+// A webpack production build (`next build --webpack`) loads server chunks through the webpack
+// runtime: `var c=b.X(0,[5030,7718],()=>b(b.s=61320))`, with chunks at .next/server/chunks/<id>.js.
+const wpEntry = (ids) => `var b=require("../../../../webpack-api-runtime.js");b.C(a);var c=b.X(0,[${ids.join(',')}],()=>b(b.s=61320));module.exports=c`;
+
+/** The clean tree's shape as webpack emits it: the costs route loads reader chunk 7718. */
+function webpackTree() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ratio-bundle-wp-'));
+  dirs.push(root);
+  write(root, 'static/chunks/app.js', 'console.log("ui")');
+  write(root, `server/${COSTS_ENTRY}`, wpEntry([5030, 7718]));
+  write(root, `server/${COSTS_ENTRY}.nft.json`, nft(['../../../../../../node_modules/pg/lib/index.js']));
+  write(root, 'server/chunks/7718.js', `SELECT 1 FROM ratio.cost_facts_published; set_config('ratio.tenant_id'); pg_auth_members`);
+  write(root, 'server/chunks/5030.js', 'export const gateway = 1');
+  write(root, 'server/pages/api/v1/connectors.js', wpEntry([5030]));
+  write(root, 'server/pages/index.js', wpEntry([5030]));
+  return root;
+}
+
+describe('B9 webpack builds are read too (`next build --webpack`)', () => {
+  it('a reader chunk loaded through X(0,[ids]) only by reader entries passes', () => {
+    expect(problemsOf(webpackTree())).toEqual([]);
+  });
+
+  it('the same reader chunk also loaded by another entry fails and names that entry', () => {
+    const root = webpackTree();
+    write(root, 'server/pages/api/v1/connectors.js', wpEntry([5030, 7718]));
+    expect(problemsOf(root).join('\n')).toMatch(/server\/chunks\/7718\.js.*connectors/);
+  });
+
+  it('a reader chunk no entry loads still fails, and ids that are prefixes do not match (718 is not 7718)', () => {
+    const root = webpackTree();
+    write(root, 'server/chunks/9001.js', 'cost_facts_published');
+    write(root, 'server/pages/api/v1/connectors.js', wpEntry([5030, 900, 718]));
+    const out = problemsOf(root).join('\n');
+    expect(out).toMatch(/server\/chunks\/9001\.js.*no entry/);
+    expect(out).not.toMatch(/7718/);
+  });
+});
+
+describe('B10 webpack chunk loading the check cannot read fails closed', () => {
+  it('flags an entry whose .X(<n>, ...) call does not parse as numeric ids with first argument 0', () => {
+    const named = webpackTree();
+    write(named, 'server/pages/api/v1/connectors.js', 'var b=require("../../../../webpack-api-runtime.js");var c=b.X(0,["vendors-reader"],()=>b(b.s=1))');
+    expect(problemsOf(named).join('\n')).toMatch(/connectors\.js loads chunks in a form the check cannot read/);
+    const otherArg = webpackTree();
+    write(otherArg, 'server/pages/index.js', 'var b=require("../../webpack-runtime.js");var c=b.X(1,[7718],()=>b(b.s=1))');
+    expect(problemsOf(otherArg).join('\n')).toMatch(/index\.js loads chunks in a form the check cannot read/);
+  });
+
+  it('ordinary minified .X( property calls and parsed loads are not flagged', () => {
+    const root = webpackTree();
+    write(root, 'server/pages/index.js', `${wpEntry([5030])};const z=a.X(foo);`);
+    expect(problemsOf(root)).toEqual([]);
   });
 });
