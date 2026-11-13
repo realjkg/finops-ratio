@@ -420,3 +420,30 @@ describe('review round 21 (Copilot summary): questions about Frank Coster are ab
     expect(await last(['Frank Coster, what is the ROI of the portfolio?'])).toBe(await last(['What is the ROI of the portfolio?']));
   });
 });
+
+describe('review round 22: name variants, possessives and the bare name', () => {
+  const IDENTITY = "**I'm Frank Coster, Ratio's FinOps accountability partner**";
+
+  it.each(['Who is Frank Costers?', 'who is frankcoster', 'Who is Coster?', "What is Frank Coster's role?", "What is Frank Coster's job?", "Frank's role?"])(
+    '%s gets the identity answer',
+    async (q) => {
+      expect((await last([q])).split('\n')[0], q).toBe(IDENTITY);
+    },
+  );
+
+  it.each(['Coster?', 'Mr Coster, hi'])('%s never gets a cost answer', async (q) => {
+    expect(await last([q]), q).not.toMatch(/cost driver|Highest-cost|Cost drivers/);
+  });
+
+  it.each([['Frank', "**Hi — I'm Frank Coster**"], ['Frank Coster', "**Hi — I'm Frank Coster**"], ['frank coster!', "**Hi — I'm Frank Coster**"], ['Frank?', "**Hi — I'm Frank Coster**"]])(
+    'the bare name "%s" is a greeting',
+    async (q, header) => {
+      expect((await last([q])).split('\n')[0], q).toBe(header);
+    },
+  );
+
+  it('words that really mean cost still route to cost', async () => {
+    expect(await last(['How costly is Legal?'])).toMatch(/Legal/);
+    expect((await last(['Which team is driving the highest cost?'])).split('\n')[0]).toMatch(/Highest-cost team/);
+  });
+});

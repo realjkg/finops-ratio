@@ -116,8 +116,13 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   if (at < 0) return help();
   const raw = messages[at].content;
   if (typeof raw !== 'string') return help();
-  // Frank's own surname must never route a question to cost ("Coster" contains "cost").
-  const text = raw.slice(0, MAX_TEXT).replace(/\bfrank\s+coster\b/gi, 'Frank');
+  // Frank's own surname must never route a question to cost ("Coster" contains "cost"):
+  // every form of the name ("Frank Coster", "Frank Costers", "frankcoster", "Coster")
+  // becomes "Frank", and the possessive "Frank Coster's" becomes "Frank's".
+  const text = raw
+    .slice(0, MAX_TEXT)
+    .replace(/\bfrank\s*coster(?:(['’]s)|s)?\b/gi, (_m, possessive?: string) => (possessive ? "Frank's" : 'Frank'))
+    .replace(/\bcoster(?:(['’]s)|s)?\b/gi, (_m, possessive?: string) => (possessive ? "Frank's" : 'Frank'));
   const lower = text.toLowerCase();
   if (LEGACY_HELP.test(lower)) return help();
 

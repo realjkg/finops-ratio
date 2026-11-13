@@ -20,7 +20,7 @@ const MAX_SMALL_TALK = 120;
 
 /** Phrases per kind, matched at the start of the remaining text, longest first within each kind. */
 const PHRASES: ReadonlyArray<[SmallTalkKind, RegExp]> = [
-  ['identity', /^(?:who are you|what are you|(?:who|what) (?:is|s) frank(?: coster)?|introduce yourself|tell me about (?:yourself|you|frank(?: coster)?)|what is your name|what s your name|whats your name|are you frank(?: coster)?|(?:are you|is frank(?: coster)?) (?:an? )?(?:ai|bot|robot|chatbot|real|human|person|llm|chatgpt|language model)|who (?:made|built|created|owns) (?:you|frank(?: coster)?))\b/],
+  ['identity', /^(?:(?:what (?:is|s) )?(?:your|frank s) (?:role|job|purpose)|who are you|what are you|(?:who|what) (?:is|s) frank(?: coster)?|introduce yourself|tell me about (?:yourself|you|frank(?: coster)?)|what is your name|what s your name|whats your name|are you frank(?: coster)?|(?:are you|is frank(?: coster)?) (?:an? )?(?:ai|bot|robot|chatbot|real|human|person|llm|chatgpt|language model)|who (?:made|built|created|owns) (?:you|frank(?: coster)?))\b/],
   ['start', /^(?:where (?:do|should|can) i (?:start|begin)|what (?:should|can|could) i ask(?: you)?|how do i use (?:this|you|ratio|frank)|how does this work|how do you work|can you help(?: me)?|help me(?: out)?|i need help|what do you do|what (?:can|does) (?:you|frank(?: coster)?) do)\b/],
   ['how_are_you', /^(?:how are you(?: doing)?(?: today)?|how are things|how s it going|hows it going|how is it going|how have you been|what s up|whats up|sup)\b/],
   ['greeting', /^(?:good (?:morning|afternoon|evening|day)|hi there|hello there|hey there|hiya|howdy|heya|hello|hey|hi|yo|greetings)\b/],
@@ -79,7 +79,8 @@ export function smallTalkKinds(text: string): SmallTalkKind[] | null {
   if (/[\p{N}%$€£]/u.test(text)) return null;
   const all = normalize(text);
   if (all === '' || all === 'help') return null;
-  const seq = parse(all);
+  // The bare name ("Frank", "Frank Coster!") is someone getting Frank's attention: a greeting.
+  const seq = /^frank(?: coster)?$/.test(all) ? (['greeting'] as SmallTalkKind[]) : parse(all);
   if (!seq || seq.length === 0) return null;
   const kinds = seq.filter((k, i) => seq.indexOf(k) === i);
   // "that's all?", "ok?!", "¿ok": a question mark with only acknowledgments, thanks or
