@@ -127,7 +127,8 @@ function isPlainLine(line: string): boolean {
   return ![TABLE_ROW, NUMBERED, BULLET, HEADING_MD, WHOLE_BOLD, SOURCE, LABEL].some((rx) => rx.test(line));
 }
 
-type OpenList = { ordered: false; items: Inline[][] } | { ordered: true; items: Inline[][]; numbers: number[] };
+/** Items keep their raw text until the list closes, so a code span can run over wrapped lines. */
+type OpenList = { ordered: false; items: string[] } | { ordered: true; items: string[]; numbers: number[] };
 
 export function parseReply(content: string): ReplyBlock[] {
   const blocks: ReplyBlock[] = [];
@@ -135,7 +136,11 @@ export function parseReply(content: string): ReplyBlock[] {
   const first = lines.findIndex((l) => l.trim() !== '');
   let list: OpenList | null = null;
   const flush = () => {
-    if (list) blocks.push(list.ordered ? { kind: 'list', ordered: true, items: list.items, numbers: list.numbers } : { kind: 'list', ordered: false, items: list.items });
+    if (list) {
+      // Each item is parsed once, with its wrapped lines, so spans keep their text.
+      const items = list.items.map((raw) => parseInline(raw.trimEnd()));
+      blocks.push(list.ordered ? { kind: 'list', ordered: true, items, numbers: list.numbers } : { kind: 'list', ordered: false, items });
+    }
     list = null;
   };
 
@@ -173,7 +178,7 @@ export function parseReply(content: string): ReplyBlock[] {
     // ("1. Foo" / "   continues here"). Unindented lines stay their own paragraph.
     const open: OpenList | null = list;
     if (open && /^(?:\s{2,}|\t)\S/.test(line) && !NUMBERED.test(line) && !BULLET.test(line)) {
-      open.items[open.items.length - 1].push({ text: ' ', strong: false }, ...parseInline(line.trim()));
+      open.items[open.items.length - 1] += `\n${line.replace(/^\s+/, '')}`;
       continue;
     }
 
@@ -182,22 +187,22 @@ export function parseReply(content: string): ReplyBlock[] {
     if (numbered) {
       const current: OpenList | null = list;
       if (current && current.ordered) {
-        current.items.push(parseInline(numbered[2]));
+        current.items.push(numbered[2]);
         current.numbers.push(Number(numbered[1]));
       } else {
         flush();
-        list = { ordered: true, items: [parseInline(numbered[2])], numbers: [Number(numbered[1])] };
+        list = { ordered: true, items: [numbered[2]], numbers: [Number(numbered[1])] };
       }
       continue;
     }
     if (bullet) {
       const current: OpenList | null = list;
-      if (current && !current.ordered) current.items.push(parseInline(bullet[1]));
+      if (current && !current.ordered) current.items.push(bullet[1]);
       else {
         // A bullet nested under a numbered item is its own list; the numbered
         // list resumes with its typed numbers afterwards.
         flush();
-        list = { ordered: false, items: [parseInline(bullet[1])] };
+        list = { ordered: false, items: [bullet[1]] };
       }
       continue;
     }

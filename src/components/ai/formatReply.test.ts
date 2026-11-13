@@ -275,3 +275,20 @@ describe('review round 14 (Copilot summary): wrapped list items stay in their it
     expect(items('- a\n\nAfter the list.')).toEqual([{ list: ['a'], numbers: null }, { paragraph: true }]);
   });
 });
+
+describe('review round 16 (Copilot): code spans across wrapped list-item lines', () => {
+  const code = (s: string) =>
+    parseReply(s).flatMap((b) => (b.kind === 'list' ? b.items.flatMap((i) => i.filter((x) => x.code).map((x) => x.text)) : []));
+
+  it.each([
+    ['1. see `alpha\n   2 ** 3 ** 2\n   omega` end\n2. next'],
+    ['- see `alpha\n  2 ** 3 ** 2\n  omega` end\n- next'],
+  ])('keeps the operators: %s', (s) => {
+    expect(code(s)).toEqual(['alpha 2 ** 3 ** 2 omega']);
+  });
+
+  it('wrapped plain text still joins with one space', () => {
+    const b = parseReply('1. Foo\n   continues here');
+    expect(b[0].kind === 'list' ? b[0].items[0].map((x) => x.text).join('') : null).toBe('Foo continues here');
+  });
+});
