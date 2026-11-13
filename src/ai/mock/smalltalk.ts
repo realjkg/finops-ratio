@@ -38,7 +38,9 @@ function normalize(text: string): string {
     .toLowerCase()
     .replace(/[’`]/g, "'")
     .replace(/'/g, ' ')
-    .replace(/[^a-z\s]/g, ' ')
+    // Keep every letter and number (any script) so that content the phrases do not
+    // cover makes the parse fail; only punctuation and symbols become spaces.
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -51,34 +53,39 @@ function normalize(text: string): string {
 export function smallTalkKinds(text: string): SmallTalkKind[] | null {
   if (typeof text !== 'string' || text.length > MAX_SMALL_TALK) return null;
   // A number or amount is data the user typed: never acknowledge it and drop it.
-  if (/[0-9%$€£]/.test(text)) return null;
+  if (/[\p{N}%$€£]/u.test(text)) return null;
   let rest = normalize(text);
   if (rest === '' || rest === 'help') return null;
   const kinds: SmallTalkKind[] = [];
   while (rest.length > 0) {
-    const filler = FILLER.exec(rest);
-    if (filler) {
-      rest = rest.slice(filler[0].length).trimStart();
+    // Whole phrases first, so a phrase that starts with a filler word ("all right") is reachable.
+    const hit = PHRASES.map(([kind, rx]) => ({ kind, m: rx.exec(rest) })).find((h) => h.m !== null);
+    if (hit && hit.m) {
+      if (!kinds.includes(hit.kind)) kinds.push(hit.kind);
+      rest = rest.slice(hit.m[0].length).trimStart();
       continue;
     }
-    const hit = PHRASES.map(([kind, rx]) => ({ kind, m: rx.exec(rest) })).find((h) => h.m !== null);
-    if (!hit || !hit.m) return null;
-    if (!kinds.includes(hit.kind)) kinds.push(hit.kind);
-    rest = rest.slice(hit.m[0].length).trimStart();
+    const filler = FILLER.exec(rest);
+    if (!filler) return null;
+    rest = rest.slice(filler[0].length).trimStart();
   }
   if (kinds.length === 0) return null;
-  // "that's all?", "ok?", "later?" ask something: only identity, start, greeting and
-  // how-are-you may end in a question mark.
-  if (/\?\s*$/.test(text) && kinds.every((k) => k === 'acknowledge' || k === 'farewell' || k === 'thanks')) return null;
+  // "that's all?", "ok?!", "ok? thanks" ask something: only identity, start, greeting and
+  // how-are-you may carry a question mark.
+  if (/[?？¿؟‽⁇⁈⁉﹖]/.test(text) && kinds.every((k) => k === 'acknowledge' || k === 'farewell' || k === 'thanks')) return null;
   return kinds;
 }
 
-/** Polite idioms whose "there" or "it" never points back at a subject ("hi there", "appreciate it"). */
-const IDIOMS = /\b(?:(?:hi|hey|hello) there|appreciate it)\b/g;
+/** Polite idioms whose "there" or "it" never points back at a subject ("hi there", "got it"). */
+const IDIOMS = /\b(?:(?:hi|hiya|hey|heya|hello),? there|appreciate it|got it)\b/g;
 
-/** Lower-cased text with those idioms blanked, for the back-reference check on small talk. */
+/**
+ * Lower-cased text with those idioms blanked, for the back-reference check on small
+ * talk. Whitespace is collapsed first so "hi   there" matches; a real reference such
+ * as "how is it going?" is left intact.
+ */
 export function withoutIdioms(lower: string): string {
-  return lower.replace(IDIOMS, ' ');
+  return lower.replace(/\s+/g, ' ').replace(IDIOMS, ' ');
 }
 
 /** The greeting word to echo back, capitalized ("good morning" -> "Good morning"). */

@@ -197,3 +197,34 @@ describe('review round 2: greeting idioms are not back-references', () => {
     expect(r[2]).not.toContain(UNSUPPORTED);
   });
 });
+
+describe('review round 3 (Copilot): nothing the user typed is dropped', () => {
+  it.each(['Hi 分析成本', 'ok ５０', 'thanks ¾', 'hello olá', 'ok?!', "that's all?!", 'ok? thanks', 'bye?.', 'ok؟', 'ok‽', 'ok⁇', 'ok⁈', 'ok﹖'])('not small talk: %s', (q) => {
+    expect(smallTalkKinds(q)).toBeNull();
+  });
+
+  it.each([
+    ['all right', ['acknowledge']],
+    ['all right, thanks', ['acknowledge', 'thanks']],
+    ['Hey 👋', ['greeting']],
+    ['who are you?!', ['identity']],
+  ])('%s', (q, kinds) => {
+    expect(smallTalkKinds(q)).toEqual(kinds);
+  });
+
+  it.each([
+    ['got it', '**Got it**'],
+    ['Got it!', '**Got it**'],
+    ['hi   there!', "**Hi — I'm Frank Coster**"],
+    ['hi, there', "**Hi — I'm Frank Coster**"],
+    ['hiya there', "**Hi — I'm Frank Coster**"],
+  ])('"%s" after an answer is small talk', async (q, header) => {
+    const r = await ask(['ROI of Sales Copilot', q]);
+    expect(r[1].split('\n')[0], q).toBe(header);
+  });
+
+  it('"got it" keeps the subject for the next follow-up', async () => {
+    const r = await ask(['What is the ROI of the CX Engineering team?', 'got it', 'what about its workloads?']);
+    expect(r[2]).toContain('CX Engineering');
+  });
+});
