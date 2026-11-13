@@ -190,14 +190,32 @@ test.describe('touch screens: text fields never trigger iOS zoom', () => {
     });
   }
 
-  test('the Frank review rationale box on Agent workflows is at least 16px on a phone', async ({ browser }) => {
-    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
-    const page = await ctx.newPage();
+  const signIn = async (page: import('@playwright/test').Page) => {
     await page.goto('/simulation');
     await page.getByRole('button', { name: 'Continue as Morgan', exact: true }).click();
     await expect(page.getByText('Signed in as Morgan', { exact: false })).toBeVisible();
+  };
+
+  test('the Ask Frank box on Agent workflows is at least 16px on a phone', async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await signIn(page);
     await page.goto('/agent-workflows');
-    expect(await fontPx(page.getByLabel('Review rationale for Frank'))).toBeGreaterThanOrEqual(16);
+    expect(await fontPx(page.getByRole('textbox', { name: 'Ask Frank' }))).toBeGreaterThanOrEqual(16);
+    await ctx.close();
+  });
+
+  test('a field never grows past its designed size: the workspace select fits at 320px with 130% text', async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await page.addInitScript(() => localStorage.setItem('ratio.typography', JSON.stringify({ scale: 130, family: 'default' })));
+    await signIn(page);
+    await page.goto('/workspace');
+    const select = page.getByLabel('Workflow workload');
+    const box = await select.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320 + 0.5);
+    expect(await fontPx(select)).toBeGreaterThanOrEqual(16);
     await ctx.close();
   });
 });
