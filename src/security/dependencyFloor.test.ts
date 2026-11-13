@@ -3,10 +3,11 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // Pins the production-chain advisory floors found by `npm audit --omit=dev`
-// (next GHSA range 16.0.0 - 16.3.7, sharp < 0.35.5, source-map-js 1.0.0 - 1.2.1).
-// If the lockfile regresses below a floor, this fails before CI audit would.
+// (next GHSA range 16.0.0 - 16.4.0, incl. critical GHSA-2464-fhr4-w9xw; sharp < 0.35.5;
+// source-map-js 1.0.0 - 1.2.1). If the lockfile regresses below a floor, this fails
+// before CI audit would. #187 pinned next 16.3.8 and this floor did not catch it.
 const FLOORS: Record<string, string> = {
-  next: '16.3.8',
+  next: '16.4.6',
   sharp: '0.35.5',
   'source-map-js': '1.2.2',
 };

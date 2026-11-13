@@ -272,3 +272,20 @@ describe('B9 webpack builds are read too (`next build --webpack`)', () => {
     expect(out).not.toMatch(/7718/);
   });
 });
+
+describe('B10 webpack chunk loading the check cannot read fails closed', () => {
+  it('flags an entry whose .X(<n>, ...) call does not parse as numeric ids with first argument 0', () => {
+    const named = webpackTree();
+    write(named, 'server/pages/api/v1/connectors.js', 'var b=require("../../../../webpack-api-runtime.js");var c=b.X(0,["vendors-reader"],()=>b(b.s=1))');
+    expect(problemsOf(named).join('\n')).toMatch(/connectors\.js loads chunks in a form the check cannot read/);
+    const otherArg = webpackTree();
+    write(otherArg, 'server/pages/index.js', 'var b=require("../../webpack-runtime.js");var c=b.X(1,[7718],()=>b(b.s=1))');
+    expect(problemsOf(otherArg).join('\n')).toMatch(/index\.js loads chunks in a form the check cannot read/);
+  });
+
+  it('ordinary minified .X( property calls and parsed loads are not flagged', () => {
+    const root = webpackTree();
+    write(root, 'server/pages/index.js', `${wpEntry([5030])};const z=a.X(foo);`);
+    expect(problemsOf(root)).toEqual([]);
+  });
+});

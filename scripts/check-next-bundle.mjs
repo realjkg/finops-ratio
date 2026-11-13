@@ -93,6 +93,8 @@ const WORKER_TRACE = /(^|\/)node_modules\/(@aws-sdk\/|csv-parse\/)/;
 const CHUNK_REF = /R\.c\("server\/(chunks\/[^"]+)"\)/g;
 /** webpack server runtime: `b.X(0,[5030,7718],()=>b(b.s=61320))` loads server/chunks/<id>.js. */
 const WEBPACK_CHUNK_REF = /\.X\(0,\s*\[([0-9,\s]+)\]/g;
+/** Any webpack runtime chunk-load call (`.X(<n>,`): one the parser above cannot read fails closed. */
+const WEBPACK_CHUNK_CALL = /\.X\(\s*\d+\s*,/g;
 
 /** Every chunk (relative to .next/server) a server entry loads, in either bundler's syntax. */
 function chunkRefs(text) {
@@ -150,7 +152,12 @@ export function checkNextBundle(nextDir, { fontHashes = [] } = {}) {
   const entries = walk(path.join(serverDir, 'pages')).filter((f) => f.endsWith('.js'));
   const loadedBy = new Map(); // chunk abs path -> entries (rel)
   for (const e of entries) {
-    for (const ref of chunkRefs(fs.readFileSync(e, 'utf8'))) {
+    const text = fs.readFileSync(e, 'utf8');
+    const calls = (text.match(WEBPACK_CHUNK_CALL) ?? []).length;
+    if (calls > [...text.matchAll(WEBPACK_CHUNK_REF)].length) {
+      problems.push(`server entry ${rel(e)} loads chunks in a form the check cannot read (webpack .X call): the scan would be blind`);
+    }
+    for (const ref of chunkRefs(text)) {
       const chunk = path.join(serverDir, ref);
       if (!loadedBy.has(chunk)) loadedBy.set(chunk, new Set());
       loadedBy.get(chunk).add(rel(e));
