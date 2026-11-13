@@ -116,17 +116,20 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   if (at < 0) return help();
   const raw = messages[at].content;
   if (typeof raw !== 'string') return help();
+  const world = buildWorld(context);
   // Frank's own surname must never route a question to cost ("Coster" contains "cost"):
   // every form of the name ("Frank Coster", "Frank Costers", "frankcoster", "Coster")
-  // becomes "Frank", and the possessive "Frank Coster's" becomes "Frank's".
-  const text = raw
-    .slice(0, MAX_TEXT)
-    .replace(/\bfrank\s*coster(?:(['’]s)|s)?\b/gi, (_m, possessive?: string) => (possessive ? "Frank's" : 'Frank'))
-    .replace(/\bcoster(?:(['’]s)|s)?\b/gi, (_m, possessive?: string) => (possessive ? "Frank's" : 'Frank'));
+  // becomes "Frank", and the possessive "Frank Coster's" becomes "Frank's". A name
+  // that is part of a team, workload or model in the data ("Coster Pipeline", the
+  // "Costers" team) is that entity's name and is never rewritten.
+  const sliced = raw.slice(0, MAX_TEXT);
+  const named = findMentions(sliced, world).filter((m) => m.scope.kind !== 'portfolio');
+  const text = sliced.replace(/\b(?:frank\s*)?coster(?:(['’]s)|s)?\b/gi, (m: string, possessive: string | undefined, at: number) =>
+    named.some((n) => n.start < at + m.length && at < n.end) ? m : possessive ? "Frank's" : 'Frank',
+  );
   const lower = text.toLowerCase();
   if (LEGACY_HELP.test(lower)) return help();
 
-  const world = buildWorld(context);
   const mentions = findMentions(text, world);
   const subject = pickSubject(mentions);
   const explicit = subject !== null && subject.scope.kind !== 'portfolio';

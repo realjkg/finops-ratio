@@ -6,6 +6,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BASIS, CTX, UNSUPPORTED, ask, last, nextQuestions, restoreClock, useFastClock } from './__testkit__/ask';
 import { isMetaHeader } from './metaHeaders';
 import { smallTalkKinds } from './smalltalk';
+import { buildAIContext } from '@/ai/buildAIContext';
+import { WORKLOADS } from '@/data/workloads';
 
 beforeAll(useFastClock);
 afterAll(restoreClock);
@@ -445,5 +447,26 @@ describe('review round 22: name variants, possessives and the bare name', () => 
   it('words that really mean cost still route to cost', async () => {
     expect(await last(['How costly is Legal?'])).toMatch(/Legal/);
     expect((await last(['Which team is driving the highest cost?'])).split('\n')[0]).toMatch(/Highest-cost team/);
+  });
+});
+
+describe('review round 23: a team or workload named "Coster" keeps its name', () => {
+  // The first workload is renamed "Coster Pipeline"; the Revenue team becomes "Costers".
+  const CUSTOM = buildAIContext(
+    WORKLOADS.map((w, i) => ({ ...w, name: i === 0 ? 'Coster Pipeline' : w.name, team: w.team === 'Revenue' ? 'Costers' : w.team })),
+  );
+  it.each([
+    ['ROI of Coster Pipeline', /Coster Pipeline/],
+    ['What is the ROI of the Costers team?', /Costers \(team\)/],
+    ['show the Costers team workloads', /Costers \(team\)/],
+    ['Coster Pipeline alerts', /Coster Pipeline/],
+  ])('%s answers for the named entity', async (q, rx) => {
+    const t = await last([q], CUSTOM);
+    expect(t.split('\n')[0], q).toMatch(rx);
+    expect(t, q).not.toMatch(/called "?Frank|Frank Pipeline/);
+  });
+  it('Frank\'s own name still gets Frank\'s identity in the same data', async () => {
+    expect((await last(['Who is Frank Coster?'], CUSTOM)).split('\n')[0]).toBe("**I'm Frank Coster, Ratio's FinOps accountability partner**");
+    expect((await last(['Frank Coster'], CUSTOM)).split('\n')[0]).toBe("**Hi — I'm Frank Coster**");
   });
 });
