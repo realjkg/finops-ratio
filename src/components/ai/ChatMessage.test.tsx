@@ -46,3 +46,12 @@ describe('review round 6: structure for screen readers', () => {
     expect([...container.querySelectorAll('li')].map((li) => li.getAttribute('value'))).toEqual(['3', '4']);
   });
 });
+
+describe('review round 11 (Copilot): inline code keeps its spaces', () => {
+  it('inline code preserves whitespace', () => {
+    const { container } = render(<ChatMessage message={reply("Run `printf 'a  b'` now")} />);
+    const code = container.querySelector('code');
+    expect(code?.textContent).toBe("printf 'a  b'");
+    expect(code?.className).toMatch(/whitespace-pre-wrap/);
+  });
+});

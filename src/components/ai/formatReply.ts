@@ -58,6 +58,35 @@ function boldRuns(text: string, out: Inline[]): void {
   if (last < text.length) out.push({ text: text.slice(last), strong: false });
 }
 
+/** Length of the first backtick run in `text` that no run of the same length closes, or 0. */
+function openTickRun(text: string): number {
+  for (let i = 0; i < text.length; ) {
+    if (text[i] !== '`') {
+      i++;
+      continue;
+    }
+    let n = 0;
+    while (text[i + n] === '`') n++;
+    let closed = -1;
+    for (let j = i + n; j < text.length; ) {
+      if (text[j] !== '`') {
+        j++;
+        continue;
+      }
+      let m = 0;
+      while (text[j + m] === '`') m++;
+      if (m === n) {
+        closed = j;
+        break;
+      }
+      j += m;
+    }
+    if (closed < 0) return n;
+    i = closed + n;
+  }
+  return 0;
+}
+
 /**
  * Split a line into code spans and **bold** runs. Code spans are found first
  * (CommonMark: a run of N backticks closed by a run of exactly N), so asterisks
@@ -93,7 +122,7 @@ export function parseInline(line: string): Inline[] {
       i += n;
       continue;
     }
-    let body = line.slice(i + n, close);
+    let body = line.slice(i + n, close).replace(/\n/g, ' ');
     if (body.length > 2 && body.startsWith(' ') && body.endsWith(' ') && body.trim() !== '') body = body.slice(1, -1);
     boldRuns(text, out);
     text = '';
@@ -101,7 +130,16 @@ export function parseInline(line: string): Inline[] {
     i = close + n;
   }
   boldRuns(text, out);
+  for (const seg of out) if (!seg.code) seg.text = seg.text.replace(/\n/g, ' ');
   return out.length > 0 ? out : [{ text: line, strong: false }];
+}
+
+/** A line that can only continue a paragraph (no block marker of any kind). */
+function isPlainLine(line: string): boolean {
+  if (line.trim() === '') return false;
+  const fence = FENCE_OPEN.exec(line);
+  if (fence && isOpening(fence)) return false;
+  return ![TABLE_ROW, NUMBERED, BULLET, HEADING_MD, WHOLE_BOLD, SOURCE, LABEL].some((rx) => rx.test(line));
 }
 
 type OpenList = { ordered: false; items: Inline[][] } | { ordered: true; items: Inline[][]; numbers: number[] };
@@ -177,7 +215,28 @@ export function parseReply(content: string): ReplyBlock[] {
     else if (whole) blocks.push({ kind: 'label', inline: [{ text: whole[1], strong: true }] });
     else if (SOURCE.test(line)) blocks.push({ kind: 'source', inline: parseInline(line.trim()) });
     else if (LABEL.test(line)) blocks.push({ kind: 'label', inline: parseInline(line.trim().replace(/:$/, '')) });
-    else blocks.push({ kind: 'paragraph', inline: parseInline(line.trim()) });
+    else {
+      // A code span left open on this line continues over the following plain
+      // paragraph lines (never into a list, table, fence, heading or blank
+      // line) until a backtick run of the same length closes it (CommonMark).
+      let text = line.trim();
+      const open = openTickRun(text);
+      if (open > 0) {
+        let j = i + 1;
+        const joined: string[] = [];
+        // Bounded lookahead keeps a reply with a stray backtick linear in practice.
+        while (j < lines.length && j - i <= 40 && isPlainLine(lines[j].trimEnd())) {
+          joined.push(lines[j].trim());
+          if (openTickRun([text, ...joined].join('\n')) !== open) break;
+          j++;
+        }
+        if (j < lines.length && joined.length > 0 && openTickRun([text, ...joined].join('\n')) !== open) {
+          text = [text, ...joined].join('\n');
+          i = j;
+        }
+      }
+      blocks.push({ kind: 'paragraph', inline: parseInline(text) });
+    }
   }
   flush();
   return blocks;

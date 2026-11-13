@@ -168,3 +168,38 @@ describe('review round 9 (Copilot): code spans and tilde fences', () => {
     ]);
   });
 });
+
+describe('review round 11 (Copilot): multi-line code spans', () => {
+  it('a code span that continues over plain lines is one span with its text intact', () => {
+    expect(parseReply('see `alpha\n2 ** 3 ** 2\nomega` end')).toEqual([
+      {
+        kind: 'paragraph',
+        inline: [
+          { text: 'see ', strong: false },
+          { text: 'alpha 2 ** 3 ** 2 omega', strong: false, code: true },
+          { text: ' end', strong: false },
+        ],
+      },
+    ]);
+  });
+
+  it('an unclosed backtick does not join lines', () => {
+    expect(parseReply('a `b\nc').map((b) => b.kind)).toEqual(['paragraph', 'paragraph']);
+  });
+
+  it('a code span never continues into a list, table, fence or blank line', () => {
+    expect(parseReply('a `b\n- c`').map((b) => b.kind)).toEqual(['paragraph', 'list']);
+    expect(parseReply('a `b\n\nc`').map((b) => b.kind)).toEqual(['paragraph', 'paragraph']);
+    expect(parseReply('a `b\n| x` | y |').map((b) => b.kind)).toEqual(['paragraph', 'pre']);
+  });
+});
+
+describe('review round 11: a stray backtick in a long reply stays fast and loses nothing', () => {
+  it('5,000 plain lines after an unclosed backtick parse quickly as separate paragraphs', () => {
+    const text = ['a ` b', ...Array.from({ length: 5000 }, (_, n) => `line ${n}`)].join('\n');
+    const t0 = performance.now();
+    const blocks = parseReply(text);
+    expect(performance.now() - t0).toBeLessThan(2000);
+    expect(blocks).toHaveLength(5001);
+  });
+});
