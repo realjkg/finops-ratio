@@ -50,6 +50,8 @@ function normalize(text: string): string {
  */
 export function smallTalkKinds(text: string): SmallTalkKind[] | null {
   if (typeof text !== 'string' || text.length > MAX_SMALL_TALK) return null;
+  // A number or amount is data the user typed: never acknowledge it and drop it.
+  if (/[0-9%$€£]/.test(text)) return null;
   let rest = normalize(text);
   if (rest === '' || rest === 'help') return null;
   const kinds: SmallTalkKind[] = [];
@@ -64,7 +66,11 @@ export function smallTalkKinds(text: string): SmallTalkKind[] | null {
     if (!kinds.includes(hit.kind)) kinds.push(hit.kind);
     rest = rest.slice(hit.m[0].length).trimStart();
   }
-  return kinds.length > 0 ? kinds : null;
+  if (kinds.length === 0) return null;
+  // "that's all?", "ok?", "later?" ask something: only identity, start, greeting and
+  // how-are-you may end in a question mark.
+  if (/\?\s*$/.test(text) && kinds.every((k) => k === 'acknowledge' || k === 'farewell' || k === 'thanks')) return null;
+  return kinds;
 }
 
 /** The greeting word to echo back, capitalized ("good morning" -> "Good morning"). */
@@ -76,11 +82,14 @@ function greetingWord(text: string): string {
   return shown.charAt(0).toUpperCase() + shown.slice(1);
 }
 
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`;
+
 function dataLine(world: World): string {
+  if (world.workloads.length === 0) return 'No workloads are in this view yet.';
   const r = rollup(world.workloads);
-  const teams = world.teams.length > 0 ? ` across ${world.teams.length} teams` : '';
+  const teams = world.teams.length > 0 ? ` across ${plural(world.teams.length, 'team')}` : '';
   const spend = r.spend > 0 ? `, ${usd(r.spend)}/mo of spend` : '';
-  return `In this view: ${world.workloads.length} workloads${teams}${spend}.`;
+  return `In this view: ${plural(world.workloads.length, 'workload')}${teams}${spend}.`;
 }
 
 /** Next questions: a drill-down on the subject under discussion, else the starter questions. */
@@ -93,9 +102,9 @@ function suggestions(world: World, focus: Scope | null): string[] {
 }
 
 const IDENTITY =
-  "I'm Ratio's FinOps accountability partner. I'm a deterministic assistant, not a generative AI model: fixed rules compute every answer from the data in this view, the same question always gets the same answer, and I say plainly when something is outside the data.";
+  "I'm Ratio's FinOps accountability partner. I'm a deterministic assistant, not a generative AI model: fixed rules compute every answer from the data in this view, the same question in the same conversation always gets the same answer, and I say plainly when something is outside the data.";
 const HOW_ARE_YOU =
-  "I'm running well, thanks for asking. I'm a deterministic assistant, so you'll get the same answer to the same question every time.";
+  "I'm running well, thanks for asking. I'm a deterministic assistant, so the same question in the same conversation always gets the same answer.";
 const TOPICS =
   'I can help with ROI and Value / cost, team and workload costs, tokens and cache, alerts, outcome evidence, savings, EBITDA impact and moving a workload to a private open model.';
 
@@ -105,12 +114,13 @@ export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: Wor
   const base = { referenced: [] as string[] };
   if (kinds.includes('start')) return capabilityAnswer(world);
   if (kinds.includes('identity')) {
-    return { ...base, header: "**I'm Frank Coster**", body: [IDENTITY, TOPICS, dataLine(world)], next };
+    const how = kinds.includes('how_are_you') ? [HOW_ARE_YOU] : [];
+    return { ...base, header: "**I'm Frank Coster**", body: [...how, IDENTITY, TOPICS, dataLine(world)], next };
   }
   if (kinds.includes('greeting')) {
     const body = [
       ...(kinds.includes('how_are_you') ? [HOW_ARE_YOU] : []),
-      "I'm Ratio's FinOps accountability partner. Ask me about cost, value and savings in your own words, and I'll show where every figure comes from.",
+      "I'm Ratio's FinOps accountability partner. Ask me about cost, value and savings, and I'll show where every figure comes from.",
       dataLine(world),
       'Good places to start are below, or ask "What can you answer?" for the full list.',
     ];
@@ -119,11 +129,12 @@ export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: Wor
   if (kinds.includes('how_are_you')) {
     return { ...base, header: '**Doing well**', body: [HOW_ARE_YOU, 'What would you like to look at?'], next };
   }
+  if (kinds.includes('farewell')) {
+    const welcome = kinds.includes('thanks') ? ["You're welcome."] : [];
+    return { ...base, header: '**Goodbye**', body: [...welcome, 'Thanks for the conversation. Come back any time with a question about cost, value or savings.'], next: [] };
+  }
   if (kinds.includes('thanks')) {
     return { ...base, header: "**You're welcome**", body: ['Happy to help. Want to go a level deeper?'], next };
-  }
-  if (kinds.includes('farewell')) {
-    return { ...base, header: '**Goodbye**', body: ['Thanks for the conversation. Come back any time with a question about cost, value or savings.'], next: [] };
   }
   return { ...base, header: '**Got it**', body: ['What would you like to look at next?'], next };
 }

@@ -121,14 +121,20 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   if (LEGACY_HELP.test(lower)) return help();
 
   const world = buildWorld(context);
-  const talk = smallTalkKinds(text);
-  if (talk) return done(smallTalkAnswer(talk, text, world, deriveFocus(messages.slice(0, at), world)), world);
   const mentions = findMentions(text, world);
   const subject = pickSubject(mentions);
   const explicit = subject !== null && subject.scope.kind !== 'portfolio';
   const ref = detectReference(lower);
   const elliptical = isElliptical(lower);
   const backRef = !subject && (ref.kind !== 'none' || elliptical);
+
+  // Small talk: only a turn that is entirely conversational, names no data and does not
+  // point back at a remembered subject ("how is it going?" after an answer is a follow-up).
+  const talk = smallTalkKinds(text);
+  if (talk && !mentions.some((m) => m.scope.kind !== 'portfolio')) {
+    const focus = deriveFocus(messages.slice(0, at), world);
+    if (!(ref.kind !== 'none' && focus !== null)) return done(smallTalkAnswer(talk, text, world, focus), world);
+  }
 
   let intent = classifyIntent(lower, { hasEntity: explicit, namesTeam: namesTeam(mentions), backRef });
   if (intent === 'legacy' && (elliptical || subject !== null)) {

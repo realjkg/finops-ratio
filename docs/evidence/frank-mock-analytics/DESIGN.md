@@ -152,4 +152,4 @@ verbatim), `respond` (router). `MockAIClient` keeps its public API.
 3. Is `cost_trend_pct` an acceptable stand-in for "spending went down" when the user states no
    amount?
 4. Should a stated percentage be against prior spend rather than current spend?
-5. Should the bare greeting keep the legacy help text? (Kept.)
+5. Should the bare greeting keep the legacy help text? (Kept until ADR-0002 phase F1: a bare `hi`, `hello` or `hey` now gets the conversational greeting in `smalltalk.ts`; `help` and `?` keep the legacy text.)
