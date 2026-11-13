@@ -392,3 +392,31 @@ describe('review round 15: the meta-header list matches the real replies', () =>
     }
   });
 });
+
+describe('review round 21 (Copilot summary): questions about Frank Coster are about Frank, not cost', () => {
+  const IDENTITY = "**I'm Frank Coster, Ratio's FinOps accountability partner**";
+  const CAPABILITY = '**What I can answer**';
+
+  it.each([
+    ['Who is Frank Coster?', IDENTITY],
+    ["Who's Frank Coster", IDENTITY],
+    ['What is Frank Coster?', IDENTITY],
+    ['Tell me about Frank Coster', IDENTITY],
+    ['Tell me about Frank', IDENTITY],
+    ['Are you Frank Coster?', IDENTITY],
+    ['Is Frank Coster an AI?', IDENTITY],
+    ['Is Frank a bot?', IDENTITY],
+    ['Who made Frank Coster?', IDENTITY],
+    ['Who built you?', IDENTITY],
+    ['What does Frank Coster do?', CAPABILITY],
+    ['What can Frank do?', CAPABILITY],
+    ['What can you do?', CAPABILITY],
+  ])('%s', async (q, header) => {
+    expect((await last([q])).split('\n')[0], q).toBe(header);
+  });
+
+  it('"Coster" never triggers a cost answer: a question that names Frank gets the same answer as without the name', async () => {
+    expect(await last(['Frank Coster, which team is driving the highest cost?'])).toBe(await last(['Which team is driving the highest cost?']));
+    expect(await last(['Frank Coster, what is the ROI of the portfolio?'])).toBe(await last(['What is the ROI of the portfolio?']));
+  });
+});

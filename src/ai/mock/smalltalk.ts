@@ -20,8 +20,8 @@ const MAX_SMALL_TALK = 120;
 
 /** Phrases per kind, matched at the start of the remaining text, longest first within each kind. */
 const PHRASES: ReadonlyArray<[SmallTalkKind, RegExp]> = [
-  ['identity', /^(?:who are you|what are you|who is frank|who s frank|what is frank|what s frank|introduce yourself|tell me about yourself|what is your name|what s your name|whats your name|are you (?:an? )?(?:ai|bot|robot|chatbot|real|human|person|llm|chatgpt|language model))\b/],
-  ['start', /^(?:where (?:do|should|can) i (?:start|begin)|what (?:should|can|could) i ask(?: you)?|how do i use (?:this|you|ratio|frank)|how does this work|how do you work|can you help(?: me)?|help me(?: out)?|i need help|what do you do)\b/],
+  ['identity', /^(?:who are you|what are you|(?:who|what) (?:is|s) frank(?: coster)?|introduce yourself|tell me about (?:yourself|you|frank(?: coster)?)|what is your name|what s your name|whats your name|are you frank(?: coster)?|(?:are you|is frank(?: coster)?) (?:an? )?(?:ai|bot|robot|chatbot|real|human|person|llm|chatgpt|language model)|who (?:made|built|created|owns) (?:you|frank(?: coster)?))\b/],
+  ['start', /^(?:where (?:do|should|can) i (?:start|begin)|what (?:should|can|could) i ask(?: you)?|how do i use (?:this|you|ratio|frank)|how does this work|how do you work|can you help(?: me)?|help me(?: out)?|i need help|what do you do|what (?:can|does) (?:you|frank(?: coster)?) do)\b/],
   ['how_are_you', /^(?:how are you(?: doing)?(?: today)?|how are things|how s it going|hows it going|how is it going|how have you been|what s up|whats up|sup)\b/],
   ['greeting', /^(?:good (?:morning|afternoon|evening|day)|hi there|hello there|hey there|hiya|howdy|heya|hello|hey|hi|yo|greetings)\b/],
   ['thanks', /^(?:thank you(?: so much| very much)?|thanks(?: a lot| so much)?|many thanks|much appreciated|appreciate it|thx|ty|cheers)\b/],

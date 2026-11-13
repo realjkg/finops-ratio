@@ -116,7 +116,8 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   if (at < 0) return help();
   const raw = messages[at].content;
   if (typeof raw !== 'string') return help();
-  const text = raw.slice(0, MAX_TEXT);
+  // Frank's own surname must never route a question to cost ("Coster" contains "cost").
+  const text = raw.slice(0, MAX_TEXT).replace(/\bfrank\s+coster\b/gi, 'Frank');
   const lower = text.toLowerCase();
   if (LEGACY_HELP.test(lower)) return help();
 
