@@ -12,7 +12,7 @@
 import { capabilityAnswer, starterQuestions } from './answersMeta';
 import { ladder } from './answerKit';
 import { rollup } from './calc';
-import { usd } from './format';
+import { evid, returnText, usd } from './format';
 import type { Answer, Scope, World } from './types';
 
 export type SmallTalkKind = 'greeting' | 'how_are_you' | 'thanks' | 'acknowledge' | 'farewell' | 'identity' | 'start';
@@ -45,6 +45,30 @@ function normalize(text: string): string {
     .trim();
 }
 
+/** The phrase kinds of normalized text, in order (repeats kept), or null if anything is left over. */
+function parse(text: string): SmallTalkKind[] | null {
+  let rest = text;
+  const seq: SmallTalkKind[] = [];
+  while (rest.length > 0) {
+    // Whole phrases first, so a phrase that starts with a filler word ("all right") is reachable.
+    const hit = PHRASES.map(([kind, rx]) => ({ kind, m: rx.exec(rest) })).find((h) => h.m !== null);
+    if (hit && hit.m) {
+      seq.push(hit.kind);
+      rest = rest.slice(hit.m[0].length).trimStart();
+      continue;
+    }
+    const filler = FILLER.exec(rest);
+    if (!filler) return null;
+    rest = rest.slice(filler[0].length).trimStart();
+  }
+  return seq;
+}
+
+/** Kinds that a question mark turns into a question ("ok?", "that's all?", "thanks?"). */
+const QUESTIONABLE: ReadonlySet<SmallTalkKind> = new Set(['acknowledge', 'farewell', 'thanks']);
+const QUESTION_MARKS = /[?？¿؟‽⁇⁈⁉﹖]/;
+const QUESTION_END = /[?？؟‽⁇⁈⁉﹖]+/;
+
 /**
  * The small-talk kinds a message consists of, in order, or null when anything
  * in it is not small talk (a question, a name, a number). `help` alone is not
@@ -54,25 +78,22 @@ export function smallTalkKinds(text: string): SmallTalkKind[] | null {
   if (typeof text !== 'string' || text.length > MAX_SMALL_TALK) return null;
   // A number or amount is data the user typed: never acknowledge it and drop it.
   if (/[\p{N}%$€£]/u.test(text)) return null;
-  let rest = normalize(text);
-  if (rest === '' || rest === 'help') return null;
-  const kinds: SmallTalkKind[] = [];
-  while (rest.length > 0) {
-    // Whole phrases first, so a phrase that starts with a filler word ("all right") is reachable.
-    const hit = PHRASES.map(([kind, rx]) => ({ kind, m: rx.exec(rest) })).find((h) => h.m !== null);
-    if (hit && hit.m) {
-      if (!kinds.includes(hit.kind)) kinds.push(hit.kind);
-      rest = rest.slice(hit.m[0].length).trimStart();
-      continue;
-    }
-    const filler = FILLER.exec(rest);
-    if (!filler) return null;
-    rest = rest.slice(filler[0].length).trimStart();
+  const all = normalize(text);
+  if (all === '' || all === 'help') return null;
+  const seq = parse(all);
+  if (!seq || seq.length === 0) return null;
+  const kinds = seq.filter((k, i) => seq.indexOf(k) === i);
+  // "that's all?", "ok?!", "¿ok": a question mark with only acknowledgments, thanks or
+  // goodbyes is a question, not small talk.
+  if (QUESTION_MARKS.test(text) && kinds.every((k) => QUESTIONABLE.has(k))) return null;
+  // "Hi Frank, ok?", "hello, that's all?": a clause that ends in a question mark and
+  // whose last phrase is an acknowledgment, thanks or goodbye asks something, even
+  // after a greeting. "Hi Frank, how are you?" still passes.
+  const clauses = text.split(QUESTION_END);
+  for (let i = 0; i < clauses.length - 1; i++) {
+    const clause = parse(normalize(clauses[i]));
+    if (clause && clause.length > 0 && QUESTIONABLE.has(clause[clause.length - 1])) return null;
   }
-  if (kinds.length === 0) return null;
-  // "that's all?", "ok?!", "ok? thanks" ask something: only identity, start, greeting and
-  // how-are-you may carry a question mark.
-  if (/[?？¿؟‽⁇⁈⁉﹖]/.test(text) && kinds.every((k) => k === 'acknowledge' || k === 'farewell' || k === 'thanks')) return null;
   return kinds;
 }
 
@@ -103,7 +124,8 @@ function dataLine(world: World): string {
   if (world.workloads.length === 0) return 'No workloads are in this view yet.';
   const r = rollup(world.workloads);
   const teams = world.teams.length > 0 ? ` across ${plural(world.teams.length, 'team')}` : '';
-  const spend = r.spend > 0 ? `, ${usd(r.spend)}/mo of spend` : '';
+  // R4: spend is never shown without its value ratio and evidence status.
+  const spend = r.spend > 0 ? `, ${usd(r.spend)}/mo of spend at ${returnText(r.ratio)}${evid(r.evidence)}` : '';
   return `In this view: ${plural(world.workloads.length, 'workload')}${teams}${spend}.`;
 }
 

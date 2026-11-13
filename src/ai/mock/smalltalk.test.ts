@@ -228,3 +228,28 @@ describe('review round 3 (Copilot): nothing the user typed is dropped', () => {
     expect(r[2]).toContain('CX Engineering');
   });
 });
+
+describe('review round 4 (Copilot): questioned phrases and R4', () => {
+  it.each(['Hi Frank, ok?', "hello, that's all?", 'hey, thanks?', 'hi, bye?', 'good morning, ok?!', 'hi, ok? thanks'])('not small talk: %s', (q) => {
+    expect(smallTalkKinds(q)).toBeNull();
+  });
+
+  it.each([
+    ['Hi Frank, how are you?', ['greeting', 'how_are_you']],
+    ['ok, who are you?', ['acknowledge', 'identity']],
+    ['thanks! who are you?', ['thanks', 'identity']],
+    ['hi! how are you? thanks', ['greeting', 'how_are_you', 'thanks']],
+  ])('%s', (q, kinds) => {
+    expect(smallTalkKinds(q)).toEqual(kinds);
+  });
+
+  it('R4: a small-talk reply that quotes monthly spend also quotes the ratio and its evidence status', async () => {
+    for (const q of ['Hi Frank', 'hello', 'Good morning', 'who are you?', 'hi, how are you?']) {
+      const t = await last([q]);
+      expect(t, q).toMatch(/\/mo/);
+      expect(t, q).toMatch(/Value \/ cost \d+\.\d×/);
+      expect(t, q).toMatch(/value evidence: (assumed|projected|measured|unmarked)/);
+      expect(t, q).not.toMatch(/value evidence: measured/);
+    }
+  });
+});
