@@ -505,6 +505,20 @@ describe('Copilot review of cc1ade4: Frank\'s name never changes which data is n
     const t = await last([q]);
     expect(t, q).toMatch(/called "Costers?"/);
   });
+  it.each([
+    ['Coster, ROI of Coster', /called "Coster"/],
+    ['ROI of Coster, Coster?', /called "Coster"/],
+    ['Frank Coster, ROI of Frank Coster', /called "Frank Coster"/],
+    ['ROI of Finance, Coster?', /called "Finance"/],
+    ['What is the ROI of Acme Widgets, Frank?', /called "Acme Widgets"/],
+  ])('%s: addressing Frank never hides the name asked about', async (q, rx) => {
+    expect(await last([q]), q).toMatch(rx);
+  });
+  it.each(['ROI of Legal, Frank?', 'ROI of Legal, Frank Coster!', 'Frank, ROI of Legal'])('%s: addressing Frank is not an unknown name', async (q) => {
+    const t = await last([q]);
+    expect(t, q).not.toMatch(/called "?Frank/);
+    expect(t.split('\n')[0], q).toMatch(/Legal/);
+  });
   it.each(['Frank Coster, what is the ROI of the Frank team?', 'Coster, what is the ROI of the Frank team?'])(
     '%s reports the team the user asked about',
     async (q) => {

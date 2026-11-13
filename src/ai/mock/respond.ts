@@ -78,13 +78,22 @@ const INHERITABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 
 /** The question a bare follow-up repeats: the latest earlier user turn with a read-only intent. */
 /** Frank's surname in any form: "Frank Coster", "Frank Costers", "frankcoster", "Coster", possessives. */
 const NAME_RX = /\b(?:frank\s*)?coster(?:(['’]s)|s)?\b/gi;
+const FRANK = "(?:frank(?:\\s*coster(?:['\u2019]s|s)?)?|coster(?:['\u2019]s|s)?)";
+/** Frank addressed by name at the start ("Coster, ...") or at the end ("..., Frank?"). */
+const LEADING_ADDRESS = new RegExp(`^\\s*${FRANK}\\s*,`, 'i');
+const TRAILING_ADDRESS = new RegExp(`,\\s*${FRANK}(?=\\s*[?.!]*\\s*$)`, 'i');
+
 /**
- * Frank's surname used to address him: alone at the start before a comma ("Coster, ROI of
- * Legal") or alone at the end after a comma ("ROI of Legal, Coster?"). Anywhere else ("ROI
- * of Coster") it names what the user is asking about.
+ * The typed text with the words that address Frank blanked out (same length, so entity
+ * positions still line up). Unknown names are looked for here: "ROI of Legal, Coster?"
+ * names nothing unknown, while "ROI of Coster" and "Coster, ROI of Coster" ask about
+ * something named Coster. A span inside a named entity is never blanked.
  */
-const ADDRESSES_FRANK = /(?:^\s*(?:frank\s*)?coster(?:['’]s|s)?\s*,|,\s*(?:frank\s*)?coster(?:['’]s|s)?\s*[?.!]*\s*$)/i;
-const FRANKS_NAME = /^(?:frank\s*)?coster(?:['’]s|s)?$/i;
+function withoutAddress(t: string, mentions: Mention[]): string {
+  const blank = (m: string, at: number): string =>
+    mentions.some((n) => n.scope.kind !== 'portfolio' && n.start < at + m.length && at < n.end) ? m : ' '.repeat(m.length);
+  return t.replace(LEADING_ADDRESS, (m: string, at: number) => blank(m, at)).replace(TRAILING_ADDRESS, (m: string, at: number) => blank(m, at));
+}
 
 /**
  * The text the question type is read from. "Coster" contains "cost", so Frank's surname
@@ -196,13 +205,11 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   // An unrecognized name is reported plainly (before any back-reference or default scope), also next
   // to a recognized entity ("ROI of Legal and the Finance team"); it is never silently substituted.
   if (intent !== 'forecast' && intent !== 'capability') {
-    const team = unknownTeam(text, mentions);
+    const asked = withoutAddress(text, mentions);
+    const team = unknownTeam(asked, mentions);
     if (team && !explicit) return reply(unknownNameText(world, { name: team, team: true }));
     const lone = !subject && !backRef && (NAMEABLE.has(intent) || intent === 'legacy' || intent === 'savings' || intent === 'cost_driver');
-    const capitalized = team || !(explicit || lone) ? null : unknownCapitalized(text, explicit ? mentions : []);
-    // Frank's own name addressed to him ("ROI of Legal, Coster?") is not an unknown entity;
-    // "ROI of Coster" asks about something named Coster, so that is reported as unknown.
-    const name = capitalized && !(FRANKS_NAME.test(capitalized.trim()) && ADDRESSES_FRANK.test(text)) ? capitalized : null;
+    const name = team || !(explicit || lone) ? null : unknownCapitalized(asked, explicit ? mentions : []);
     if (team) notes.push(`Note: I don't have a team called ${team}; ${only}.`);
     else if (name && explicit) notes.push(`Note: I don't have a team, workload or model called "${name}"; ${only}.`);
     else if (name) return reply(unknownNameText(world, { name, team: false }));
