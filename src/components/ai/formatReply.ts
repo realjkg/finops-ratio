@@ -178,12 +178,14 @@ export function parseReply(content: string): ReplyBlock[] {
     // ("1. Foo" / "   continues here"). Unindented lines stay their own paragraph.
     const open: OpenList | null = list;
     if (open && /^(?:\s{2,}|\t)\S/.test(line) && !NUMBERED.test(line) && !BULLET.test(line)) {
-      open.items[open.items.length - 1] += `\n${line.replace(/^\s+/, '')}`;
+      // The raw line (trailing spaces kept): a code span may need them; flush() trims the item's end.
+      open.items[open.items.length - 1] += `\n${lines[i].replace(/^\s+/, '')}`;
       continue;
     }
 
-    const numbered = NUMBERED.exec(line);
-    const bullet = numbered ? null : BULLET.exec(line);
+    // Match on the raw line so an item keeps trailing spaces a code span may need.
+    const numbered = NUMBERED.exec(lines[i]);
+    const bullet = numbered ? null : BULLET.exec(lines[i]);
     if (numbered) {
       const current: OpenList | null = list;
       if (current && current.ordered) {

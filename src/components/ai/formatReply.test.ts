@@ -292,3 +292,20 @@ describe('review round 16 (Copilot): code spans across wrapped list-item lines',
     expect(b[0].kind === 'list' ? b[0].items[0].map((x) => x.text).join('') : null).toBe('Foo continues here');
   });
 });
+
+describe('review round 20 (Copilot): spaces before a line break inside a list-item code span are kept', () => {
+  const code = (s: string) =>
+    parseReply(s).flatMap((b) => (b.kind === 'list' ? b.items.flatMap((i) => i.filter((x) => x.code).map((x) => x.text)) : []));
+
+  it.each([
+    ['1. run `printf "a  \n   b"` now'],
+    ['- run `printf "a  \n  b"` now'],
+  ])('%s', (s) => {
+    expect(code(s)).toEqual(['printf "a   b"']);
+  });
+
+  it('trailing spaces at the end of an item are still trimmed', () => {
+    const b = parseReply('- item   \n- next');
+    expect(b[0].kind === 'list' ? b[0].items.map((i) => i.map((x) => x.text).join('')) : null).toEqual(['item', 'next']);
+  });
+});
