@@ -110,3 +110,26 @@ describe('review round 6: live-model reply shapes keep their text', () => {
     expect(parseReply(table)).toEqual([{ kind: 'pre', text: table }]);
   });
 });
+
+describe('review round 7: inline code on one line is text, not a fence', () => {
+  it('a one-line ```code``` span keeps its text', () => {
+    const blocks = parseReply('```sql SELECT * FROM t```\nafter');
+    expect(blocks).toEqual([
+      { kind: 'paragraph', inline: [{ text: '```sql SELECT * FROM t```', strong: false }] },
+      { kind: 'paragraph', inline: [{ text: 'after', strong: false }] },
+    ]);
+    expect(parseReply('```bash npm install```')[0]).toMatchObject({ kind: 'paragraph' });
+  });
+
+  it('a line that starts with ``` but has more text is not a closing fence', () => {
+    expect(parseReply('```\ncode\n``` then text\n```\nafter')).toEqual([
+      { kind: 'pre', text: 'code\n``` then text' },
+      { kind: 'paragraph', inline: [{ text: 'after', strong: false }] },
+    ]);
+  });
+
+  it('a ~~~ fence closes only on ~~~, and a fence with an info string still opens', () => {
+    expect(parseReply('~~~\na ``` b\n~~~')).toEqual([{ kind: 'pre', text: 'a ``` b' }]);
+    expect(parseReply('```ts\nconst a = 1;\n```')).toEqual([{ kind: 'pre', text: 'const a = 1;' }]);
+  });
+});

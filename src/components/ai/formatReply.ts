@@ -31,7 +31,17 @@ const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.+)$/;
 /** A short title that introduces what follows ("Next questions:", "What I can't do:"): words only, no figures. */
 const LABEL = /^\s*([A-Z][A-Za-z'’ /&-]{0,48}):\s*$/;
 const SOURCE = /^\s*Source:\s/;
-const FENCE = /^\s{0,3}(```|~~~)/;
+/**
+ * CommonMark fences: an opening fence's info string may not contain its fence
+ * character (so "```sql SELECT 1```" on one line is inline code, kept as text),
+ * and only a bare fence line closes it.
+ */
+const FENCE_OPEN = /^\s{0,3}(`{3,}|~{3,})(.*)$/;
+const isOpening = (m: RegExpExecArray): boolean => !m[2].includes(m[1][0]);
+const isClosing = (line: string, open: string): boolean => {
+  const m = /^\s{0,3}(`{3,}|~{3,})\s*$/.exec(line);
+  return m !== null && m[1][0] === open[0] && m[1].length >= open.length;
+};
 const TABLE_ROW = /^\s*\|.*\|\s*$/;
 
 /** Split **bold** runs out of a line; anything unmatched stays literal text. */
@@ -64,12 +74,12 @@ export function parseReply(content: string): ReplyBlock[] {
     const line = lines[i].trimEnd();
 
     // Code fence: everything up to the closing fence (or the end) is kept verbatim.
-    const fence = FENCE.exec(line);
-    if (fence) {
+    const fence = FENCE_OPEN.exec(line);
+    if (fence && isOpening(fence)) {
       flush();
       const body: string[] = [];
       let j = i + 1;
-      while (j < lines.length && !lines[j].trimStart().startsWith(fence[1])) body.push(lines[j++]);
+      while (j < lines.length && !isClosing(lines[j], fence[1])) body.push(lines[j++]);
       blocks.push({ kind: 'pre', text: body.join('\n') });
       i = j;
       continue;
