@@ -293,3 +293,23 @@ describe('owner review: Frank says who he is, what he does and what he cannot do
     expect(smallTalkKinds(q)).toBeNull();
   });
 });
+
+describe('review round 6: no overclaims', () => {
+  it('evidence status is claimed for Value / cost, not for every figure', async () => {
+    for (const q of ['who are you?', 'What can you answer?']) expect(await last([q]), q).not.toMatch(/evidence status of every figure/);
+  });
+
+  it('"measured outcomes" is listed as missing only when the data holds none', async () => {
+    expect(await last(['who are you?'])).toMatch(/measured outcomes/);
+    const measured = {
+      ...CTX,
+      initiatives: CTX.initiatives.map((i) => ({ ...i, valueEvidenceStatus: 'measured' as const })),
+      workloads: (CTX.workloads ?? []).map((w) => ({ ...w, valueEvidenceStatus: 'measured' as const })),
+    };
+    for (const q of ['who are you?', 'What can you answer?']) {
+      const t = await last([q], measured);
+      expect(t, q).toMatch(/value evidence: measured/);
+      expect(t, q).not.toMatch(/measured outcomes/);
+    }
+  });
+});

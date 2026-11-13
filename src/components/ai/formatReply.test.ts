@@ -29,7 +29,7 @@ describe('parseReply', () => {
   it('drops the ** markers and the trailing colon of labels, and keeps every word', () => {
     const blocks = parseReply(SAMPLE);
     const text = (b: (typeof blocks)[number]) =>
-      b.kind === 'list' ? b.items.map((i) => i.map((s) => s.text).join('')).join('|') : b.inline.map((s) => s.text).join('');
+      b.kind === 'list' ? b.items.map((i) => i.map((s) => s.text).join('')).join('|') : b.kind === 'pre' ? b.text : b.inline.map((s: { text: string }) => s.text).join('');
     expect(text(blocks[0])).toBe("I'm Frank Coster, Ratio's FinOps accountability partner");
     expect(text(blocks[2])).toBe('What I do');
     expect(text(blocks[3])).toBe('Show cost, value and Value / cost|Rank teams');
@@ -69,5 +69,44 @@ describe('parseInline', () => {
       { text: ' c', strong: false },
     ]);
     expect(parseInline('2 ** 3')).toEqual([{ text: '2 ** 3', strong: false }]);
+  });
+});
+
+describe('review round 6: live-model reply shapes keep their text', () => {
+  it('ordered lists keep the numbers that were typed', () => {
+    const a = parseReply('3. Marketing\n4. Legal');
+    expect(a[0]).toMatchObject({ kind: 'list', ordered: true, numbers: [3, 4] });
+    const b = parseReply('1. CX\n2. Revenue\n\nNote on the next one\n\n3. Marketing');
+    expect(b.flatMap((x) => (x.kind === 'list' && x.ordered ? [x.numbers] : []))).toEqual([[1, 2], [3]]);
+    const c = parseReply('1. First step\n   - sub point\n2. Second step');
+    expect(c.flatMap((x) => (x.kind === 'list' && x.ordered ? x.numbers : []))).toEqual([1, 2]);
+  });
+
+  it('a heading keeps a "#" that is part of a word; a closing "#" run is dropped', () => {
+    const text = (s: string) => {
+      const b = parseReply(s)[0];
+      return b.kind === 'heading' ? b.inline.map((i) => i.text).join('') : null;
+    };
+    expect(text('# Use C#')).toBe('Use C#');
+    expect(text('## Title ##')).toBe('Title');
+  });
+
+  it.each(['2 alert(s), most severe first:', 'Total: $1,234 / mo:', '6 initiative(s) need attention:'])('a data line is a paragraph, not a label: %s', (line) => {
+    expect(parseReply(`**H**\n${line}`)[1].kind).toBe('paragraph');
+  });
+
+  it.each(['Next questions:', "What I can't do:", 'Follow-ups:', 'Assumptions:', 'Who I am:'])('a short title line is a label: %s', (line) => {
+    expect(parseReply(`**H**\n${line}`)[1].kind).toBe('label');
+  });
+
+  it('code fences and pipe tables keep their exact text and spacing', () => {
+    const fenced = '**H**\n```\na   b\n  c\n```\nafter';
+    expect(parseReply(fenced)).toEqual([
+      { kind: 'heading', inline: [{ text: 'H', strong: true }] },
+      { kind: 'pre', text: 'a   b\n  c' },
+      { kind: 'paragraph', inline: [{ text: 'after', strong: false }] },
+    ]);
+    const table = '| Team | Cost |\n|---|---|\n| Legal | $1 |';
+    expect(parseReply(table)).toEqual([{ kind: 'pre', text: table }]);
   });
 });

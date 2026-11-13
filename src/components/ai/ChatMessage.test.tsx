@@ -33,3 +33,16 @@ describe('ChatMessage (assistant)', () => {
     expect(container.textContent).toContain('<img src=x onerror=alert(1)>');
   });
 });
+
+describe('review round 6: structure for screen readers', () => {
+  it('the reply heading and section labels are headings', () => {
+    render(<ChatMessage message={reply("**I'm Frank Coster**\nWhat I do:\n• Show cost")} />);
+    expect(screen.getByRole('heading', { name: "I'm Frank Coster" })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'What I do' })).toBeTruthy();
+  });
+
+  it('a ranked list keeps its typed numbers', () => {
+    const { container } = render(<ChatMessage message={reply('3. Marketing\n4. Legal')} />);
+    expect([...container.querySelectorAll('li')].map((li) => li.getAttribute('value'))).toEqual(['3', '4']);
+  });
+});

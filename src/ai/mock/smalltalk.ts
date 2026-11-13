@@ -9,7 +9,7 @@
 // team, workload or model, so conversation memory (which reads answer headers)
 // keeps the subject the user was discussing.
 
-import { CANNOT_DO, WHAT_I_DO, capabilityAnswer, dataLine, starterQuestions } from './answersMeta';
+import { WHAT_I_DO, cannotDo, capabilityAnswer, dataLine, starterQuestions } from './answersMeta';
 import { ladder } from './answerKit';
 import type { Answer, Scope, World } from './types';
 
@@ -129,7 +129,7 @@ function suggestions(world: World, focus: Scope | null): string[] {
 }
 
 const IDENTITY =
-  'I help leaders see what their AI spend returns: where the money goes, what value it produces and where to save. I show where every figure comes from.';
+  'I help leaders see what their AI workloads cost and return: where the money goes, what value it produces and where to save. I show where every figure comes from.';
 const HOW_I_WORK =
   "I'm a deterministic assistant, not a generative AI model: fixed rules compute every answer from the data in this view, so the same question in the same conversation always gets the same answer.";
 const HOW_ARE_YOU =
@@ -149,7 +149,7 @@ export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: Wor
       'What I do:',
       ...WHAT_I_DO.map((d) => `• ${d}`),
       "What I can't do:",
-      ...CANNOT_DO.map((c) => `• ${c}`),
+      ...cannotDo(world).map((c) => `• ${c}`),
       'How I work:',
       HOW_I_WORK,
       dataLine(world),

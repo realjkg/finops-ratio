@@ -42,17 +42,24 @@ export const WHO_I_AM =
 
 /** What Frank does, in executive terms. */
 export const WHAT_I_DO = [
-  'Show cost, value and Value / cost for the portfolio, a team, a workload or a model, with the evidence status of every figure',
+  'Show cost, value and Value / cost for the portfolio, a team, a workload or a model, with the evidence status of every Value / cost',
   'Rank teams, explain what drives cost and find savings',
   'Estimate EBITDA impact and the cost of moving a workload to a private open model, with every assumption stated',
 ];
 
-/** What Frank does not have or do. */
-export const CANNOT_DO = [
-  'Use data that is not in this view: revenue or EBITDA baselines, hosting costs, open-model quality, measured outcomes, forecasts, or anything per customer or per user',
-  "Act for you: I don't change budgets, approve spend or look anything up live. Approvals stay with the accountable owner",
-  'Guess: when a question is outside the data, I say so instead of making up a number',
-];
+/**
+ * What Frank does not have or do. "Measured outcomes" is listed as missing only
+ * when no workload in view carries measured value evidence.
+ */
+export function cannotDo(world: World): string[] {
+  const measured = world.workloads.some((w) => w.evidence === 'measured');
+  const missing = ['revenue or EBITDA baselines', 'hosting costs', 'open-model quality', ...(measured ? [] : ['measured outcomes']), 'forecasts'];
+  return [
+    `Use data that is not in this view: ${missing.join(', ')}, or anything per customer or per user`,
+    "Act for you: I don't change budgets, approve spend or look anything up live. Approvals stay with the accountable owner",
+    'Guess: when a question is outside the data, I say so instead of making up a number',
+  ];
+}
 
 export function capabilityAnswer(world: World): Answer {
   const s = sampleNames(world);
@@ -67,7 +74,7 @@ export function capabilityAnswer(world: World): Answer {
     '• EBITDA impact when spend goes down (percentages need a baseline you type)',
     '• Moving a workload from a public API to a private open model: monthly cost, saving, break-even and payback, from illustrative assumptions you can override',
     "What I can't do:",
-    ...CANNOT_DO.map((c) => `• ${c}`),
+    ...cannotDo(world).map((c) => `• ${c}`),
     'Follow-ups:',
     'Go from portfolio to team to workload to model, tokens, alerts and outcome evidence. I remember the last subject for follow-ups such as "what about its workloads?" (the last 12 messages only).',
     dataLine(world),

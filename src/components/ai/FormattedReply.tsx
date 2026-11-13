@@ -22,28 +22,33 @@ function Block({ block }: { block: ReplyBlock }): ReactNode {
   switch (block.kind) {
     case 'heading':
       return (
-        <p className="text-sm font-semibold leading-snug text-txt">
+        <p role="heading" aria-level={3} className="text-sm font-semibold leading-snug text-txt">
           <Text inline={block.inline.map((s) => ({ ...s, strong: false }))} />
         </p>
       );
     case 'label':
       return (
-        <p className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-dim">
+        <p role="heading" aria-level={4} className="pt-1 text-[11px] font-semibold uppercase tracking-wide text-dim">
           <Text inline={block.inline.map((s) => ({ ...s, strong: false }))} />
         </p>
       );
     case 'list': {
+      // Ordered items keep the number that was typed (a ranked list that
+      // continues at 3 must not restart at 1).
+      const numbers = block.ordered ? block.numbers : null;
       const items = block.items.map((item, i) => (
-        <li key={i} className="pl-0.5">
+        <li key={i} className="pl-0.5" value={numbers ? numbers[i] : undefined}>
           <Text inline={item} />
         </li>
       ));
       return block.ordered ? (
-        <ol className="list-decimal space-y-1 pl-5">{items}</ol>
+        <ol className="list-decimal space-y-1 pl-6">{items}</ol>
       ) : (
         <ul className="list-disc space-y-1 pl-5 marker:text-purple">{items}</ul>
       );
     }
+    case 'pre':
+      return <pre className="overflow-x-auto whitespace-pre font-mono text-[11px] leading-relaxed">{block.text}</pre>;
     case 'source':
       return (
         <p className="mt-1 border-t border-edge pt-2 text-[11px] leading-snug text-dim">

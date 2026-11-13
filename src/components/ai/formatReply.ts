@@ -1,10 +1,12 @@
 // Turns a plain-text Frank reply into display blocks: a heading, paragraphs,
-// section labels, bulleted and numbered lists, and the source footnote. Pure,
-// no HTML: the component renders the blocks as React elements, so nothing the
-// reply contains is ever interpreted as markup.
+// section labels, bulleted and numbered lists, preformatted text (code fences
+// and pipe tables) and the source footnote. Pure, no HTML: the component
+// renders the blocks as React elements, so nothing the reply contains is ever
+// interpreted as markup.
 //
 // The reply text itself is unchanged (spoken replies, tests and copy/paste all
-// read it as before); only its presentation changes.
+// read it as before); only its presentation changes. No word is dropped,
+// reordered or renumbered: ordered lists keep the numbers that were typed.
 
 export interface Inline {
   text: string;
@@ -15,17 +17,22 @@ export type ReplyBlock =
   | { kind: 'heading'; inline: Inline[] }
   | { kind: 'label'; inline: Inline[] }
   | { kind: 'paragraph'; inline: Inline[] }
-  | { kind: 'list'; ordered: boolean; items: Inline[][] }
+  | { kind: 'list'; ordered: false; items: Inline[][] }
+  | { kind: 'list'; ordered: true; items: Inline[][]; numbers: number[] }
+  | { kind: 'pre'; text: string }
   | { kind: 'source'; inline: Inline[] };
 
 const BOLD = /\*\*([^*\n]+)\*\*/g;
-const HEADING_MD = /^\s{0,3}#{1,4}\s+(.+?)\s*#*\s*$/;
+/** CommonMark ATX heading; a closing "#" run counts only after a space ("# Use C#" keeps its "#"). */
+const HEADING_MD = /^\s{0,3}#{1,4}\s+(.+?)(?:\s+#+)?\s*$/;
 const WHOLE_BOLD = /^\s*\*\*([^*\n]+)\*\*\s*$/;
 const BULLET = /^\s*(?:•|-|\*|·)\s+(.+)$/;
-const NUMBERED = /^\s*\d{1,3}[.)]\s+(.+)$/;
-/** A short line that introduces what follows: "Assumptions:", "What I can't do:". */
-const LABEL = /^\s*([^\s•*#-][^.!?]{0,58}):\s*$/;
+const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.+)$/;
+/** A short title that introduces what follows ("Next questions:", "What I can't do:"): words only, no figures. */
+const LABEL = /^\s*([A-Z][A-Za-z'’ /&-]{0,48}):\s*$/;
 const SOURCE = /^\s*Source:\s/;
+const FENCE = /^\s{0,3}(```|~~~)/;
+const TABLE_ROW = /^\s*\|.*\|\s*$/;
 
 /** Split **bold** runs out of a line; anything unmatched stays literal text. */
 export function parseInline(line: string): Inline[] {
@@ -41,34 +48,71 @@ export function parseInline(line: string): Inline[] {
   return out.length > 0 ? out : [{ text: line, strong: false }];
 }
 
+type OpenList = { ordered: false; items: Inline[][] } | { ordered: true; items: Inline[][]; numbers: number[] };
+
 export function parseReply(content: string): ReplyBlock[] {
   const blocks: ReplyBlock[] = [];
-  let list: { ordered: boolean; items: Inline[][] } | null = null;
+  const lines = content.replace(/\r\n?/g, '\n').split('\n');
+  const first = lines.findIndex((l) => l.trim() !== '');
+  let list: OpenList | null = null;
   const flush = () => {
-    if (list) blocks.push({ kind: 'list', ordered: list.ordered, items: list.items });
+    if (list) blocks.push(list.ordered ? { kind: 'list', ordered: true, items: list.items, numbers: list.numbers } : { kind: 'list', ordered: false, items: list.items });
     list = null;
   };
 
-  const lines = content.replace(/\r\n?/g, '\n').split('\n');
-  const first = lines.findIndex((l) => l.trim() !== '');
-  lines.forEach((raw, i) => {
-    const line = raw.trimEnd();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trimEnd();
+
+    // Code fence: everything up to the closing fence (or the end) is kept verbatim.
+    const fence = FENCE.exec(line);
+    if (fence) {
+      flush();
+      const body: string[] = [];
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trimStart().startsWith(fence[1])) body.push(lines[j++]);
+      blocks.push({ kind: 'pre', text: body.join('\n') });
+      i = j;
+      continue;
+    }
+    // Pipe table: consecutive rows are kept verbatim so their columns stay aligned.
+    if (TABLE_ROW.test(line)) {
+      flush();
+      const rows: string[] = [];
+      while (i < lines.length && TABLE_ROW.test(lines[i].trimEnd())) rows.push(lines[i++].trimEnd());
+      i--;
+      blocks.push({ kind: 'pre', text: rows.join('\n') });
+      continue;
+    }
     if (line.trim() === '') {
       flush();
-      return;
+      continue;
     }
-    const bullet = BULLET.exec(line);
-    const numbered = bullet ? null : NUMBERED.exec(line);
-    if (bullet || numbered) {
-      const ordered = numbered !== null;
-      const text = (bullet ?? numbered)![1];
-      if (!list || list.ordered !== ordered) {
+
+    const numbered = NUMBERED.exec(line);
+    const bullet = numbered ? null : BULLET.exec(line);
+    if (numbered) {
+      const current: OpenList | null = list;
+      if (current && current.ordered) {
+        current.items.push(parseInline(numbered[2]));
+        current.numbers.push(Number(numbered[1]));
+      } else {
         flush();
-        list = { ordered, items: [] };
+        list = { ordered: true, items: [parseInline(numbered[2])], numbers: [Number(numbered[1])] };
       }
-      list.items.push(parseInline(text));
-      return;
+      continue;
     }
+    if (bullet) {
+      const current: OpenList | null = list;
+      if (current && !current.ordered) current.items.push(parseInline(bullet[1]));
+      else {
+        // A bullet nested under a numbered item is its own list; the numbered
+        // list resumes with its typed numbers afterwards.
+        flush();
+        list = { ordered: false, items: [parseInline(bullet[1])] };
+      }
+      continue;
+    }
+
     flush();
     const md = HEADING_MD.exec(line);
     const whole = WHOLE_BOLD.exec(line);
@@ -78,7 +122,7 @@ export function parseReply(content: string): ReplyBlock[] {
     else if (SOURCE.test(line)) blocks.push({ kind: 'source', inline: parseInline(line.trim()) });
     else if (LABEL.test(line)) blocks.push({ kind: 'label', inline: parseInline(line.trim().replace(/:$/, '')) });
     else blocks.push({ kind: 'paragraph', inline: parseInline(line.trim()) });
-  });
+  }
   flush();
   return blocks;
 }
