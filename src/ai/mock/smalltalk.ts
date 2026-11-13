@@ -11,6 +11,7 @@
 
 import { WHAT_I_DO, cannotDo, capabilityAnswer, dataLine, starterQuestions } from './answersMeta';
 import { ladder } from './answerKit';
+import { DOING_WELL_HEADER, GOODBYE_HEADER, GOT_IT_HEADER, IDENTITY_HEADER, WELCOME_HEADER, greetingHeader } from './metaHeaders';
 import type { Answer, Scope, World } from './types';
 
 export type SmallTalkKind = 'greeting' | 'how_are_you' | 'thanks' | 'acknowledge' | 'farewell' | 'identity' | 'start';
@@ -155,7 +156,7 @@ export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: Wor
       HOW_I_WORK,
       dataLine(world),
     ];
-    return { ...base, header: "**I'm Frank Coster, Ratio's FinOps accountability partner**", body, next };
+    return { ...base, header: IDENTITY_HEADER, body, next };
   }
   if (kinds.includes('greeting')) {
     const body = [
@@ -164,17 +165,17 @@ export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: Wor
       dataLine(world),
       'Good places to start are below. Ask "Who are you?" to hear what I can and can\'t do, or "What can you answer?" for the full list.',
     ];
-    return { ...base, header: `**${greetingWord(text)} — I'm Frank Coster**`, body, next };
+    return { ...base, header: greetingHeader(greetingWord(text)), body, next };
   }
   if (kinds.includes('how_are_you')) {
-    return { ...base, header: '**Doing well**', body: [HOW_ARE_YOU, 'What would you like to look at?'], next };
+    return { ...base, header: DOING_WELL_HEADER, body: [HOW_ARE_YOU, 'What would you like to look at?'], next };
   }
   if (kinds.includes('farewell')) {
     const welcome = kinds.includes('thanks') ? ["You're welcome."] : [];
-    return { ...base, header: '**Goodbye**', body: [...welcome, 'Thanks for the conversation. Come back any time with a question about cost, value or savings.'], next: [] };
+    return { ...base, header: GOODBYE_HEADER, body: [...welcome, 'Thanks for the conversation. Come back any time with a question about cost, value or savings.'], next: [] };
   }
   if (kinds.includes('thanks')) {
-    return { ...base, header: "**You're welcome**", body: ['Happy to help. Want to go a level deeper?'], next };
+    return { ...base, header: WELCOME_HEADER, body: ['Happy to help. Want to go a level deeper?'], next };
   }
-  return { ...base, header: '**Got it**', body: ['What would you like to look at next?'], next };
+  return { ...base, header: GOT_IT_HEADER, body: ['What would you like to look at next?'], next };
 }

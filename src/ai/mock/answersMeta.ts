@@ -2,6 +2,7 @@
 
 import { rollup } from './calc';
 import { basisLine, evid, returnText, usd } from './format';
+import { CAPABILITY_HEADER } from './metaHeaders';
 import type { Answer, World } from './types';
 
 const UNSUPPORTED_HEADER = "**I can't answer that from this data**";
@@ -80,7 +81,7 @@ export function capabilityAnswer(world: World): Answer {
     dataLine(world),
   ];
   return {
-    header: '**What I can answer**',
+    header: CAPABILITY_HEADER,
     body,
     next: [
       'Which team is driving the highest cost?',

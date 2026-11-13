@@ -4,6 +4,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { BASIS, CTX, UNSUPPORTED, ask, last, nextQuestions, restoreClock, useFastClock } from './__testkit__/ask';
+import { isMetaHeader } from './metaHeaders';
 import { smallTalkKinds } from './smalltalk';
 
 beforeAll(useFastClock);
@@ -341,6 +342,53 @@ describe('review round 10: the small-talk gate and the analytic path agree on ba
       const r = await ask([s, q]);
       expect(r[1].split('\n')[0], `${s} / ${q}`).toBe(header);
       expect(r[1]).not.toContain(UNSUPPORTED);
+    }
+  });
+});
+
+describe('review round 15: small-talk and meta headers never become the conversation subject', () => {
+  // A realistic team name that also appears in Frank's identity header.
+  const finops = { ...CTX, workloads: (CTX.workloads ?? []).map((w, n) => (n < 2 ? { ...w, team: 'FinOps' } : w)) };
+
+  it('"who are you?" does not switch the subject to a team called FinOps', async () => {
+    const r = await ask(['ROI of Sales Copilot', 'who are you?', 'show its workloads'], finops);
+    expect(r[2].split('\n')[0]).toContain('Sales Copilot');
+    expect(r[2]).not.toMatch(/FinOps \(team\)/);
+  });
+
+  it('"who are you?" alone does not invent a subject', async () => {
+    const r = await ask(['who are you?', 'show its workloads'], finops);
+    expect(r[1]).not.toMatch(/FinOps \(team\)/);
+  });
+
+  it.each([
+    ['What', 'where do I start?'],
+    ['Welcome', 'thanks'],
+    ['Goodbye', 'bye'],
+    ['Well', 'how are you?'],
+    ['Got', 'ok'],
+    ['Partner', 'who are you?'],
+    ['Accountability', 'help'],
+  ])('a team named %s is not picked up from the reply to "%s"', async (team, talk) => {
+    const ctx = { ...CTX, workloads: (CTX.workloads ?? []).map((w, n) => (n < 2 ? { ...w, team } : w)) };
+    const r = await ask(['ROI of Sales Copilot', talk, 'show its workloads'], ctx);
+    expect(r[2].split('\n')[0], `${team} / ${talk}`).toContain('Sales Copilot');
+  });
+});
+
+describe('review round 15: the meta-header list matches the real replies', () => {
+  it('every small-talk, identity, capability and help reply starts with a meta header', async () => {
+    
+    for (const q of ['Hi Frank', 'Good morning', 'hello there', 'who are you?', 'how are you?', 'thanks', 'ok', 'bye', 'where do I start?', 'What can you answer?', 'help', '?']) {
+      const first = (await last([q])).split('\n')[0];
+      expect(isMetaHeader(first), `${q}: ${first}`).toBe(true);
+    }
+  });
+
+  it('no analytic answer header is a meta header', async () => {
+    
+    for (const q of ['Which team is driving the highest cost?', 'ROI of Sales Copilot', 'Summarize the portfolio', 'How much can we save?']) {
+      expect(isMetaHeader((await last([q])).split('\n')[0]), q).toBe(false);
     }
   });
 });

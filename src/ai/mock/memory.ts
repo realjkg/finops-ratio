@@ -6,6 +6,7 @@
 
 import type { AIMessage } from '../AIClient';
 import { findMentions, pickSubject } from './entities';
+import { isMetaHeader } from './metaHeaders';
 import type { Scope, World } from './types';
 
 export const MAX_HISTORY = 12;
@@ -20,7 +21,12 @@ export function deriveFocus(history: AIMessage[], world: World): Scope | null {
     if (typeof m?.content !== 'string') continue;
     let text: string;
     if (m.role === 'user') text = m.content.slice(0, USER_SCAN);
-    else if (m.role === 'assistant') text = (m.content.split('\n', 1)[0] ?? '').slice(0, ASSISTANT_SCAN);
+    else if (m.role === 'assistant') {
+      const first = m.content.split('\n', 1)[0] ?? '';
+      // Small-talk, identity, capability and help replies never name a subject.
+      if (isMetaHeader(first)) continue;
+      text = first.slice(0, ASSISTANT_SCAN);
+    }
     else continue;
     const subject = pickSubject(findMentions(text, world));
     if (subject) return subject.scope;
