@@ -74,8 +74,15 @@ export function recognitionLanguage(explicit?: string): string | undefined {
 
 // ---- Inline error copy (one-line hints — no stack traces in the chat) ----
 
+// Each browser error gets its own hint: "access was denied" is shown only when the
+// site permission really is the cause (owner report, iPhone Safari).
 export const MIC_PERMISSION_DENIED =
-  'Microphone access was denied — allow the mic permission for this site and try again.';
+  'Microphone access is blocked for this site — allow it in your browser settings (on iPhone: aA > Website Settings > Microphone), then try again.';
+export const SPEECH_SERVICE_UNAVAILABLE =
+  "Voice input isn't available in this browser right now. On iPhone, check that Dictation is on (Settings > General > Keyboard), or type your question.";
+export const NO_MICROPHONE = 'No microphone was found — connect one or type your question.';
+export const SPEECH_SERVICE_UNREACHABLE =
+  "Voice input couldn't reach the browser's speech service — check your connection or type your question.";
 export const VOICE_INPUT_FAILED = 'Voice input did not work — try again.';
 
 // ---- Dictation controller ----
@@ -183,8 +190,14 @@ export class VoiceDictationController {
   }
 
   private handleError(code: string): void {
-    if (code === 'not-allowed' || code === 'service-not-allowed') {
-      this.callbacks.onError(MIC_PERMISSION_DENIED);
+    const hint: Record<string, string> = {
+      'not-allowed': MIC_PERMISSION_DENIED,
+      'service-not-allowed': SPEECH_SERVICE_UNAVAILABLE,
+      'audio-capture': NO_MICROPHONE,
+      network: SPEECH_SERVICE_UNREACHABLE,
+    };
+    if (Object.hasOwn(hint, code)) {
+      this.callbacks.onError(hint[code]);
       return;
     }
     // no-speech / aborted end quietly via onend; anything else is a generic retry hint.

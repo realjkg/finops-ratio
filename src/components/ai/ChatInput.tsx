@@ -110,7 +110,7 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
           rows={1}
           aria-label="Ask about your initiative portfolio"
           placeholder="Ask about initiative risk, cost, or savings…"
-          className="max-h-28 flex-1 resize-none rounded-md border border-edge bg-slab px-3 py-2 font-mono text-xs text-txt outline-none placeholder:text-dim focus:border-purple"
+          className="max-h-28 flex-1 resize-none rounded-md border border-edge bg-slab px-3 py-2 font-mono text-base text-txt outline-none placeholder:text-dim focus:border-purple sm:text-xs"
         />
         <button
           type="submit"

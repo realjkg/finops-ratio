@@ -166,3 +166,27 @@ test('Estimated value: opening it describes the button and announces the text; E
   await page.keyboard.press('Escape');
   await expect(note).toHaveCount(0);
 });
+
+// Owner report (iPhone): typing in the Frank panel left the page zoomed in with the panel
+// cut off on the right. iOS Safari zooms into a focused field whose font is below 16px.
+for (const width of [320, 390]) {
+  test(`Frank chat box is at least 16px at ${width}px so iOS does not zoom in, and the panel fits the screen`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/');
+    await nav(page).getByRole('button', { name: 'Ask Frank Coster' }).click();
+    const box = page.getByRole('textbox', { name: 'Ask about your initiative portfolio' });
+    await box.focus();
+    const px = await box.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(px).toBeGreaterThanOrEqual(16);
+    const fit = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, inner: window.innerWidth }));
+    expect(fit.doc).toBeLessThanOrEqual(fit.inner);
+  });
+}
+
+test('Frank chat box stays compact on a desktop screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await nav(page).getByRole('button', { name: 'Ask Frank Coster' }).click();
+  const px = await page.getByRole('textbox', { name: 'Ask about your initiative portfolio' }).evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(px).toBeLessThan(16);
+});
