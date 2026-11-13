@@ -20,7 +20,7 @@ import { atRisk, costDriver, help, savings, summary } from './legacy';
 import { SOURCE_PREFIX, render } from './format';
 import { scopeLabel } from './calc';
 import { buildWorld, legacyContext } from './world';
-import { smallTalkAnswer, smallTalkKinds } from './smalltalk';
+import { smallTalkAnswer, smallTalkKinds, withoutIdioms } from './smalltalk';
 import type { Answer, Scope, World } from './types';
 
 const LEGACY_HELP = /^\s*(?:help|\?)\W*$/;
@@ -133,7 +133,8 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   const talk = smallTalkKinds(text);
   if (talk && !mentions.some((m) => m.scope.kind !== 'portfolio')) {
     const focus = deriveFocus(messages.slice(0, at), world);
-    if (!(ref.kind !== 'none' && focus !== null)) return done(smallTalkAnswer(talk, text, world, focus), world);
+    const pointsBack = detectReference(withoutIdioms(lower)).kind !== 'none';
+    if (!(pointsBack && focus !== null)) return done(smallTalkAnswer(talk, text, world, focus), world);
   }
 
   let intent = classifyIntent(lower, { hasEntity: explicit, namesTeam: namesTeam(mentions), backRef });

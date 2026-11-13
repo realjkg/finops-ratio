@@ -3,7 +3,7 @@
 // Anything that carries a question goes to the analytic router unchanged.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { BASIS, UNSUPPORTED, ask, last, nextQuestions, restoreClock, useFastClock } from './__testkit__/ask';
+import { BASIS, CTX, UNSUPPORTED, ask, last, nextQuestions, restoreClock, useFastClock } from './__testkit__/ask';
 import { smallTalkKinds } from './smalltalk';
 
 beforeAll(useFastClock);
@@ -146,7 +146,6 @@ describe('review round 1: real follow-ups and data names win over small talk', (
   });
 
   it('a team whose name is a small-talk word is answered as data', async () => {
-    const { CTX } = await import('./__testkit__/ask');
     // Teams come from the workload snapshots (world.ts), so rename the team there.
     const renamed = { ...CTX, workloads: (CTX.workloads ?? []).map((w, n) => (n === 0 ? { ...w, team: 'Great' } : w)) };
     const t = await last(['Great team'], renamed);
@@ -162,11 +161,39 @@ describe('review round 1: real follow-ups and data names win over small talk', (
   });
 
   it('counts are pluralized correctly', async () => {
-    const { CTX } = await import('./__testkit__/ask');
     const id = CTX.initiatives[0].id;
     const one = { ...CTX, initiatives: CTX.initiatives.slice(0, 1), workloads: (CTX.workloads ?? []).filter((w) => w.id === id), omitted: [] };
     const t = await last(['Hi Frank'], one);
     expect(t).toMatch(/In this view: 1 workload across 1 team\b/);
     expect(t).not.toMatch(/1 workloads|1 teams/);
+  });
+});
+
+describe('review round 2: greeting idioms are not back-references', () => {
+  const subjects = ['ROI of Sales Copilot', 'What is the ROI of the CX Engineering team?'];
+
+  it.each([
+    ['hi there', "**Hi — I'm Frank Coster**"],
+    ['Hey there!', "**Hey — I'm Frank Coster**"],
+    ['hello there', "**Hello — I'm Frank Coster**"],
+    ['appreciate it', "**You're welcome**"],
+    ['thanks, appreciate it', "**You're welcome**"],
+  ])('"%s" after an answer is small talk', async (q, header) => {
+    for (const s of subjects) {
+      const r = await ask([s, q]);
+      expect(r[1].split('\n')[0], `${s} / ${q}`).toBe(header);
+    }
+  });
+
+  it('a real "it" next to a greeting idiom is still a follow-up', async () => {
+    const r = await ask(['ROI of Sales Copilot', 'hi there, how is it going?']);
+    expect(r[1]).toContain('Sales Copilot');
+    expect(r[1].split('\n')[0]).not.toMatch(/Frank Coster/);
+  });
+
+  it('the subject survives the idiom', async () => {
+    const r = await ask(['What is the ROI of the CX Engineering team?', 'appreciate it', 'what about its workloads?']);
+    expect(r[2]).toContain('CX Engineering');
+    expect(r[2]).not.toContain(UNSUPPORTED);
   });
 });

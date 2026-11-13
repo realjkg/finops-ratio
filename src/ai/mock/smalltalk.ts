@@ -73,6 +73,14 @@ export function smallTalkKinds(text: string): SmallTalkKind[] | null {
   return kinds;
 }
 
+/** Polite idioms whose "there" or "it" never points back at a subject ("hi there", "appreciate it"). */
+const IDIOMS = /\b(?:(?:hi|hey|hello) there|appreciate it)\b/g;
+
+/** Lower-cased text with those idioms blanked, for the back-reference check on small talk. */
+export function withoutIdioms(lower: string): string {
+  return lower.replace(IDIOMS, ' ');
+}
+
 /** The greeting word to echo back, capitalized ("good morning" -> "Good morning"). */
 function greetingWord(text: string): string {
   const n = normalize(text);
