@@ -483,3 +483,30 @@ describe('review round 24: an unknown name is quoted as the user typed it', () =
     expect(t, q).not.toMatch(/called "?Frank/);
   });
 });
+
+describe('Copilot review of cc1ade4: Frank\'s name never changes which data is named', () => {
+  it('"Coster Pipeline" is never read as a real "Frank Pipeline" workload', async () => {
+    const withFrankPipeline = buildAIContext(WORKLOADS.map((w, i) => ({ ...w, name: i === 0 ? 'Frank Pipeline' : w.name })));
+    const t = await last(['ROI of Coster Pipeline'], withFrankPipeline);
+    expect(t.split('\n')[0]).not.toMatch(/Frank Pipeline/);
+    expect(t).toMatch(/called "Coster Pipeline"/);
+  });
+  it('a follow-up after a question that names Frank keeps the same kind of answer as without the name', async () => {
+    const withName = await ask(['Frank Coster, show Legal', 'what about Revenue?']);
+    const without = await ask(['show Legal', 'what about Revenue?']);
+    expect(withName[1].split('\n')[0]).toBe(without[1].split('\n')[0]);
+  });
+  it('addressing Frank after a list of entities is not an unknown name', async () => {
+    const t = await last(['ROI of Legal and Revenue, Coster?']);
+    expect(t).not.toMatch(/called "?Coster/);
+    expect(t.split('\n')[0]).toBe((await last(['ROI of Legal and Revenue?'])).split('\n')[0]);
+  });
+  it.each(['Frank Coster, what is the ROI of the Frank team?', 'Coster, what is the ROI of the Frank team?'])(
+    '%s reports the team the user asked about',
+    async (q) => {
+      const t = await last([q]);
+      expect(t, q).toMatch(/team called Frank\b/);
+      expect(t, q).not.toMatch(/called "?(?:Frank Coster|Coster)/);
+    },
+  );
+});
