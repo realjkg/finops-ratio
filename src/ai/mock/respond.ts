@@ -78,6 +78,12 @@ const INHERITABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 
 /** The question a bare follow-up repeats: the latest earlier user turn with a read-only intent. */
 /** Frank's surname in any form: "Frank Coster", "Frank Costers", "frankcoster", "Coster", possessives. */
 const NAME_RX = /\b(?:frank\s*)?coster(?:(['’]s)|s)?\b/gi;
+/**
+ * Frank's surname used to address him: alone at the start before a comma ("Coster, ROI of
+ * Legal") or alone at the end after a comma ("ROI of Legal, Coster?"). Anywhere else ("ROI
+ * of Coster") it names what the user is asking about.
+ */
+const ADDRESSES_FRANK = /(?:^\s*(?:frank\s*)?coster(?:['’]s|s)?\s*,|,\s*(?:frank\s*)?coster(?:['’]s|s)?\s*[?.!]*\s*$)/i;
 const FRANKS_NAME = /^(?:frank\s*)?coster(?:['’]s|s)?$/i;
 
 /**
@@ -194,8 +200,9 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
     if (team && !explicit) return reply(unknownNameText(world, { name: team, team: true }));
     const lone = !subject && !backRef && (NAMEABLE.has(intent) || intent === 'legacy' || intent === 'savings' || intent === 'cost_driver');
     const capitalized = team || !(explicit || lone) ? null : unknownCapitalized(text, explicit ? mentions : []);
-    // Frank's own name addressed to him ("ROI of Legal, Coster?") is not an unknown entity.
-    const name = capitalized && !FRANKS_NAME.test(capitalized.trim()) ? capitalized : null;
+    // Frank's own name addressed to him ("ROI of Legal, Coster?") is not an unknown entity;
+    // "ROI of Coster" asks about something named Coster, so that is reported as unknown.
+    const name = capitalized && !(FRANKS_NAME.test(capitalized.trim()) && ADDRESSES_FRANK.test(text)) ? capitalized : null;
     if (team) notes.push(`Note: I don't have a team called ${team}; ${only}.`);
     else if (name && explicit) notes.push(`Note: I don't have a team, workload or model called "${name}"; ${only}.`);
     else if (name) return reply(unknownNameText(world, { name, team: false }));

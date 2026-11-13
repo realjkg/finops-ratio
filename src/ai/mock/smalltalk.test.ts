@@ -501,6 +501,10 @@ describe('Copilot review of cc1ade4: Frank\'s name never changes which data is n
     expect(t).not.toMatch(/called "?Coster/);
     expect(t.split('\n')[0]).toBe((await last(['ROI of Legal and Revenue?'])).split('\n')[0]);
   });
+  it.each(['ROI of Coster', 'What is the ROI of Costers?'])('%s asks about something named Coster: the unknown name is reported, not the portfolio', async (q) => {
+    const t = await last([q]);
+    expect(t, q).toMatch(/called "Costers?"/);
+  });
   it.each(['Frank Coster, what is the ROI of the Frank team?', 'Coster, what is the ROI of the Frank team?'])(
     '%s reports the team the user asked about',
     async (q) => {
