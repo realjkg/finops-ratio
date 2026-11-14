@@ -25,7 +25,7 @@ import { BUDGET_PROFILES } from '@/data/budgets';
 import { ALERTS } from '@/data/alerts';
 import { MODEL_REGISTRY } from '@/data/models';
 import { allGatesPassed } from '@/lib/derive';
-import { buildAIContext, createAIClient, fitHistory, MAX_MESSAGE_CHARS } from '@/ai';
+import { buildAIContext, createAIClient, fitHistory, MAX_MESSAGE_CHARS, SIM_MAX_QUESTION_CHARS } from '@/ai';
 import { withSourceLine } from '@/ai/mock/format';
 import type { AIMessage, AIProvider } from '@/ai';
 
@@ -328,13 +328,14 @@ export const useStore = create<AppState>((set, get) => ({
     const trimmed = content.trim();
     if (!trimmed) return;
     const { workloads, selectedId, now, aiMessages } = get();
-    // The route rejects a longer message. It is not added to the history, which is resent on every
-    // later turn, so one long paste cannot make the rest of the conversation fail.
-    if (trimmed.length > MAX_MESSAGE_CHARS) {
+    // The route rejects a longer message (the simulation route a shorter one). It is not added to the
+    // history, which is resent on every later turn, so one long paste cannot fail the rest.
+    const limit = get().simulation ? SIM_MAX_QUESTION_CHARS : MAX_MESSAGE_CHARS;
+    if (trimmed.length > limit) {
       const notice: AIChatMessage = {
         id: nextMessageId(),
         role: 'system',
-        content: `Message not sent: it is ${trimmed.length.toLocaleString('en-US')} characters long, and the limit is ${MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters. Shorten it and ask again.`,
+        content: `Message not sent: it is ${trimmed.length.toLocaleString('en-US')} characters long, and the limit is ${limit.toLocaleString('en-US')} characters. Shorten it and ask again.`,
         timestamp: new Date().toISOString(),
       };
       set((state) => ({ aiMessages: [...state.aiMessages, notice] }));
@@ -354,8 +355,11 @@ export const useStore = create<AppState>((set, get) => ({
     // prepends its own system prompt from the context.
     // fitHistory keeps it within every route limit (turns, characters, request bytes), dropping the
     // oldest turns first; this question is always last.
+    // A question that failed (the next message is its "AI error:" notice) is left out: a provider that
+    // rejected it once would reject every later turn that resends it.
+    const failed = (i: number) => aiMessages[i].role === 'user' && aiMessages[i + 1]?.role === 'system' && aiMessages[i + 1].content.startsWith(AI_ERROR_PREFIX);
     const history: AIMessage[] = fitHistory(
-      [...aiMessages, userMessage].flatMap((m) => (m.role === 'user' || m.role === 'assistant' ? [{ role: m.role, content: m.content }] : [])),
+      [...aiMessages.filter((_, i) => !failed(i)), userMessage].flatMap((m) => (m.role === 'user' || m.role === 'assistant' ? [{ role: m.role, content: m.content }] : [])),
       { focusInitiativeId: selectedId || null },
     );
     const context = buildAIContext(workloads, selectedId || null, now);
@@ -387,7 +391,7 @@ export const useStore = create<AppState>((set, get) => ({
       const errorMessage: AIChatMessage = {
         id: nextMessageId(),
         role: 'system',
-        content: `AI error: ${message}`,
+        content: `${AI_ERROR_PREFIX}${message}`,
         timestamp: new Date().toISOString(),
       };
       set((state) => ({
@@ -400,3 +404,5 @@ export const useStore = create<AppState>((set, get) => ({
   toggleAIPanel: () => set((state) => ({ aiPanelOpen: !state.aiPanelOpen })),
 }));
 
+/** Opens every inline chat error; a user turn followed by one is a failed question. */
+const AI_ERROR_PREFIX = 'AI error: ';

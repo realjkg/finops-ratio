@@ -13,6 +13,8 @@ import { useVoiceDictation } from './useVoiceDictation';
 interface ChatInputProps {
   disabled: boolean;
   onSend: (text: string) => void;
+  /** Longest question the current mode accepts; a longer draft is kept (not cleared) when refused. */
+  maxChars?: number;
 }
 
 function MicIcon({ className = '' }: { className?: string }) {
@@ -34,7 +36,7 @@ function MicIcon({ className = '' }: { className?: string }) {
   );
 }
 
-export function ChatInput({ disabled, onSend }: ChatInputProps) {
+export function ChatInput({ disabled, onSend, maxChars = MAX_MESSAGE_CHARS }: ChatInputProps) {
   const [draft, setDraft] = useState('');
   // A committed transcript lands in the draft (appended, space-joined) so the
   // user can review or edit it — sending still flows through the existing path.
@@ -46,7 +48,8 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
     const text = draft.trim();
     if (!text || disabled) return;
     onSend(text);
-    setDraft('');
+    // Too long: the panel refuses it with a notice; keep the draft so it can be shortened, not retyped.
+    if (text.length <= maxChars) setDraft('');
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -109,7 +112,6 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onKeyDown}
           rows={1}
-          maxLength={MAX_MESSAGE_CHARS}
           aria-label="Ask about your initiative portfolio"
           placeholder="Ask about initiative risk, cost, or savings…"
           className="max-h-28 flex-1 resize-none rounded-md border border-edge bg-slab px-3 py-2 font-mono text-xs text-txt outline-none placeholder:text-dim focus:border-purple"
@@ -122,6 +124,12 @@ export function ChatInput({ disabled, onSend }: ChatInputProps) {
           Send
         </button>
       </div>
+      {/* Shown near and over the limit, so a long paste is never cut silently. */}
+      {draft.length > maxChars * 0.9 && (
+        <p data-testid="chat-char-count" aria-live="polite" className={`pt-1 text-right font-mono text-[11px] ${draft.length > maxChars ? 'text-cost' : 'text-dim'}`}>
+          {draft.length.toLocaleString('en-US')} / {maxChars.toLocaleString('en-US')} characters
+        </p>
+      )}
     </form>
   );
 }

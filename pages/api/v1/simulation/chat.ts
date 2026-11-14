@@ -1,3 +1,4 @@
+import { SIM_MAX_QUESTION_CHARS } from '@/ai/limits';
 import { frankGuide } from '@/agent-workflows/frank';
 import { database } from '@/simulation/server/database';
 import { requireCsrf, sessionFor, simulationRoute } from '@/simulation/server/http';
@@ -8,7 +9,7 @@ export const config = { api: { bodyParser: { sizeLimit: '8kb' } } };
 export default simulationRoute(['POST'], async (req, res) => {
   const session = sessionFor(req); requireCsrf(req, session);
   const message = req.body?.message;
-  if (typeof message !== 'string' || !message.trim() || message.length > 2000) throw new WorkflowError(400, 'Enter a question of up to 2,000 characters.');
+  if (typeof message !== 'string' || !message.trim() || message.length > SIM_MAX_QUESTION_CHARS) throw new WorkflowError(400, 'Enter a question of up to 2,000 characters.');
   const state = database().read(session.identity.tenant);
   if (/baseline|owner|evidence|full cost|expand|governance|permission|credential/.test(message.toLowerCase())) {
     const workloadId = req.body?.workloadId ?? state.workloads[0].id;
