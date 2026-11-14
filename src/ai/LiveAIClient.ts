@@ -1,4 +1,5 @@
-// LiveAIClient — posts to /api/v1/ai/chat. The actual LLM call happens server-side;
+// LiveAIClient — posts to /api/v1/ai/chat. The actual LLM call happens server-side,
+// over a context the server builds from its own records;
 // this client never sees an API key. Mirrors LiveCostSourceClient error handling:
 // a typed Error on network failure and on non-2xx, never a raw fetch rejection.
 
@@ -17,7 +18,9 @@ export class LiveAIClient implements AIClient {
       res = await fetch(CHAT_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages, context }),
+        // Only the conversation and the focus id cross the wire: the server derives
+        // every figure, name and evidence status from its own records.
+        body: JSON.stringify({ messages, focusInitiativeId: context.focusInitiativeId ?? null }),
       });
     } catch (err) {
       throw new Error(

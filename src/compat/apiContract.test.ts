@@ -258,8 +258,13 @@ async function captureAll(): Promise<Record<string, unknown>> {
     await call(import('../../pages/api/finio/export'), makeReq('GET')),
   );
 
+  // Contract change (value-derivation note §7.1, honesty fix 1): the route answers from its own
+  // records. A legacy body that still carries a client context gets the same server-derived answer.
   out['v1/ai/chat mock answer (empty env)'] = shape(
     await call(import('../../pages/api/v1/ai/chat'), makeReq('POST', { body: CHAT_BODY })),
+  );
+  out['v1/ai/chat mock answer, focus id only (empty env)'] = shape(
+    await call(import('../../pages/api/v1/ai/chat'), makeReq('POST', { body: { messages: CHAT_BODY.messages, focusInitiativeId: 'wl-support' } })),
   );
 
   for (const format of ['pdf', 'xlsx']) {

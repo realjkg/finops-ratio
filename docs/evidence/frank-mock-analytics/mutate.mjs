@@ -105,7 +105,7 @@ const MUTANTS = [
   ['wrong-type-as-absent', M + 'world.ts', 'if (v == null) return null; // absent', "if (typeof v !== 'number') return null;", 'a present non-number reads as absent'],
   ['list-before-off', M + 'entities.ts', '[LIST_NAME_RX, LIST_BEFORE_RX]', '[LIST_NAME_RX]', 'a name before the separator is dropped'],
   ['summary-trusted-on-reject', M + 'world.ts', 'return drop.size === 0 && initiatives.length === arr(ctx.initiatives).length && typeof v', 'return typeof v', 'summary keeps rejected workloads'],
-  ['mock-prompt-built', 'pages/api/v1/ai/chat.ts', "adapter.provider === 'mock' ?", 'false ?', 'the mock route formats raw context first'],
+  ['route-trusts-client-context', 'pages/api/v1/ai/chat.ts', 'const context = serverChatContext(readFocus(req.body as Record<string, unknown>) ?? null);', 'const context = (req.body as { context: AIContext }).context ?? serverChatContext(null);', 'the route answers from client-supplied figures'],
   ['jobs-unvalidated', 'docs/evidence/frank-mock-analytics/mutate.mjs', 'jobs < 1) {\n  log(', 'jobs < 1 && false) {\n  log(', 'invalid --jobs accepted'],
   ['team-word-stop-dropped', M + 'entities.ts', 'team teams group groups department departments dept show', 'show', 'team words captured as names'],
 ];

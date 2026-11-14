@@ -1,5 +1,5 @@
 {
-  "_generatedFrom": "feat/quality-floor-tca@daeadb3 + fix/focus-normalization-fixtures (C1: ServiceSubcategory default, truthful backfill audit); x_RatioGovernanceGates re-captured for fix/readiness-seed-consistency (Fraud Triage cost/scale gates lapsed)",
+  "_generatedFrom": "feat/quality-floor-tca@daeadb3 + fix/focus-normalization-fixtures (C1: ServiceSubcategory default, truthful backfill audit); x_RatioGovernanceGates re-captured for fix/readiness-seed-consistency (Fraud Triage cost/scale gates lapsed); v1/ai/chat re-captured on fix/chat-trust-boundary (honesty fix 1: server-derived context; legacy client context ignored)",
   "costsource/sources sandbox entries": {
     "status": 200,
     "body": [
@@ -2491,10 +2491,33 @@
     "body": {
       "message": {
         "role": "assistant",
-        "content": "1 initiative(s) need attention:\n• **GPT Summarizer** — At Risk, $50,000/mo at 2.1× return, $8,000/mo savings identified\nTotal portfolio: $50,000/mo across 1 initiatives."
+        "content": "6 initiative(s) need attention:\n• **Customer Support Agent** — At Risk, $13,632/mo at 13.8× return (value evidence: assumed)\n• **Sales Copilot** — At Risk, $6,800/mo at 7.4× return (value evidence: assumed)\n• **Code Review Bot** — At Risk, $2,400/mo at 20.8× return (value evidence: assumed)\n• **Document Summarizer** — At Risk, $1,150/mo at 5.4× return (value evidence: assumed)\n• **Marketing Content Gen** — Pending Approval, $4,900/mo at 2.3× return (value evidence: assumed), $1,568/mo savings identified\n• **Fraud Triage Agent** — Pending Approval, $4,200/mo at -0.2× return (value evidence: assumed), $840/mo savings identified\nTotal portfolio: $41,212/mo across 11 initiatives."
       },
       "initiativesReferenced": [
-        "i1"
+        "wl-support",
+        "wl-sales",
+        "wl-codereview",
+        "wl-docsum",
+        "wl-marketing",
+        "wl-fraud"
+      ],
+      "provider": "mock"
+    }
+  },
+  "v1/ai/chat mock answer, focus id only (empty env)": {
+    "status": 200,
+    "body": {
+      "message": {
+        "role": "assistant",
+        "content": "6 initiative(s) need attention:\n• **Customer Support Agent** — At Risk, $13,632/mo at 13.8× return (value evidence: assumed)\n• **Sales Copilot** — At Risk, $6,800/mo at 7.4× return (value evidence: assumed)\n• **Code Review Bot** — At Risk, $2,400/mo at 20.8× return (value evidence: assumed)\n• **Document Summarizer** — At Risk, $1,150/mo at 5.4× return (value evidence: assumed)\n• **Marketing Content Gen** — Pending Approval, $4,900/mo at 2.3× return (value evidence: assumed), $1,568/mo savings identified\n• **Fraud Triage Agent** — Pending Approval, $4,200/mo at -0.2× return (value evidence: assumed), $840/mo savings identified\nTotal portfolio: $41,212/mo across 11 initiatives."
+      },
+      "initiativesReferenced": [
+        "wl-support",
+        "wl-sales",
+        "wl-codereview",
+        "wl-docsum",
+        "wl-marketing",
+        "wl-fraud"
       ],
       "provider": "mock"
     }
