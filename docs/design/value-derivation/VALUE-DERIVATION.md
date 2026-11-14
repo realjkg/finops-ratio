@@ -60,7 +60,9 @@ Every value figure must state its formula inputs, their sources, the period, the
 For one initiative, one period and one currency:
 
 ```
-Value  V = [ (N_observed − N_counterfactual) × U  +  N_observed × (K_counterfactual − K_observed) ] × A  −  H
+Value  V = (N_observed − N_counterfactual) × U × A_output
+         + (N_counterfactual × K_counterfactual − N_observed × K_observed) × A_cost
+         − H
 Cost   C = reconciled model usage + infrastructure + implementation + oversight + labor   (same period, same currency)
 Value / cost = V ÷ C          ROI = (V − C) ÷ C
 ```
@@ -69,13 +71,16 @@ Value / cost = V ÷ C          ROI = (V − C) ÷ C
 |---|---|---|---|
 | `N_observed` | Count of successful outcomes in the period that meet the **pre-approved quality condition** | Outcome events from the system of record (ticketing, CRM, claims, CI), joined to traces and billing by ID, through a connector at **Reconciled** (ADR-0002 D4); `successfulOutcomeCount` in `durable.ts` already applies the quality gate | No one types it; it is computed |
 | `N_counterfactual` | Outcomes that would have happened without the AI | In order of strength: (1) a **holdout or control group** run in the same period; (2) a **pre-registered baseline** from an equal-length prior period, normalized for volume; (3) none, which makes the figure at best `projected` | Method fixed in the outcome registration **before** the observation period starts |
-| `U` | Money value of one incremental outcome | A **unit-value register** owned by finance: amount, currency, effective dates, source document, and whether it is revenue (then × contribution margin) or cost avoided | Finance owner; approved by someone other than the workload team |
+| `U` | Money value of one incremental outcome | A **unit-value register** owned by finance: amount, currency, effective dates, source document, and whether it is revenue (then × contribution margin) or cost avoided. A cost-avoided `U` must exclude every process cost already measured in `K`, so the same saving is never counted in both terms | Finance owner; approved by someone other than the workload team |
 | `K_counterfactual`, `K_observed` | Cost per outcome of the work **other than the AI's own full cost `C`**: the replaced process without the AI, and the remaining process with it (for example, staff handling time per ticket × a loaded labor rate) | Measured unit costs from the system of record (time tracking, ticket handling time, vendor invoices) priced with rates from the finance register; `K_counterfactual` from the same holdout or pre-registered baseline as `N_counterfactual` | Method fixed in the registration; rates owned by finance |
-| `A` | Share of the improvement credited to the AI | 100% only with a holdout (the difference is the attribution); otherwise a stated, justified share, never a silent default | Set in the registration; changed only through a new, reviewed registration |
-| `H` | Incremental cost of failed or harmful outcomes | (quality-failed events observed − quality-failed events in the counterfactual) × a harm unit value from the same register, so harm is incremental like the benefit term | Computed |
+| `A_output`, `A_cost` | Share of each improvement credited to the AI: the change in volume, and the change in process cost | 100% for both only with a holdout (the difference is the attribution); otherwise a stated, justified share for each, never a silent default. A parallel process change can move one but not the other, so one shared share needs its own justification | Set in the registration; changed only through a new, reviewed registration |
+| `H` | Incremental cost of failed or harmful outcomes | (quality-failed events observed − quality-failed events in the counterfactual) × a harm unit value from the same register, so harm is incremental like the benefit terms. Not attributed: all extra harm is charged to the AI (conservative). The harm unit excludes any rework cost already measured in `K_observed`, so rework is never counted twice | Computed |
 | `C` | Full cost | `cost_facts_published` (reconciled batches only, which needs each batch's reconciliation state; the reader cannot see it until the batch-status view of migration 0005 exists) + supplemental costs, each with its own evidence status | Computed; supplemental costs verified by a second person |
 
-The two benefit terms are separate on purpose. The first counts **more output** (incremental outcomes × their value). The second counts **cheaper output** (cost avoided on the outcomes that happened). If the AI replaces existing work without changing the volume, the first term is zero and all the value comes from the second. Example: 100 outcomes either way, $10 of manual cost per outcome before, $0 after, AI full cost `C` = $200. Then V = 100 × $10 = $1,000, Value / cost = 5.0× and ROI = 400% (a net $800 saved). The AI's own cost is never in `K`; it is only in `C`, so it is not counted twice.
+The two benefit terms are separate on purpose. The first counts **more output**: incremental outcomes × their value. The second counts **cheaper output**: the change in the total cost of the work other than the AI, `N_counterfactual × K_counterfactual − N_observed × K_observed`. It credits no avoided cost on extra outcomes that would not have happened at all. The AI's own cost is never in `K`; it is only in `C`, so it is not counted twice.
+
+- **Same volume, cheaper work.** 100 outcomes either way, $10 of manual cost per outcome before and $0 after, AI full cost `C` = $200, `A` = 100%. Then V = 0 + (1,000 − 0) = $1,000, Value / cost = 5.0× and ROI = 400% (a net $800 saved).
+- **More volume and cheaper work.** 100 outcomes before and 150 after, `K` $10 before and $2 after, `U` = $5, `A` = 100%. Then V = 50 × $5 + (100 × $10 − 150 × $2) = $250 + $700 = $950.
 
 Report a **range**, not only a point: low and high values from the uncertainty in `N_counterfactual` (holdout confidence interval or baseline variance), in `U` and in `K`. Proposed: the Value / cost, ROI and evidence status use the **low end** (the conservative point), and the range is shown beside it.
 
@@ -87,7 +92,7 @@ The status is computed from the inputs; nobody selects it.
 
 | Status | Required for every input |
 |---|---|
-| `measured` | `N_observed` from system-of-record events via a Reconciled connector; `N_counterfactual` from a holdout or a pre-registered, volume-normalized baseline; `U` and the rates in `K` from the approved register; `K_observed` and `K_counterfactual` from measured unit costs and the same counterfactual method; `A` from the registration; cost reconciled and supplemental costs verified; all in the same period and currency; verified by a person who is neither the recorder nor the workload owner |
+| `measured` | `N_observed` from system-of-record events via a Reconciled connector; `N_counterfactual` from a holdout or a pre-registered, volume-normalized baseline; `U` and the rates in `K` from the approved register; `K_observed` and `K_counterfactual` from measured unit costs and the same counterfactual method; `A_output` and `A_cost` from the registration; cost reconciled and supplemental costs verified; all in the same period and currency; verified by a person who is neither the recorder nor the workload owner |
 | `projected` | Any input is a forecast or model output (an extrapolated baseline, an estimated unit value, a partial period) |
 | `assumed` | Any input was typed without a source, or has no status |
 
@@ -97,7 +102,7 @@ The status is computed from the inputs; nobody selects it.
 ## 5. Independence controls
 
 1. **Separation of duties.** The recorder, the verifier and the workload owner are three different people; finance owns unit values.
-2. **Pre-registration.** Metric, quality condition, counterfactual method, attribution, unit value and the unit-cost method (`K`) are fixed and approved before the observation period starts. Changing any of them starts a new registration and clears verification (the simulation already clears verification on period changes).
+2. **Pre-registration.** Metric, quality condition, counterfactual method, both attributions, unit value and the unit-cost method (`K`) are fixed and approved before the observation period starts. Changing any of them starts a new registration and clears verification (the simulation already clears verification on period changes).
 3. **Recompute from source.** Value is derived on the server from stored records. A client never supplies a value or a status.
 4. **Immutable audit trail.** Every change stores the before and after values, the actor and the reason. Verified claims cannot be overwritten or deleted, only superseded with review (the durable schema already blocks deleting verified claims; edits are allowed there and clear verification).
 5. **Period and currency alignment.** Value and cost share one period and one currency; no cross-currency sums.
