@@ -368,7 +368,7 @@ function FindingRow({
               >
                 {formatRatio(finding.valueRatio)}
               </span>
-              <EvidenceMark status={finding.valueEvidenceStatus} />
+              <EvidenceMark status={finding.valueEvidenceStatus} unmarked={finding.valueEvidenceUnmarked} />
               <span className="font-mono text-[11px] text-dim">
                 {formatUSD(finding.monthlySpend, { compact: true })}/mo
               </span>
@@ -488,7 +488,7 @@ function RecommendationPane({
             >
               {formatRatio(finding.valueRatio)}
             </span>
-            <EvidenceMark status={finding.valueEvidenceStatus} explain />
+            <EvidenceMark status={finding.valueEvidenceStatus} unmarked={finding.valueEvidenceUnmarked} explain />
             <span className="text-xs text-sub">Target {VALUE_MINIMUM}×</span>
           </p>
         </div>

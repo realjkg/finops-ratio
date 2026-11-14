@@ -5,7 +5,7 @@
 import { findModel } from '@/data/models';
 import { workloadValueRatio } from '@/lib/valueRatio';
 import type { EvidenceStatus, ModelEntry, UnitCosts, Workload } from '@/types';
-import { headlineEvidenceStatus, weakestStatus } from '@/lib/valueEvidence';
+import { portfolioEvidence } from '@/lib/valueEvidence';
 
 function safeDiv(numerator: number, denominator: number): number {
   return denominator > 0 ? numerator / denominator : 0;
@@ -133,6 +133,8 @@ export interface PortfolioRatio {
   worst: { id: string; name: string; ratio: number } | null;
   /** Weakest headline evidence status across the workloads; `undefined` for an empty portfolio. */
   evidence_status: EvidenceStatus | undefined;
+  /** Workloads with at least one value input that has no recorded provenance (they count as assumed). */
+  evidence_unmarked_workloads: number;
 }
 
 export function derivePortfolioRatio(
@@ -161,7 +163,10 @@ export function derivePortfolioRatio(
     below_threshold,
     best,
     worst,
-    evidence_status: weakestStatus(workloads.map((w) => headlineEvidenceStatus(w.value))),
+    ...(() => {
+      const e = portfolioEvidence(workloads.map((w) => w.value));
+      return { evidence_status: e.status, evidence_unmarked_workloads: e.unmarkedWorkloads };
+    })(),
   };
 }
 

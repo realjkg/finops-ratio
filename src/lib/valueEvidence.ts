@@ -16,18 +16,22 @@ const WEAKNESS_RANK: Record<EvidenceStatus, number> = {
   assumed: 2,
 };
 
+/** True only for the three known statuses (own keys, so `'toString'` or `'Measured'` is not one). */
+export function isEvidenceStatus(x: unknown): x is EvidenceStatus {
+  return typeof x === 'string' && Object.hasOwn(WEAKNESS_RANK, x);
+}
+
 /**
- * Weakest status among the given marks. An unmarked input (`undefined`) counts
- * as `assumed`: missing provenance is the weakest evidence, never a mark that
- * silently drops out of the roll-up (owner decision, value-derivation note §4).
- * Returns `undefined` only for an empty list, where there is no input at all.
+ * Weakest status among the given marks. An unmarked input (`undefined`, `null`)
+ * or one that is not a known status (`''`, `'Measured'`, stored data from an
+ * older version) counts as `assumed`: missing provenance is the weakest evidence,
+ * never a mark that silently drops out of the roll-up (owner decision 1,
+ * value-derivation note §4). Returns `undefined` only for an empty list.
  */
-export function weakestStatus(
-  statuses: ReadonlyArray<EvidenceStatus | undefined>,
-): EvidenceStatus | undefined {
+export function weakestStatus(statuses: ReadonlyArray<unknown>): EvidenceStatus | undefined {
   let weakest: EvidenceStatus | undefined;
   for (const raw of statuses) {
-    const status: EvidenceStatus = raw ?? 'assumed';
+    const status: EvidenceStatus = isEvidenceStatus(raw) ? raw : 'assumed';
     if (weakest === undefined || WEAKNESS_RANK[status] > WEAKNESS_RANK[weakest]) {
       weakest = status;
     }
@@ -48,7 +52,20 @@ export function headlineEvidence(value: WorkloadValue): { status: EvidenceStatus
   const marks = VALUE_INPUTS.map((k) => value.evidence?.[k]);
   return {
     status: weakestStatus(marks) ?? 'assumed',
-    unmarked: VALUE_INPUTS.filter((_, i) => marks[i] === undefined),
+    unmarked: VALUE_INPUTS.filter((_, i) => !isEvidenceStatus(marks[i])),
+  };
+}
+
+/**
+ * Portfolio evidence: the weakest headline status across the workloads, and how many
+ * workloads have at least one value input with no recorded (or no valid) mark.
+ * `status` is `undefined` only for an empty portfolio.
+ */
+export function portfolioEvidence(values: ReadonlyArray<WorkloadValue>): { status: EvidenceStatus | undefined; unmarkedWorkloads: number } {
+  const each = values.map(headlineEvidence);
+  return {
+    status: weakestStatus(each.map((e) => e.status)),
+    unmarkedWorkloads: each.filter((e) => e.unmarked.length > 0).length,
   };
 }
 
@@ -89,3 +106,25 @@ export const EVIDENCE_META: Record<
     title: COPY.estimatedValueExplanation,
   },
 };
+
+const INPUT_NAMES: Record<ValueInput, string> = {
+  revenue_protected: 'revenue protected',
+  cost_avoided: 'cost avoided',
+  harm_from_misses: 'harm from misses',
+  quality_floor_pass_rate: 'quality-floor pass rate',
+};
+
+/** "No provenance is recorded for X and Y, so this value counts as estimated until a source is recorded." */
+function unmarkedSentence(unmarked: readonly string[]): string {
+  const names = unmarked.map((k) => (Object.hasOwn(INPUT_NAMES, k) ? INPUT_NAMES[k as ValueInput] : k.replace(/_/g, ' ')));
+  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return `No provenance is recorded for ${list}, so this value counts as estimated until a source is recorded.`;
+}
+
+/** The explanation text: the status's own sentence, or the unmarked-input one, plus the portfolio count. */
+export function evidenceExplanation(status: EvidenceStatus, unmarked?: readonly string[], unmarkedWorkloads?: number): string {
+  const base = unmarked?.length ? unmarkedSentence(unmarked) : EVIDENCE_META[status].title;
+  if (!unmarkedWorkloads) return base;
+  const who = unmarkedWorkloads === 1 ? 'One workload has' : `${unmarkedWorkloads} workloads have`;
+  return `${base} ${who} value inputs with no recorded provenance; those inputs count as estimated.`;
+}

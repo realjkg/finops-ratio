@@ -98,7 +98,7 @@ export function InitiativeCard({ initiative, lang, showLens }: InitiativeCardPro
         <span className="font-mono font-bold" style={{ color: initiative.valueColor }}>
           {formatRatio(initiative.valueRatio)}
         </span>
-        <EvidenceMark status={initiative.valueEvidenceStatus} />
+        <EvidenceMark status={initiative.valueEvidenceStatus} unmarked={initiative.valueEvidenceUnmarked} />
       </p>
 
       {showLens && <MatrixedLens initiative={initiative} />}

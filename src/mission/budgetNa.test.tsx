@@ -110,7 +110,20 @@ describe('portfolio headline shows its evidence status and, in the demo, that it
   it('demo mode: the evidence mark and the illustrative label sit beside Value returned', () => {
     const html = renderToStaticMarkup(<RatioModeProvider mode="demo"><FleetHeader fleet={fleet} /></RatioModeProvider>);
     expect(html).toContain('Estimated value');
-    expect(html).toContain('Illustrative · offline sandbox data');
+    // Seen as "Illustrative · offline sandbox data"; a screen reader hears a comma, not "middle dot".
+    expect(html).toContain('Illustrative<span aria-hidden="true"> · </span><span class="sr-only">, </span>offline sandbox data');
+  });
+  it('the headline explanation counts workloads whose value inputs have no recorded provenance', () => {
+    const w = structuredClone(WORKLOADS);
+    delete (w[0].value as { evidence?: unknown }).evidence;
+    const f = buildMissionBoard(w, { now: NOW }).fleet;
+    expect(f.valueEvidenceUnmarkedWorkloads).toBe(1);
+    expect(f.valueEvidenceStatus).toBe('assumed');
+  });
+  it('engagement mode with an empty portfolio renders no empty line under the headline', () => {
+    const empty = buildMissionBoard([], { now: NOW }).fleet;
+    const html = renderToStaticMarkup(<RatioModeProvider mode="engagement"><FleetHeader fleet={empty} /></RatioModeProvider>);
+    expect(html).not.toContain('mt-1 flex flex-wrap items-center gap-x-2 font-body');
   });
   it('engagement mode: the evidence mark stays, the demo label does not', () => {
     const html = renderToStaticMarkup(<RatioModeProvider mode="engagement"><FleetHeader fleet={fleet} /></RatioModeProvider>);

@@ -69,6 +69,7 @@ export function MissionCard({ mission, onOpen }: MissionCardProps) {
         valueRatio={mission.valueRatio}
         valueColor={mission.valueColor}
         evidenceStatus={mission.valueEvidenceStatus}
+        evidenceUnmarked={mission.valueEvidenceUnmarked}
       />
 
       {/* Trajectory verdict (monthly forecast, plain language) */}

@@ -1,7 +1,10 @@
 // EvidenceMark — the quiet provenance mark beside a value number (audit C1/C8).
 // Says how firm the value is: "Estimated value" (assumptions), "Projected value" or
 // "Measured value". Renders nothing only when no status is passed; a value with missing
-// provenance arrives as `assumed` (lib/valueEvidence.ts), and `unmarked` names the inputs.
+// provenance arrives as `assumed` (lib/valueEvidence.ts), and `unmarked` names the inputs, whose
+// sentence then replaces the "stated assumptions" one (there is no assumption, only no record).
+// A status that is not a known one is shown as Estimated, never trusted or crashed on.
+// `unmarkedWorkloads` is the portfolio form: how many workloads have an unmarked input.
 //
 // `explain` turns the label into a button that opens a short explanation. It works by tap,
 // click or keyboard (Enter and Space; Escape or an outside tap closes), unlike a title
@@ -18,38 +21,26 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { EvidenceStatus } from '@/types';
-import { EVIDENCE_META } from '@/lib/valueEvidence';
+import { EVIDENCE_META, evidenceExplanation, isEvidenceStatus } from '@/lib/valueEvidence';
 import { placePopup, type Placement } from '@/lib/popupPlacement';
 
 /** The ChatPanel <aside> id (Frank): Escape pressed inside it is the panel's, not this popup's. */
 const AI_PANEL_ID = 'ai-chat-panel';
-
-const INPUT_NAMES: Record<string, string> = {
-  revenue_protected: 'revenue protected',
-  cost_avoided: 'cost avoided',
-  harm_from_misses: 'harm from misses',
-  quality_floor_pass_rate: 'quality-floor pass rate',
-};
-
-/** "No provenance is recorded for X and Y; they count as estimated." — or '' when every input is marked. */
-function unmarkedSentence(unmarked: readonly string[] | undefined): string {
-  if (!unmarked?.length) return '';
-  const names = unmarked.map((k) => INPUT_NAMES[k] ?? k.replace(/_/g, ' '));
-  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return ` No provenance is recorded for ${list}; ${names.length === 1 ? 'it counts' : 'they count'} as estimated.`;
-}
 
 export function EvidenceMark({
   status,
   className = '',
   explain = false,
   unmarked,
+  unmarkedWorkloads,
 }: {
   status?: EvidenceStatus;
   className?: string;
   explain?: boolean;
   /** Value inputs with no recorded mark (they count as assumed); named in the explanation. */
   unmarked?: readonly string[];
+  /** Portfolio marks: workloads with at least one unmarked value input. */
+  unmarkedWorkloads?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<Placement | null>(null);
@@ -95,9 +86,10 @@ export function EvidenceMark({
     };
   }, [open]);
 
-  if (!status) return null;
-  const meta = EVIDENCE_META[status];
-  const explanation = meta.title + unmarkedSentence(unmarked);
+  if (status === undefined || status === null) return null;
+  const known: EvidenceStatus = isEvidenceStatus(status) ? status : 'assumed';
+  const meta = EVIDENCE_META[known];
+  const explanation = evidenceExplanation(known, unmarked, unmarkedWorkloads);
   const style = { color: meta.color };
   const base = `text-[11px] font-medium ${className}`;
 

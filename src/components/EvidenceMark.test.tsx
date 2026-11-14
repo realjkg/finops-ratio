@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { EvidenceMark } from './EvidenceMark';
+import { EVIDENCE_META, evidenceExplanation } from '@/lib/valueEvidence';
 
 declare global {
   var IS_REACT_ACT_ENVIRONMENT: boolean;
@@ -118,19 +119,29 @@ describe('EvidenceMark', () => {
 });
 
 describe('EvidenceMark names inputs with no recorded provenance', () => {
-  it('the title says which inputs carry no mark and that they count as estimated', () => {
+  it('the title names the unmarked inputs instead of claiming stated assumptions', () => {
     mount(<EvidenceMark status="assumed" unmarked={['harm_from_misses', 'quality_floor_pass_rate']} />);
     const title = box.querySelector('span')?.getAttribute('title') ?? '';
-    expect(title).toContain('No provenance is recorded for harm from misses and quality-floor pass rate; they count as estimated.');
+    expect(title).toBe('No provenance is recorded for harm from misses and quality-floor pass rate, so this value counts as estimated until a source is recorded.');
+    expect(title).not.toContain(EVIDENCE_META.assumed.title);
     expect(title).not.toMatch(/assumed/i);
   });
   it('the explanation popup carries the same sentence', () => {
     mount(<EvidenceMark status="assumed" unmarked={['revenue_protected']} explain />);
     act(() => box.querySelector('button')!.click());
-    expect(document.querySelector('[data-testid="evidence-note"]')?.textContent).toContain('No provenance is recorded for revenue protected; it counts as estimated.');
+    expect(document.querySelector('[data-testid="evidence-note"]')?.textContent).toBe('No provenance is recorded for revenue protected, so this value counts as estimated until a source is recorded.');
   });
-  it('nothing is added when every input is marked', () => {
+  it('nothing changes when every input is marked', () => {
     mount(<EvidenceMark status="assumed" unmarked={[]} />);
-    expect(box.querySelector('span')?.getAttribute('title')).not.toContain('No provenance');
+    expect(box.querySelector('span')?.getAttribute('title')).toBe(EVIDENCE_META.assumed.title);
+  });
+  it('the portfolio form counts the workloads with an unmarked input', () => {
+    expect(evidenceExplanation('measured', undefined, 2)).toBe(`${EVIDENCE_META.measured.title} 2 workloads have value inputs with no recorded provenance; those inputs count as estimated.`);
+    expect(evidenceExplanation('assumed', undefined, 1)).toContain('One workload has value inputs with no recorded provenance');
+    expect(evidenceExplanation('assumed', undefined, 0)).toBe(EVIDENCE_META.assumed.title);
+  });
+  it.each(['Measured', '', 'toString', 'bogus'])('a status that is not a known one (%j) shows as Estimated, never crashes', (bad) => {
+    mount(<EvidenceMark status={bad as never} />);
+    expect(box.querySelector('span')?.textContent).toBe(EVIDENCE_META.assumed.label);
   });
 });

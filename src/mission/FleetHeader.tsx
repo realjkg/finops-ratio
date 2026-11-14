@@ -37,10 +37,12 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
               {formatRatio(fleet.valueReturned)}
             </dd>
             {/* The headline carries its computed provenance, and in the demo says it is illustrative. */}
-            <dd className="mt-1 flex flex-wrap items-center gap-x-2 font-body">
-              <EvidenceMark status={fleet.valueEvidenceStatus} explain />
-              {demo && <span className="text-[11px] text-dim">{DEMO_HEADLINE_LABEL}</span>}
-            </dd>
+            {(fleet.valueEvidenceStatus || demo) && (
+              <dd className="mt-1 flex flex-wrap items-center gap-x-2 font-body">
+                <EvidenceMark status={fleet.valueEvidenceStatus} unmarkedWorkloads={fleet.valueEvidenceUnmarkedWorkloads} explain />
+                {demo && <DemoLabel />}
+              </dd>
+            )}
           </div>
 
           {/* Missions needing attention */}
@@ -85,3 +87,15 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
   );
 }
 
+/** "Illustrative · offline sandbox data", with the separator hidden from screen readers (read as a comma). */
+function DemoLabel() {
+  const [first, ...rest] = DEMO_HEADLINE_LABEL.split(' · ');
+  return (
+    <span className="text-[11px] text-dim">
+      {first}
+      <span aria-hidden="true"> · </span>
+      <span className="sr-only">, </span>
+      {rest.join(', ')}
+    </span>
+  );
+}

@@ -19,7 +19,7 @@ import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { derivePortfolioRatio } from '@/lib/derive';
 import { budgetConsumed } from '@/lib/metricContracts';
 import type { ForecastStatus } from '@/lib/forecast';
-import { headlineEvidenceStatus } from '@/lib/valueEvidence';
+import { headlineEvidence, type ValueInput } from '@/lib/valueEvidence';
 import { budgetColor, PROVIDER_LABEL, ratioColor } from '@/lib/scales';
 import type { Alert, BudgetProfile, AlertSeverity, EvidenceStatus, Workload } from '@/types';
 
@@ -47,8 +47,10 @@ export interface MissionView {
   // Value badge (R4) — never rendered without the gauge.
   valueRatio: number | null;
   valueColor: string;
-  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
-  valueEvidenceStatus?: EvidenceStatus;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2); unmarked counts as assumed. */
+  valueEvidenceStatus: EvidenceStatus;
+  /** Value inputs with no valid mark; the mark names them. */
+  valueEvidenceUnmarked: ValueInput[];
   // Trajectory (monthly forecast).
   status: MissionStatus;
   forecast: ForecastStatus | 'na';
@@ -68,6 +70,8 @@ export interface FleetSummary {
   valueReturned: number;
   /** Weakest evidence status behind valueReturned (an unmarked input counts as assumed). */
   valueEvidenceStatus: EvidenceStatus | undefined;
+  /** Workloads with at least one value input that has no recorded provenance. */
+  valueEvidenceUnmarkedWorkloads: number;
   missionCount: number;
   needsAttention: number;
   /** Missions with an invalid budget: not counted as attention, shown separately. */
@@ -158,7 +162,8 @@ export function toMissionView(workload: Workload, context: ProjectionContext = {
     remainingToday: status.daily.remaining,
     valueRatio: workloadValueRatio(workload),
     valueColor: ratioColor(workloadValueRatio(workload)),
-    valueEvidenceStatus: headlineEvidenceStatus(workload.value),
+    valueEvidenceStatus: headlineEvidence(workload.value).status,
+    valueEvidenceUnmarked: headlineEvidence(workload.value).unmarked,
     status: statusNa && adverse === 'nominal' ? 'na' : adverse,
     statusNa,
     forecast: status.monthly.status,
@@ -196,6 +201,7 @@ export function buildMissionBoard(
       fleetFuelColor: budgetColor(fleetFuelRatio),
       valueReturned: portfolio.portfolio_ratio,
       valueEvidenceStatus: portfolio.evidence_status,
+      valueEvidenceUnmarkedWorkloads: portfolio.evidence_unmarked_workloads,
       missionCount: missions.length,
       needsAttention,
       budgetNa,

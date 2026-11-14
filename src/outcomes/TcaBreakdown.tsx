@@ -11,7 +11,7 @@ import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatPct, formatRatio, formatUSD } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
 import { deriveDefensibleValue } from '@/lib/valueMath';
-import { headlineEvidenceStatus, weakestStatus } from '@/lib/valueEvidence';
+import { headlineEvidence, isEvidenceStatus, weakestStatus, type ValueInput } from '@/lib/valueEvidence';
 import { estimateTca } from './model';
 import type { Workload } from '@/types';
 
@@ -23,7 +23,10 @@ export function TcaBreakdown({ workload }: { workload: Workload }) {
   const tca = estimateTca(workload);
   const ev = workload.value.evidence;
   const claimedMark = weakestStatus([ev?.revenue_protected, ev?.cost_avoided]);
-  const headlineMark = headlineEvidenceStatus(workload.value);
+  const claimedUnmarked = (['revenue_protected', 'cost_avoided'] as const).filter((k) => !isEvidenceStatus(ev?.[k]));
+  // One input's own row: its mark, or `assumed` naming it when it has none (never a bare, unmarked figure).
+  const inputMark = (k: ValueInput) => (isEvidenceStatus(ev?.[k]) ? { mark: ev![k] } : { mark: 'assumed' as const, unmarked: [k] });
+  const { status: headlineMark, unmarked: headlineUnmarked } = headlineEvidence(workload.value);
 
   return (
     <div
@@ -39,6 +42,7 @@ export function TcaBreakdown({ workload }: { workload: Workload }) {
           label="Claimed value (revenue + cost avoided)"
           value={formatUSD(defensible.gross_value)}
           mark={claimedMark}
+          unmarked={claimedUnmarked}
           detail="The seed's asserted business value, before any rigor gate"
         />
         <Row
@@ -48,19 +52,20 @@ export function TcaBreakdown({ workload }: { workload: Workload }) {
               ? formatPct(workload.value.quality_floor_pass_rate ?? 0)
               : 'not set — all outputs counted'
           }
-          mark={ev?.quality_floor_pass_rate}
+          {...inputMark('quality_floor_pass_rate')}
           detail="Outputs missing the workload's quality floor contribute no value"
         />
         <Row
           label="Harm from misses"
           value={`\u2212${formatUSD(defensible.harm_from_misses)}`}
-          mark={ev?.harm_from_misses}
+          {...inputMark('harm_from_misses')}
           detail="Monthly harm from missed outputs: refunds, rework, manual cleanup"
         />
         <Row
           label="Defensible numerator / mo"
           value={formatUSD(defensible.total_value)}
           mark={headlineMark}
+          unmarked={headlineUnmarked}
           detail="Counted value minus harm — the headline ratio's numerator"
           strong
         />
@@ -117,12 +122,14 @@ function Row({
   value,
   detail,
   mark,
+  unmarked,
   strong = false,
 }: {
   label: string;
   value: string;
   detail: string;
   mark?: Parameters<typeof EvidenceMark>[0]['status'];
+  unmarked?: readonly string[];
   strong?: boolean;
 }) {
   return (
@@ -137,7 +144,7 @@ function Row({
         >
           {value}
         </span>
-        <EvidenceMark status={mark} />
+        <EvidenceMark status={mark} unmarked={unmarked} />
       </dd>
     </div>
   );

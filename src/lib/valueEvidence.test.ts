@@ -10,6 +10,7 @@ import {
   headlineEvidence,
   headlineEvidenceStatus,
   EVIDENCE_META,
+  VALUE_INPUTS,
 } from './valueEvidence';
 import { derivePortfolioRatio } from '@/lib/derive';
 import { WORKLOADS } from '@/data/workloads';
@@ -214,5 +215,27 @@ describe("Frank's context carries the status, never an unmarked value", () => {
     const ctx = buildAIContext([legacy, ...WORKLOADS.slice(1)]);
     expect(ctx.workloads?.find((w) => w.id === legacy.id)?.valueEvidenceStatus).toBe('assumed');
     expect(ctx.initiatives.find((i) => i.id === legacy.id)?.valueEvidenceStatus).toBe('assumed');
+    // Provenance survives too: which inputs have no mark, and the portfolio status and count.
+    expect(ctx.workloads?.find((w) => w.id === legacy.id)?.valueEvidenceUnmarked).toEqual([...VALUE_INPUTS]);
+    expect(ctx.initiatives.find((i) => i.id === legacy.id)?.valueEvidenceUnmarked).toEqual([...VALUE_INPUTS]);
+    expect(ctx.summary.valueEvidenceStatus).toBe('assumed');
+    expect(ctx.summary.valueEvidenceUnmarkedWorkloads).toBe(1);
+  });
+  it('a fully marked portfolio sends its status and no unmarked lists', () => {
+    const ctx = buildAIContext(WORKLOADS);
+    expect(ctx.summary.valueEvidenceStatus).toBe(derivePortfolioRatio(WORKLOADS).evidence_status);
+    expect(ctx.summary.valueEvidenceUnmarkedWorkloads).toBe(0);
+    expect(ctx.workloads?.some((w) => 'valueEvidenceUnmarked' in w)).toBe(false);
+  });
+});
+
+describe('a status that is not a known one counts as assumed (review M1)', () => {
+  it.each([[''], ['Measured'], ['toString'], [null], [42]])('%j never strengthens the roll-up', (bad) => {
+    expect(weakestStatus(['measured', bad, 'measured'])).toBe('assumed');
+    expect(weakestStatus([bad, 'measured'])).toBe('assumed');
+  });
+  it('an invalid input mark is listed as unmarked', () => {
+    const value = { evidence: { revenue_protected: 'measured', cost_avoided: 'Measured', harm_from_misses: 'measured', quality_floor_pass_rate: '' } } as never;
+    expect(headlineEvidence(value)).toEqual({ status: 'assumed', unmarked: ['cost_avoided', 'quality_floor_pass_rate'] });
   });
 });

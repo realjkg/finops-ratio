@@ -9,7 +9,7 @@ import type { Scope, World, WorkloadFacts } from './types';
 export const REALIZED_LINE =
   'Realized savings: $0 — no measured outcome evidence exists in this data (everything here is projected or assumed).';
 
-export const short = (s: EvidenceStatus | undefined): string => `(${s ?? 'unmarked'})`;
+export const short = (s: EvidenceStatus | undefined): string => `(${s ?? 'assumed: no mark recorded'})`;
 
 /** "the Legal team" — always qualified so the question parses back to the team. */
 export const T = (team: string): string => `the ${team} team`;

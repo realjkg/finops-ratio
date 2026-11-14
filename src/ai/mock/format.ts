@@ -26,9 +26,9 @@ export function signedPct1(n: number): string {
   return Number.isFinite(n) ? `${n > 0 ? '+' : ''}${n.toFixed(1)}%` : 'n/a';
 }
 
-/** Value-evidence suffix. An unmarked ratio says so rather than implying a status. */
+/** Value-evidence suffix. An unmarked ratio counts as assumed and says it has no mark (same rule as the roll-ups). */
 export function evid(status: EvidenceStatus | undefined): string {
-  return ` (value evidence: ${status ?? 'unmarked'})`;
+  return ` (value evidence: ${status ?? 'assumed: no mark recorded'})`;
 }
 
 /** "Value / cost 13.5×", or the honest non-positive form, or n/a with no spend. */

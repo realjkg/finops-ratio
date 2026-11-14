@@ -13,6 +13,8 @@ import { useState, useCallback } from 'react';
 import { useStore } from '@/store/useStore';
 import { landingSummary } from '@/connectors/ingestLanding';
 import { WORKLOADS } from '@/data/workloads';
+import { EvidenceMark } from '@/components/EvidenceMark';
+import { portfolioEvidence } from '@/lib/valueEvidence';
 import { createAttributionClient } from './index';
 import { LiveAccrualBoard } from './LiveAccrualBoard';
 import type { AttributionDimension, AttributionReport } from './index';
@@ -36,6 +38,8 @@ function portfolioValueRatio(): number {
   const value = WORKLOADS.reduce((acc, w) => acc + w.value.total_value, 0);
   return spend === 0 ? 0 : value / spend;
 }
+// The same figure's provenance: the weakest input across the portfolio (unmarked counts as assumed).
+const PORTFOLIO_EVIDENCE = portfolioEvidence(WORKLOADS.map((w) => w.value));
 
 // ---------------------------------------------------------------------------
 // Page — the success view renders the LIVE leaderboard (LiveAccrualBoard):
@@ -80,7 +84,9 @@ export function AttributionPage() {
           {/* R4 — the one line of value context. Display-only; never in the sort. */}
           <p className="mt-2 text-xs text-dim">
             Value context: the portfolio returned {portfolioValueRatio().toFixed(1)}× its inference
-            cost this month. This list ranks absolute burn only — value never sorts it.
+            cost this month{' '}
+            <EvidenceMark status={PORTFOLIO_EVIDENCE.status} unmarkedWorkloads={PORTFOLIO_EVIDENCE.unmarkedWorkloads} />.
+            This list ranks absolute burn only — value never sorts it.
           </p>
         </div>
 
