@@ -10,6 +10,7 @@
 // Verbs stay exactly: Select / Apply / Dismiss. Warm accent (‘shape’) on Apply CTA only.
 // No badges, confetti, streaks — quiet governance. Calm register throughout.
 
+import { evidenceAriaText } from '@/lib/valueEvidence';
 import { presentFinding } from '@/costsource/findingPresentation';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
@@ -346,7 +347,7 @@ function FindingRow({
         isSelected ? 'bg-raised shadow-[inset_3px_0_0_rgb(var(--c-gate))]' : 'hover:bg-raised/60'
       }`}
       aria-pressed={isSelected}
-      aria-label={`Finding ${rank}: ${finding.workloadName}, ${VOCAB.valueToCost.label} ${formatRatio(finding.valueRatio)}`}
+      aria-label={`Finding ${rank}: ${finding.workloadName}, ${VOCAB.valueToCost.label} ${formatRatio(finding.valueRatio)}, ${evidenceAriaText(finding.valueEvidenceStatus, finding.valueEvidenceUnmarked)}`}
     >
       <div className="flex items-start gap-2.5">
         {/* Rank */}

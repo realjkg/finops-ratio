@@ -226,6 +226,7 @@ describe("Frank's context carries the status, never an unmarked value", () => {
     expect(ctx.summary.valueEvidenceStatus).toBe(derivePortfolioRatio(WORKLOADS).evidence_status);
     expect(ctx.summary.valueEvidenceUnmarkedWorkloads).toBe(0);
     expect(ctx.workloads?.some((w) => 'valueEvidenceUnmarked' in w)).toBe(false);
+    expect(ctx.initiatives.some((i) => 'valueEvidenceUnmarked' in i)).toBe(false);
   });
 });
 
@@ -237,5 +238,15 @@ describe('a status that is not a known one counts as assumed (review M1)', () =>
   it('an invalid input mark is listed as unmarked', () => {
     const value = { evidence: { revenue_protected: 'measured', cost_avoided: 'Measured', harm_from_misses: 'measured', quality_floor_pass_rate: '' } } as never;
     expect(headlineEvidence(value)).toEqual({ status: 'assumed', unmarked: ['cost_avoided', 'quality_floor_pass_rate'] });
+  });
+});
+
+describe('evidenceAriaText', () => {
+  it('names the status and the unmarked inputs, and never repeats the mark button’s own name', async () => {
+    const { evidenceAriaText } = await import('./valueEvidence');
+    expect(evidenceAriaText('assumed')).toBe('value evidence: estimated');
+    expect(evidenceAriaText('measured', [])).toBe('value evidence: measured');
+    expect(evidenceAriaText('assumed', ['harm_from_misses'])).toBe('value evidence: estimated, no valid provenance recorded for harm from misses');
+    for (const s of ['measured', 'projected', 'assumed'] as const) expect(evidenceAriaText(s).toLowerCase()).not.toContain(EVIDENCE_META[s].label.toLowerCase());
   });
 });

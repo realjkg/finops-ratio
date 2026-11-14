@@ -122,23 +122,31 @@ describe('EvidenceMark names inputs with no recorded provenance', () => {
   it('the title names the unmarked inputs instead of claiming stated assumptions', () => {
     mount(<EvidenceMark status="assumed" unmarked={['harm_from_misses', 'quality_floor_pass_rate']} />);
     const title = box.querySelector('span')?.getAttribute('title') ?? '';
-    expect(title).toBe('No provenance is recorded for harm from misses and quality-floor pass rate, so this value counts as estimated until a source is recorded.');
+    expect(title).toBe('No valid provenance is recorded for harm from misses and quality-floor pass rate, so this value counts as estimated until a source is recorded.');
     expect(title).not.toContain(EVIDENCE_META.assumed.title);
     expect(title).not.toMatch(/assumed/i);
   });
   it('the explanation popup carries the same sentence', () => {
     mount(<EvidenceMark status="assumed" unmarked={['revenue_protected']} explain />);
     act(() => box.querySelector('button')!.click());
-    expect(document.querySelector('[data-testid="evidence-note"]')?.textContent).toBe('No provenance is recorded for revenue protected, so this value counts as estimated until a source is recorded.');
+    expect(document.querySelector('[data-testid="evidence-note"]')?.textContent).toBe('No valid provenance is recorded for revenue protected, so this value counts as estimated until a source is recorded.');
   });
   it('nothing changes when every input is marked', () => {
     mount(<EvidenceMark status="assumed" unmarked={[]} />);
     expect(box.querySelector('span')?.getAttribute('title')).toBe(EVIDENCE_META.assumed.title);
   });
-  it('the portfolio form counts the workloads with an unmarked input', () => {
-    expect(evidenceExplanation('measured', undefined, 2)).toBe(`${EVIDENCE_META.measured.title} 2 workloads have value inputs with no recorded provenance; those inputs count as estimated.`);
+  it('the portfolio form counts the workloads with an unmarked input and never claims stated assumptions', () => {
+    const two = evidenceExplanation('assumed', undefined, 2);
+    expect(two).toBe('This portfolio value counts as estimated. 2 workloads have value inputs with no recorded provenance; those inputs count as estimated until a source is recorded.');
+    expect(two).not.toContain(EVIDENCE_META.assumed.title);
+    expect(two).not.toMatch(/stated assumption/i);
     expect(evidenceExplanation('assumed', undefined, 1)).toContain('One workload has value inputs with no recorded provenance');
     expect(evidenceExplanation('assumed', undefined, 0)).toBe(EVIDENCE_META.assumed.title);
+  });
+  it('the portfolio mark with explain opens the same text by keyboard or tap', () => {
+    mount(<EvidenceMark status="assumed" unmarkedWorkloads={2} explain />);
+    act(() => box.querySelector('button')!.click());
+    expect(document.querySelector('[data-testid="evidence-note"]')?.textContent).toBe(evidenceExplanation('assumed', undefined, 2));
   });
   it.each(['Measured', '', 'toString', 'bogus'])('a status that is not a known one (%j) shows as Estimated, never crashes', (bad) => {
     mount(<EvidenceMark status={bad as never} />);

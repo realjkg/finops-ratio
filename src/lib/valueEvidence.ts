@@ -114,17 +114,36 @@ const INPUT_NAMES: Record<ValueInput, string> = {
   quality_floor_pass_rate: 'quality-floor pass rate',
 };
 
-/** "No provenance is recorded for X and Y, so this value counts as estimated until a source is recorded." */
-function unmarkedSentence(unmarked: readonly string[]): string {
+/** "harm from misses and quality-floor pass rate": the inputs' plain names, joined for a sentence. */
+export function inputList(unmarked: readonly string[]): string {
   const names = unmarked.map((k) => (Object.hasOwn(INPUT_NAMES, k) ? INPUT_NAMES[k as ValueInput] : k.replace(/_/g, ' ')));
-  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-  return `No provenance is recorded for ${list}, so this value counts as estimated until a source is recorded.`;
+  return names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
-/** The explanation text: the status's own sentence, or the unmarked-input one, plus the portfolio count. */
+/** "No valid provenance is recorded for X and Y, so this value counts as estimated until a source is recorded." */
+function unmarkedSentence(unmarked: readonly string[]): string {
+  return `No valid provenance is recorded for ${inputList(unmarked)}, so this value counts as estimated until a source is recorded.`;
+}
+
+/**
+ * Short screen-reader text for a mark inside a button whose aria-label replaces its content:
+ * "value evidence: estimated". Worded unlike the mark's own label ("Estimated value"), so the
+ * row is never a second control with the evidence button's name.
+ */
+export function evidenceAriaText(status: EvidenceStatus, unmarked: readonly string[] = []): string {
+  const word = EVIDENCE_META[isEvidenceStatus(status) ? status : 'assumed'].label.split(' ')[0].toLowerCase();
+  const text = `value evidence: ${word}`;
+  return unmarked.length ? `${text}, no valid provenance recorded for ${inputList(unmarked)}` : text;
+}
+
+/**
+ * The explanation text: the status's own sentence, unless inputs have no recorded provenance. Then
+ * it names them (one value) or counts the workloads (portfolio) instead, because "rests on stated
+ * assumptions" would claim an assumption that was never recorded.
+ */
 export function evidenceExplanation(status: EvidenceStatus, unmarked?: readonly string[], unmarkedWorkloads?: number): string {
-  const base = unmarked?.length ? unmarkedSentence(unmarked) : EVIDENCE_META[status].title;
-  if (!unmarkedWorkloads) return base;
+  if (unmarked?.length) return unmarkedSentence(unmarked);
+  if (!unmarkedWorkloads) return EVIDENCE_META[status].title;
   const who = unmarkedWorkloads === 1 ? 'One workload has' : `${unmarkedWorkloads} workloads have`;
-  return `${base} ${who} value inputs with no recorded provenance; those inputs count as estimated.`;
+  return `This portfolio value counts as estimated. ${who} value inputs with no recorded provenance; those inputs count as estimated until a source is recorded.`;
 }

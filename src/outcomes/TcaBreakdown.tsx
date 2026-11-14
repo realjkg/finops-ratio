@@ -144,7 +144,7 @@ function Row({
         >
           {value}
         </span>
-        <EvidenceMark status={mark} unmarked={unmarked} />
+        <EvidenceMark status={mark} unmarked={unmarked} explain />
       </dd>
     </div>
   );

@@ -1,5 +1,5 @@
 import { workloadValueRatio } from '@/lib/valueRatio';
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import Link from 'next/link';
 import { DEMO_PROMPTS } from '@/ai/MockAIClient';
 import { MissionSurface } from '@/executive/MissionSurface';
@@ -7,6 +7,8 @@ import { SpendToValueGraph } from '@/findings/SpendToValueGraph';
 import { formatRatio, formatUSD } from '@/lib/format';
 import { TOKEN_COLOR } from '@/lib/scales';
 import { useStore } from '@/store/useStore';
+import { EvidenceMark } from '@/components/EvidenceMark';
+import { portfolioEvidence } from '@/lib/valueEvidence';
 
 export default function Demo() {
   const workloads = useStore((s) => s.workloads);
@@ -23,6 +25,8 @@ export default function Demo() {
       totalValue,
       portfolioRatio,
       belowGate,
+      // The portfolio figure's provenance: the weakest input (unmarked counts as assumed).
+      evidence: portfolioEvidence(workloads.map((workload) => workload.value)),
     };
   }, [workloads]);
 
@@ -60,6 +64,7 @@ export default function Demo() {
               label="Portfolio Value / cost"
               value={formatRatio(snapshot.portfolioRatio)}
               valueColor={snapshot.portfolioRatio >= 3 ? TOKEN_COLOR.value : TOKEN_COLOR.gate}
+              mark={snapshot.evidence.status && <EvidenceMark status={snapshot.evidence.status} unmarkedWorkloads={snapshot.evidence.unmarkedWorkloads} explain />}
             />
             <Metric
               label="Below 3x value gate"
@@ -140,10 +145,12 @@ function Metric({
   label,
   value,
   valueColor,
+  mark,
 }: {
   label: string;
   value: string;
   valueColor?: string;
+  mark?: ReactNode;
 }) {
   return (
     <div className="bg-deep px-4 py-4">
@@ -151,6 +158,7 @@ function Metric({
       <p className="mt-1 font-mono text-xl font-bold text-txt" style={valueColor ? { color: valueColor } : undefined}>
         {value}
       </p>
+      {mark && <p className="mt-1">{mark}</p>}
     </div>
   );
 }

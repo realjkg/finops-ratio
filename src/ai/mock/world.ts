@@ -6,6 +6,7 @@
 // from the wire's own numbers. Anything still unknown stays null and the
 // answers say so instead of guessing.
 
+import { VALUE_INPUTS } from '@/lib/valueEvidence';
 import { OMITTED_STATUSES, type AIAlertSnapshot, type AIContext, type AIOmittedInitiative } from '../AIClient';
 import { alertsFor } from '@/data/alerts';
 import { WORKLOADS } from '@/data/workloads';
@@ -65,6 +66,11 @@ function field(r: Record<string, unknown>, key: string, range: Range, bad: strin
   if (typeof v === 'number' && within(v, range)) return v;
   if (!bad.includes(key)) bad.push(key);
   return null;
+}
+
+/** Known value-input keys from a context list; anything else is dropped (never echoed into an answer). */
+function inputs(v: unknown): string[] {
+  return Array.isArray(v) ? [...new Set(v.filter((k): k is string => typeof k === 'string' && (VALUE_INPUTS as readonly string[]).includes(k)))] : [];
 }
 
 function evidence(v: unknown): EvidenceStatus | undefined {
@@ -146,6 +152,7 @@ export function buildWorld(ctx: AIContext): World {
       return;
     }
     const status = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
+    const unmarked = inputs(s.valueEvidenceUnmarked ?? i.valueEvidenceUnmarked);
     rows.push({
       id,
       name,
@@ -156,6 +163,7 @@ export function buildWorld(ctx: AIContext): World {
       monthlyValue: value,
       ratio: spend > 0 ? value / spend : null,
       evidence: status,
+      ...(unmarked.length ? { unmarked } : {}),
       status: str(i.status),
       budgetConsumedPct: consumed,
       monthlyBudget: budget,

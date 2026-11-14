@@ -17,7 +17,7 @@ const ids = (ws: WorkloadFacts[]): string[] => ws.map((w) => w.id);
 
 function headline(world: World, scope: Scope): string {
   const r = rollup(membersOf(world, scope));
-  return `Cost ${usd(r.spend)}/mo · value ${usd(r.value)}/mo · ${returnText(r.ratio)}${evid(r.evidence)}`;
+  return `Cost ${usd(r.spend)}/mo · value ${usd(r.value)}/mo · ${returnText(r.ratio)}${evid(r.evidence, r.unmarked)}`;
 }
 
 /** ROI for any scope: value, cost, ratio, evidence, ranked contributors, weakest and strongest. */
@@ -33,7 +33,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
     [...teamRows(world)]
       .sort((a, b) => b.roll.value - a.roll.value)
       .forEach((t, i) =>
-        body.push(`${i + 1}. ${t.team} — cost ${usd(t.roll.spend)}/mo · value ${usd(t.roll.value)}/mo · ${x(t.roll.ratio)} ${short(t.roll.evidence)}`),
+        body.push(`${i + 1}. ${t.team} — cost ${usd(t.roll.spend)}/mo · value ${usd(t.roll.value)}/mo · ${x(t.roll.ratio)} ${short(t.roll.evidence, t.roll.unmarked)}`),
       );
   } else {
     body.push(scope.kind === 'portfolio' ? 'Workloads, ranked by value:' : 'Contributors, ranked by value:');
@@ -60,7 +60,7 @@ export function roiAnswer(world: World, scope: Scope): Answer {
   const ex = scope.kind === 'workload' ? null : extremes(members);
   if (ex) {
     body.push(
-      `Strongest: ${ex.strongest.name} (${x(ex.strongest.ratio)} ${short(ex.strongest.evidence)}) · Weakest: ${ex.weakest.name} (${x(ex.weakest.ratio)} ${short(ex.weakest.evidence)}${(ex.weakest.ratio ?? 1) <= 0 ? ', no positive value' : ''})`,
+      `Strongest: ${ex.strongest.name} (${x(ex.strongest.ratio)} ${short(ex.strongest.evidence, ex.strongest.unmarked)}) · Weakest: ${ex.weakest.name} (${x(ex.weakest.ratio)} ${short(ex.weakest.evidence, ex.weakest.unmarked)}${(ex.weakest.ratio ?? 1) <= 0 ? ', no positive value' : ''})`,
     );
   } else if (members.length === 1 && scope.kind !== 'workload') {
     body.push(`Only one workload here, so the ${scope.kind} figure is that workload's figure.`);
@@ -92,15 +92,15 @@ export function teamRankAnswer(world: World, metric: RankMetric, ascending: bool
   if (lead) {
     body.push(
       metric === 'savings'
-        ? `${usd(lead.savings)}/mo identified (projected, not realized) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence)} — ${lead.roll.members.length} workload(s).`
-        : `${usd(lead.roll.spend)}/mo (${total.spend > 0 ? pct1((lead.roll.spend / total.spend) * 100) : 'n/a'} of ${usd(total.spend)} portfolio spend) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence)} — ${lead.roll.members.length} workload(s)${top ? `; top workload ${top.name} at ${usd(top.monthlySpend)}/mo` : ''}.`,
+        ? `${usd(lead.savings)}/mo identified (projected, not realized) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence, lead.roll.unmarked)} — ${lead.roll.members.length} workload(s).`
+        : `${usd(lead.roll.spend)}/mo (${total.spend > 0 ? pct1((lead.roll.spend / total.spend) * 100) : 'n/a'} of ${usd(total.spend)} portfolio spend) at ${returnText(lead.roll.ratio)}${evid(lead.roll.evidence, lead.roll.unmarked)} — ${lead.roll.members.length} workload(s)${top ? `; top workload ${top.name} at ${usd(top.monthlySpend)}/mo` : ''}.`,
     );
     body.push(`Teams ranked by ${metric === 'cost' ? 'monthly cost' : metric === 'roi' ? 'Value / cost' : 'identified savings'}${ascending ? ' (lowest first)' : ''}:`);
     const lines = rows.map((t, i) => {
       const share = total.spend > 0 ? ` (${pct1((t.roll.spend / total.spend) * 100)})` : '';
       return metric === 'savings'
-        ? `${i + 1}. ${t.team} — ${usd(t.savings)}/mo identified · cost ${usd(t.roll.spend)}/mo · ${x(t.roll.ratio)} ${short(t.roll.evidence)}`
-        : `${i + 1}. ${t.team} — ${usd(t.roll.spend)}/mo${share} · ${returnText(t.roll.ratio)} ${short(t.roll.evidence)} · ${t.roll.members.length} workload(s)`;
+        ? `${i + 1}. ${t.team} — ${usd(t.savings)}/mo identified · cost ${usd(t.roll.spend)}/mo · ${x(t.roll.ratio)} ${short(t.roll.evidence, t.roll.unmarked)}`
+        : `${i + 1}. ${t.team} — ${usd(t.roll.spend)}/mo${share} · ${returnText(t.roll.ratio)} ${short(t.roll.evidence, t.roll.unmarked)} · ${t.roll.members.length} workload(s)`;
     });
     body.push(...capRows(lines));
   } else {
@@ -128,7 +128,7 @@ export function costDriverAnswer(world: World, scope: Scope): Answer {
   const top = members[0];
   if (top) {
     body.push(
-      `Largest: ${top.name} at ${usd(top.monthlySpend)}/mo (${returnText(top.ratio)}${evid(top.evidence)})` +
+      `Largest: ${top.name} at ${usd(top.monthlySpend)}/mo (${returnText(top.ratio)}${evid(top.evidence, top.unmarked)})` +
         (top.budgetConsumedPct !== null ? `; ${top.budgetConsumedPct}% of budget (${BUDGET_USED})` : '') +
         (top.costTrendPct !== null ? `; MoM trend ${signedPct1(top.costTrendPct)}` : '') +
         '.',
@@ -155,7 +155,7 @@ export function savingsAnswer(world: World, scope: Scope): Answer {
   const body: string[] = [];
   if (total > 0) {
     body.push(`Identified savings opportunity: ${usd(total)}/mo (projected — cost-source finding estimates, not realized).`);
-    withSavings.forEach((w, i) => body.push(`${i + 1}. ${w.name} — ${usd(w.savings)}/mo · cost ${usd(w.monthlySpend)}/mo at ${returnText(w.ratio)}${evid(w.evidence)}`));
+    withSavings.forEach((w, i) => body.push(`${i + 1}. ${w.name} — ${usd(w.savings)}/mo · cost ${usd(w.monthlySpend)}/mo at ${returnText(w.ratio)}${evid(w.evidence, w.unmarked)}`));
   } else {
     body.push(`There are no savings opportunities identified for ${label} in the findings (${usd(0)}/mo).`);
     body.push('A model-migration scenario is a separate, assumption-based estimate; ask for it below.');

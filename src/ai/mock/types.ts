@@ -16,6 +16,8 @@ export interface WorkloadFacts {
   /** monthlyValue / monthlySpend; null when spend is not positive. */
   ratio: number | null;
   evidence: EvidenceStatus | undefined;
+  /** Value inputs with no valid mark (from the context), named in answers. */
+  unmarked?: string[];
   status: string | null;
   budgetConsumedPct: number | null;
   monthlyBudget: number | null;
@@ -57,6 +59,8 @@ export interface Rollup {
   value: number;
   ratio: number | null;
   evidence: EvidenceStatus | undefined;
+  /** Members with at least one value input that has no valid mark. */
+  unmarked?: number;
 }
 
 /** An answer body plus the ladder that continues from it. */

@@ -1,5 +1,6 @@
 // Pilot P0: the daily/portfolio gauges and the Budget tab show N/A with a reason
 // for an invalid budget (never 0%), and no longer clamp an overrun to 100%.
+import { evidenceExplanation } from '@/lib/valueEvidence';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { WORKLOADS } from '@/data/workloads';
@@ -119,11 +120,14 @@ describe('portfolio headline shows its evidence status and, in the demo, that it
     const f = buildMissionBoard(w, { now: NOW }).fleet;
     expect(f.valueEvidenceUnmarkedWorkloads).toBe(1);
     expect(f.valueEvidenceStatus).toBe('assumed');
+    // The rendered headline's explanation says so (the live region carries the text once opened).
+    expect(evidenceExplanation('assumed', undefined, f.valueEvidenceUnmarkedWorkloads)).toContain('One workload has value inputs with no recorded provenance');
   });
   it('engagement mode with an empty portfolio renders no empty line under the headline', () => {
     const empty = buildMissionBoard([], { now: NOW }).fleet;
     const html = renderToStaticMarkup(<RatioModeProvider mode="engagement"><FleetHeader fleet={empty} /></RatioModeProvider>);
-    expect(html).not.toContain('mt-1 flex flex-wrap items-center gap-x-2 font-body');
+    // Only the "Value returned" term and its figure: no second, empty <dd>.
+    expect(html.match(/Value returned<\/dt>(.*?)<\/div>/)?.[1].match(/<dd/g)).toHaveLength(1);
   });
   it('engagement mode: the evidence mark stays, the demo label does not', () => {
     const html = renderToStaticMarkup(<RatioModeProvider mode="engagement"><FleetHeader fleet={fleet} /></RatioModeProvider>);

@@ -33,7 +33,7 @@ export function WorkspacePage() {
   const value = state.workloads.reduce((n, x) => n + x.value.total_value, 0);
   // Every portfolio Value / cost figure carries the computed status (weakest input; unmarked counts as assumed).
   const evidence = portfolioEvidence(state.workloads.map((x) => x.value));
-  const portfolioMark = <EvidenceMark status={evidence.status} unmarkedWorkloads={evidence.unmarkedWorkloads} />;
+  const portfolioMark = evidence.status ? <EvidenceMark status={evidence.status} unmarkedWorkloads={evidence.unmarkedWorkloads} explain /> : null;
   const forecast = computeBudgetStatus(w, b, new Date(state.asOf));
   const rows = state.ledger.filter(r => source === 'all' || r.source === source);
   const viewSteps = persona === 'technical'
