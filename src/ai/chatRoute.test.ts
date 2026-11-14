@@ -118,7 +118,9 @@ describe('/api/v1/ai/chat', () => {
     };
     expect(payload.provider).toBe('mock');
     expect(payload.message.role).toBe('assistant');
-    expect(payload.initiativesReferenced).toContain('i1');
+    // The route answers from its own records; the request's hand-built 'i1' is never read.
+    expect(payload.initiativesReferenced).not.toContain('i1');
+    expect(payload.message.content).not.toContain('GPT Summarizer');
   });
 
   it('returns 405 on a non-POST method (gateway method guard)', async () => {
@@ -166,7 +168,7 @@ describe('/api/v1/ai/chat', () => {
 describe('/api/v1/ai/chat — OpenAI-compatible providers', () => {
   const AUTH = { authorization: 'Bearer secret' };
 
-  function stubCompletion(text = 'GPT Summarizer is at risk at 2.1× value.') {
+  function stubCompletion(text = 'Customer Support Agent is at risk.') {
     const fetchMock = vi.fn(async () =>
       Response.json({ choices: [{ message: { content: text } }] }),
     );
@@ -200,7 +202,8 @@ describe('/api/v1/ai/chat — OpenAI-compatible providers', () => {
     expect(res.statusCode).toBe(200);
     const body = res.body as { provider: string; initiativesReferenced: string[] };
     expect(body.provider).toBe('mistral');
-    expect(body.initiativesReferenced).toEqual(['i1']);
+    // References resolve against the server records, not the request's 'i1'.
+    expect(body.initiativesReferenced).toEqual(['wl-support']);
     const call = lastCall(fetchMock);
     expect(call.url).toBe('https://api.mistral.ai/v1/chat/completions');
     expect(call.headers.Authorization).toBe('Bearer mk');

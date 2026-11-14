@@ -60,14 +60,19 @@ describe('M1 prototype-key wire strings never crash', () => {
       expect(r.status).toBe(200);
     }
   });
-  it('a wrong-typed valueRatio is a 200 with the workload excluded through the real route', async () => {
-    const r = await viaRoute(mod((c) => { for (const o of [c.workloads![0], c.initiatives[0]]) Object.assign(o, { valueRatio: 'oops' }); }), 'What is the ROI of the portfolio?');
-    expect(r.status).toBe(200);
-    expect(r.text).toMatch(/out of range and ignored/);
+  // The route no longer reads client figures (chatTrustBoundary.test.ts); the
+  // in-browser mock still takes the client context, so its robustness is pinned there.
+  it('a wrong-typed valueRatio leaves the workload excluded through MockAIClient', async () => {
+    const { text } = await viaMock(mod((c) => { for (const o of [c.workloads![0], c.initiatives[0]]) Object.assign(o, { valueRatio: 'oops' }); }), 'What is the ROI of the portfolio?');
+    expect(text).toMatch(/out of range and ignored/);
   });
 });
 
-describe('malformed wire shapes never 500 and never reach a renderer', () => {
+async function viaMock(context: AIContext, q: string): Promise<{ text: string }> {
+  return chat([{ role: 'user', content: q }], context);
+}
+
+describe('malformed wire shapes never crash the mock and never reach a renderer', () => {
   const LEGACY_Q = ['Which initiatives are at risk?', "What's driving cloud cost?", 'How much can we save?', 'Summarize the portfolio', 'What is the ROI of the portfolio?'];
   const SHAPES: [string, (c: Record<string, unknown>) => void][] = [
     ['initiatives [null]', (c) => { c.initiatives = [null]; }],
@@ -79,8 +84,7 @@ describe('malformed wire shapes never 500 and never reach a renderer', () => {
     const c = structuredClone(CTX) as unknown as Record<string, unknown>;
     mut(c);
     for (const q of LEGACY_Q) {
-      const r = await viaRoute(c as unknown as AIContext, q);
-      expect(r.status, q).toBe(200);
+      const r = await viaMock(c as unknown as AIContext, q);
       expect(r.text, q).not.toMatch(/NaN|Infinity|undefined|\[object|can't process/);
     }
   });
@@ -88,7 +92,7 @@ describe('malformed wire shapes never 500 and never reach a renderer', () => {
     expect((await viaRoute(CTX, 'x', m)).status).toBe(400);
   });
   it('summary totals are recomputed when an initiative is omitted as incomplete', async () => {
-    const { text } = await viaRoute(mod((c) => { delete (c.initiatives[0] as unknown as Record<string, unknown>).valueRatio; }), 'Summarize the portfolio');
+    const { text } = await viaMock(mod((c) => { delete (c.initiatives[0] as unknown as Record<string, unknown>).valueRatio; }), 'Summarize the portfolio');
     expect(text).not.toMatch(/\$41,212\/mo|11 initiatives/);
   });
   it.each(['id', 'status'])('a wire %s that is {toString:1} or a 12,000-deep array is handled without the safety net', (k) => {
@@ -99,7 +103,7 @@ describe('malformed wire shapes never 500 and never reach a renderer', () => {
     }
   });
   it('an omitted malformed entry is listed in the note', async () => {
-    expect((await viaRoute(mod((c) => { Object.assign(c, { initiatives: [null, ...c.initiatives] }); }), 'Summarize the portfolio')).text).toMatch(/1 malformed[^\n]*ignored/);
+    expect((await viaMock(mod((c) => { Object.assign(c, { initiatives: [null, ...c.initiatives] }); }), 'Summarize the portfolio')).text).toMatch(/1 malformed[^\n]*ignored/);
   });
 });
 

@@ -4,8 +4,13 @@ import { FRANK } from '@/agent-workflows/frank';
 // errors). Versioned under /v1/ per the repo's API-First rule (.obvious/obvious.md);
 // breaking changes get a new version path.
 //
-// Security: API keys NEVER reach the client. Only AIMessage[] and AIContext
-// cross the wire from the browser; keys are read here from server-side env and
+// Security: API keys NEVER reach the client. Only the conversation (AIMessage[])
+// and, at most, the id of the initiative in focus cross the wire from the browser.
+// Trust boundary (value-derivation note §7.1): the server resolves its own records
+// and derives value, Value / cost and evidence status itself; the same server-built
+// context feeds the mock and every live provider. A legacy `context` in the body is
+// accepted for compatibility, but only its focus id is read. Keys are read here
+// from server-side env and
 // the provider adapters (Claude / OpenAI / OpenAI-compatible) are defined and
 // instantiated EXCLUSIVELY in this file — never imported from src/. The
 // provider registry (src/ai/providers.ts) carries env names only, never keys.
@@ -23,7 +28,10 @@ import { FRANK } from '@/agent-workflows/frank';
 import type { NextApiRequest, NextApiResponse } from 'next';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { OMITTED_STATUSES, type AIContext, type AIMessage, type AIOmittedInitiative } from '@/ai/AIClient';
+import type { AIContext, AIMessage } from '@/ai/AIClient';
+import { buildAIContext } from '@/ai/buildAIContext';
+import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
+import type { EvidenceStatus } from '@/types';
 import { logUpstreamError, readJsonBody, renderThrown, statusReason } from '@/costsource/transports/redact';
 import { MockAIClient } from '@/ai/MockAIClient';
 import {
@@ -41,31 +49,40 @@ import {
 
 // Context-size budget (spec §8.6) — keep prompt + history well under truncation.
 const MAX_MESSAGES = 50;
-const MAX_INITIATIVES = 100;
-const MAX_OMITTED = 50;
+const MAX_FOCUS_ID = 64;
 
 /**
- * Validate and sanitize the optional `omitted` list. null = malformed (the body is
- * rejected with a 400); undefined/absent = empty. Control characters and newlines
- * become spaces so no entry can start a prompt line; strings are length-capped.
+ * The context every provider sees, built on the server from its own records: the
+ * bundled demo dataset, the only workload records this route has. No tenant has
+ * workload records of its own here, so an id outside this dataset is unknown to
+ * every caller. Nothing the client sends about figures, names or status is read.
  */
-export function parseOmitted(raw: unknown): AIOmittedInitiative[] | null {
-  if (raw === undefined) return [];
-  if (!Array.isArray(raw) || raw.length > MAX_OMITTED) return null;
-  const clean = (v: string, max: number) =>
-    Array.from(v, (ch) => { const c = ch.codePointAt(0) ?? 0; return c < 32 || (c >= 127 && c <= 159) || c === 0x2028 || c === 0x2029 ? ' ' : ch; })
-      .join('').replace(/ {2,}/g, ' ').trim().slice(0, max);
-  const out: AIOmittedInitiative[] = [];
-  for (const e of raw) {
-    if (typeof e !== 'object' || e === null) return null;
-    const { id, name, status, reason, savingsOpportunity } = e as Record<string, unknown>;
-    if (savingsOpportunity !== undefined && (typeof savingsOpportunity !== 'number' || !Number.isFinite(savingsOpportunity) || savingsOpportunity < 0 || savingsOpportunity > 1e9)) return null;
-    if (typeof id !== 'string' || typeof name !== 'string' || typeof reason !== 'string') return null;
-    if (!OMITTED_STATUSES.includes(status as AIOmittedInitiative['status'])) return null;
-    out.push({ id: clean(id, 64), name: clean(name, 120), status: status as AIOmittedInitiative['status'], reason: clean(reason, 200), ...(savingsOpportunity === undefined ? {} : { savingsOpportunity: savingsOpportunity as number }) });
-  }
-  return out;
+export function serverChatContext(focusInitiativeId: string | null): AIContext {
+  return buildAIContext(WORKLOADS, focusInitiativeId, DEMO_NOW);
 }
+
+const KNOWN_FOCUS_IDS: ReadonlySet<string> = (() => {
+  const c = serverChatContext(null);
+  return new Set([...c.initiatives.map((i) => i.id), ...(c.omitted ?? []).map((o) => o.id), ...WORKLOADS.map((w) => w.id)]);
+})();
+
+/**
+ * The focus id from the body: the top-level `focusInitiativeId`, or a legacy
+ * `context.focusInitiativeId`. `null` = no focus; `undefined` = invalid (not a
+ * string, too long, or not a record the server knows).
+ */
+function readFocus(body: Record<string, unknown>): string | null | undefined {
+  const ctx = body.context;
+  const raw = 'focusInitiativeId' in body
+    ? body.focusInitiativeId
+    : typeof ctx === 'object' && ctx !== null && !Array.isArray(ctx)
+      ? (ctx as Record<string, unknown>).focusInitiativeId
+      : undefined;
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== 'string' || raw.length > MAX_FOCUS_ID || !KNOWN_FOCUS_IDS.has(raw)) return undefined;
+  return raw;
+}
+
 const MAX_TOKENS = 1024;
 
 // --- Server-only provider adapters ------------------------------------------
@@ -223,6 +240,7 @@ interface AdapterError {
 }
 
 function resolveAdapter(env: NodeJS.ProcessEnv, context: AIContext): AIAdapter {
+  // `context` is always the server-built context (serverChatContext), never the request's.
   const provider = normalizeAIProvider(env.AI_PROVIDER);
   switch (provider) {
     case 'claude': {
@@ -257,7 +275,7 @@ function resolveAdapter(env: NodeJS.ProcessEnv, context: AIContext): AIAdapter {
       return new OpenAICompatibleAdapter(provider, preset.label, baseUrl, model, apiKey);
     }
     case 'mock':
-      // Offline-safe default: the data-grounded mock, given the real context.
+      // Offline-safe default: the data-grounded mock, given the server-built context.
       return {
         provider: 'mock',
         call: async (_systemPrompt, messages) => {
@@ -279,6 +297,15 @@ function isAdapterError(err: unknown): err is AdapterError {
 
 // --- System-prompt builder (spec §5.2) -------------------------------------
 
+const PROMPT_STATUSES: ReadonlySet<string> = new Set<EvidenceStatus>(['measured', 'projected', 'assumed']);
+
+/** The provenance mark for a data line. An unknown status is refused, never written verbatim. */
+function evidenceMark(status: unknown): string {
+  if (status === undefined) return '';
+  if (typeof status !== 'string' || !PROMPT_STATUSES.has(status)) throw new Error('Refusing to write an unknown evidence status into the system prompt');
+  return ` (evidence: ${status})`;
+}
+
 export function buildSystemPrompt(ctx: AIContext): string {
   const fmt = (n: number) =>
     n.toLocaleString('en-US', {
@@ -293,7 +320,7 @@ export function buildSystemPrompt(ctx: AIContext): string {
         `- ${i.name}: ${fmt(i.monthlyCost)}/mo | Annual: ${fmt(i.annualRunRate)} | Budget: ${i.budgetConsumedPct}%\n  Status: ${i.status} | Value / cost: ${i.valueRatio.toFixed(1)}×` +
         // Provenance rides the data line (audit C1/C2) — the agent never
         // presents an assumed value as measured.
-        (i.valueEvidenceStatus ? ` (evidence: ${i.valueEvidenceStatus})` : '') +
+        evidenceMark(i.valueEvidenceStatus) +
         (i.savingsOpportunity > 0
           ? ` | Savings opportunity: ${fmt(i.savingsOpportunity)}/mo`
           : ''),
@@ -305,7 +332,7 @@ export function buildSystemPrompt(ctx: AIContext): string {
       ?.map(
         (w) =>
           `- ${w.name} (${w.model}): ${fmt(w.monthlySpend)}/mo | Value / cost ${w.valueRatio.toFixed(1)}×` +
-          (w.valueEvidenceStatus ? ` (evidence: ${w.valueEvidenceStatus})` : '') +
+          evidenceMark(w.valueEvidenceStatus) +
           ` | shape: ${w.demandShape} | gates: ${w.governanceGatesPassed}/4` +
           // Defensive typeof: older clients may omit cacheHitRate on the wire.
           (typeof w.cacheHitRate === 'number'
@@ -349,37 +376,24 @@ export function buildSystemPrompt(ctx: AIContext): string {
 
 // --- Request validation -----------------------------------------------------
 
-function isValidBody(
-  body: unknown,
-): body is { messages: AIMessage[]; context: AIContext } {
-  if (typeof body !== 'object' || body === null) return false;
-  const { messages, context } = body as {
-    messages?: unknown;
-    context?: unknown;
-  };
+function isValidBody(body: unknown): body is { messages: AIMessage[] } {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return false;
+  const { messages, context } = body as { messages?: unknown; context?: unknown };
   if (!Array.isArray(messages) || messages.length === 0) return false;
   if (messages.length > MAX_MESSAGES || !messages.every((m) => typeof m === 'object' && m !== null)) return false;
-  if (typeof context !== 'object' || context === null) return false;
-  const { initiatives, summary, asOf } = context as {
-    initiatives?: unknown;
-    summary?: unknown;
-    asOf?: unknown;
-  };
-  if (!Array.isArray(initiatives) || initiatives.length > MAX_INITIATIVES) return false;
-  if (typeof summary !== 'object' || summary === null) return false;
-  if (typeof asOf !== 'string') return false;
-  if (parseOmitted((context as { omitted?: unknown }).omitted) === null) return false;
-  return true;
+  // A legacy client still sends `context`; only its focus id is read (below).
+  if (context !== undefined && (typeof context !== 'object' || context === null || Array.isArray(context))) return false;
+  return readFocus(body as Record<string, unknown>) !== undefined;
 }
 
-/** Gateway body validator — wraps the type guard with a human-readable message. */
+/** Gateway body validator — wraps the type guard with a human-readable message (never echoes input). */
 export function validateChatBody(body: unknown): GatewayValidation {
   return isValidBody(body)
     ? { ok: true }
     : {
         ok: false,
         message:
-          'Body must include non-empty messages[] (max 50) and a context with initiatives (max 100), summary, and asOf',
+          'Body must include non-empty messages[] (max 50); focusInitiativeId, if sent, must be the id of a known initiative',
       };
 }
 
@@ -392,15 +406,10 @@ async function chatHandler(
   res: NextApiResponse,
   _ctx: GatewayContext,
 ): Promise<void> {
-  const { messages, context } = req.body as {
-    messages: AIMessage[];
-    context: AIContext;
-  };
-
-  // Validated by the gateway; replace with the sanitized copy before any use.
-  const omitted = parseOmitted(context.omitted) ?? [];
-  if (omitted.length) context.omitted = omitted;
-  else delete context.omitted;
+  const { messages } = req.body as { messages: AIMessage[] };
+  // Validated by the gateway. The context is built here from server records; the
+  // request contributes only the focus id, and only when it names a known record.
+  const context = serverChatContext(readFocus(req.body as Record<string, unknown>) ?? null);
 
   let adapter: AIAdapter;
   try {
@@ -413,7 +422,7 @@ async function chatHandler(
     throw err; // unexpected — let the gateway convert to a 500 envelope.
   }
 
-  const systemPrompt = adapter.provider === 'mock' ? /* mock sanitizes raw context itself */ '' : buildSystemPrompt(context);
+  const systemPrompt = adapter.provider === 'mock' ? /* the mock reads the same server-built context */ '' : buildSystemPrompt(context);
   const userMessages = messages.filter((m) => m.role !== 'system');
 
   // A thrown LLM error propagates to the gateway, which returns a 500 envelope
