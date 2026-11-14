@@ -19,6 +19,7 @@ export type {
 } from './AIClient';
 
 export { MockAIClient } from './MockAIClient';
+export { MAX_MESSAGE_CHARS, MAX_MESSAGES } from './limits';
 export { AI_PROVIDERS, LIVE_AI_PROVIDERS, normalizeAIProvider } from './providers';
 export type { AIProvider } from './providers';
 export { buildAIContext } from './buildAIContext';
