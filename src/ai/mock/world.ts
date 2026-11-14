@@ -153,7 +153,7 @@ export function buildWorld(ctx: AIContext): World {
     }
     const marked = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
     // Both copies are read and merged: an empty list on one never hides a non-empty list on the other.
-    const unmarked = inputs([...arr(s.valueEvidenceUnmarked), ...arr(i.valueEvidenceUnmarked)]);
+    const unmarked = [...new Set([...inputs(s.valueEvidenceUnmarked), ...inputs(i.valueEvidenceUnmarked)])];
     // A context that names unmarked inputs cannot also claim a stronger status: unmarked counts as assumed.
     const status = unmarked.length ? 'assumed' : marked;
     rows.push({
