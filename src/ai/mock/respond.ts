@@ -1,6 +1,7 @@
 // The router: one pure function from (messages, context) to a response. No
 // I/O, no clock, no randomness. Order of work:
-//   1. take the last user message (bounded), greeting -> legacy help
+//   1. take the last user message (bounded); "help" -> legacy help; a turn that
+//      is entirely small talk (greeting, thanks, who are you...) -> smalltalk.ts
 //   2. read entity mentions and back-references
 //   3. classify the intent (contract order in intents.ts)
 //   4. resolve the scope: named entity > remembered focus > portfolio
@@ -19,9 +20,10 @@ import { atRisk, costDriver, help, savings, summary } from './legacy';
 import { SOURCE_PREFIX, render } from './format';
 import { scopeLabel } from './calc';
 import { buildWorld, legacyContext } from './world';
+import { smallTalkAnswer, smallTalkKinds, withoutIdioms } from './smalltalk';
 import type { Answer, Scope, World } from './types';
 
-const GREETING = /^\s*(?:help|hi|hello|hey|\?)\W*$/;
+const LEGACY_HELP = /^\s*(?:help|\?)\W*$/;
 
 function reply(content: string, referenced: string[] = []): AIResponse {
   return { message: { role: 'assistant', content }, initiativesReferenced: referenced, provider: 'mock' };
@@ -74,6 +76,39 @@ const NAMEABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 'al
 const INHERITABLE: ReadonlySet<Intent> = new Set(['roi', 'workloads', 'tokens', 'alerts', 'outcomes', 'savings', 'cost_driver']);
 
 /** The question a bare follow-up repeats: the latest earlier user turn with a read-only intent. */
+/** Frank's surname in any form: "Frank Coster", "Frank Costers", "frankcoster", "Coster", possessives. */
+const NAME_RX = /\b(?:frank\s*)?coster(?:(['’]s)|s)?\b/gi;
+const FRANK = "(?:frank(?:\\s*coster(?:['\u2019]s|s)?)?|coster(?:['\u2019]s|s)?)";
+/** Frank addressed by name at the start ("Coster, ...") or at the end ("..., Frank?", "..., Frank 🙂"). */
+const LEADING_ADDRESS = new RegExp(`^\\s*${FRANK}\\s*,`, 'i');
+const TRAILING_ADDRESS = new RegExp(`,\\s*${FRANK}[\\s\\p{P}\\p{S}\\p{M}\\p{Cf}]*$`, 'iu'); // emoji sequences included
+
+/**
+ * The typed text with the words that address Frank blanked out (same length, so entity
+ * positions still line up). Unknown names are looked for here: "ROI of Legal, Coster?"
+ * names nothing unknown, while "ROI of Coster" and "Coster, ROI of Coster" ask about
+ * something named Coster. A span inside a named entity is never blanked.
+ */
+function withoutAddress(t: string, mentions: Mention[]): string {
+  const blank = (m: string, at: number): string =>
+    mentions.some((n) => n.scope.kind !== 'portfolio' && n.start < at + m.length && at < n.end) ? m : ' '.repeat(m.length);
+  return t.replace(LEADING_ADDRESS, (m: string, at: number) => blank(m, at)).replace(TRAILING_ADDRESS, (m: string, at: number) => blank(m, at));
+}
+
+/**
+ * The text the question type is read from. "Coster" contains "cost", so Frank's surname
+ * would route a question to cost: every form of his name becomes "Frank" ("Frank's" for a
+ * possessive), except inside a team, workload or model named in the data ("Coster
+ * Pipeline", the "Costers" team). Used only for classification, never to find data or to
+ * quote a name, so it can never create or change an entity mention.
+ */
+function routingText(t: string, world: World): string {
+  const named = findMentions(t, world).filter((m) => m.scope.kind !== 'portfolio');
+  return t.replace(NAME_RX, (m: string, possessive: string | undefined, at: number) =>
+    named.some((n) => n.start < at + m.length && at < n.end) ? m : possessive ? "Frank's" : 'Frank',
+  );
+}
+
 function previousIntent(history: AIMessage[], world: World): Intent | null {
   const recent = history.slice(-MAX_HISTORY);
   for (let i = recent.length - 1; i >= 0; i--) {
@@ -82,7 +117,7 @@ function previousIntent(history: AIMessage[], world: World): Intent | null {
     const t = m.content.slice(0, 500);
     const ms = findMentions(t, world);
     const sub = pickSubject(ms);
-    const intent = classifyIntent(t.toLowerCase(), {
+    const intent = classifyIntent(routingText(t, world).toLowerCase(), {
       hasEntity: sub !== null && sub.scope.kind !== 'portfolio',
       namesTeam: namesTeam(ms),
       backRef: false,
@@ -114,22 +149,37 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   if (at < 0) return help();
   const raw = messages[at].content;
   if (typeof raw !== 'string') return help();
-  const text = raw.slice(0, MAX_TEXT);
-  const lower = text.toLowerCase();
-  if (GREETING.test(lower)) return help();
-
   const world = buildWorld(context);
+  // Names are always read from the words the user typed, so data is found (and an unknown
+  // name is quoted) exactly as written. Only the question type is read from `routed`,
+  // where Frank's own name never means cost (see routingText).
+  const text = raw.slice(0, MAX_TEXT);
   const mentions = findMentions(text, world);
+  const routed = routingText(text, world);
+  const lower = routed.toLowerCase();
+  if (LEGACY_HELP.test(lower)) return help();
+
   const subject = pickSubject(mentions);
   const explicit = subject !== null && subject.scope.kind !== 'portfolio';
   const ref = detectReference(lower);
   const elliptical = isElliptical(lower);
   const backRef = !subject && (ref.kind !== 'none' || elliptical);
 
+  // Small talk: only a turn that is entirely conversational, names no data and does not
+  // point back at a remembered subject ("how is it going?" after an answer is a follow-up).
+  const talk = smallTalkKinds(routed);
+  if (talk && !mentions.some((m) => m.scope.kind !== 'portfolio')) {
+    const focus = deriveFocus(messages.slice(0, at), world);
+    // Skip small talk only when the raw text and the idiom-masked text both point
+    // back: the analytic path reads the raw text, so the two must agree.
+    const pointsBack = ref.kind !== 'none' && detectReference(withoutIdioms(lower)).kind !== 'none';
+    if (!(pointsBack && focus !== null)) return done(smallTalkAnswer(talk, routed, world, focus), world);
+  }
+
   let intent = classifyIntent(lower, { hasEntity: explicit, namesTeam: namesTeam(mentions), backRef });
   if (intent === 'legacy' && (elliptical || subject !== null)) {
     const portfolioRanges = mentions.filter((m) => m.scope.kind === 'portfolio');
-    if (classifyLegacy(withoutPortfolio(text, portfolioRanges)) === 'help') {
+    if (classifyLegacy(routingText(withoutPortfolio(text, portfolioRanges), world)) === 'help') {
       intent = previousIntent(messages.slice(0, at), world) ?? intent;
     }
   }
@@ -155,10 +205,11 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   // An unrecognized name is reported plainly (before any back-reference or default scope), also next
   // to a recognized entity ("ROI of Legal and the Finance team"); it is never silently substituted.
   if (intent !== 'forecast' && intent !== 'capability') {
-    const team = unknownTeam(text, mentions);
+    const asked = withoutAddress(text, mentions);
+    const team = unknownTeam(asked, mentions);
     if (team && !explicit) return reply(unknownNameText(world, { name: team, team: true }));
     const lone = !subject && !backRef && (NAMEABLE.has(intent) || intent === 'legacy' || intent === 'savings' || intent === 'cost_driver');
-    const name = team || !(explicit || lone) ? null : unknownCapitalized(text, explicit ? mentions : []);
+    const name = team || !(explicit || lone) ? null : unknownCapitalized(asked, explicit ? mentions : []);
     if (team) notes.push(`Note: I don't have a team called ${team}; ${only}.`);
     else if (name && explicit) notes.push(`Note: I don't have a team, workload or model called "${name}"; ${only}.`);
     else if (name) return reply(unknownNameText(world, { name, team: false }));
@@ -213,7 +264,7 @@ export function respond(messages: AIMessage[], context: AIContext): AIResponse {
   }
 
   // Legacy path: byte-identical answers for the original keyword questions.
-  const legacy = classifyLegacy(text);
+  const legacy = classifyLegacy(routed);
   if (legacy !== 'help') return withRejected(LEGACY[legacy](legacyContext(context, world)), world);
   // Nothing matched. A named or remembered subject gets its detail view;
   // anything else gets an honest "cannot answer" with the closest questions.

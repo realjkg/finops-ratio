@@ -52,8 +52,9 @@ describe('legacy intents are byte-identical for their example questions', () => 
     ["What's driving cloud cost?", COST_DRIVER],
     ['How much can we save?', SAVINGS],
     ['Summarize the portfolio', SUMMARY],
-    ['hello', HELP],
+    // 'hello' moved to the conversational greeting (smalltalk.test.ts); 'help' keeps this reply.
     ['help', HELP],
+    ['?', HELP],
   ])('%s', async (q, expected) => {
     expect(await last([q])).toBe(expected);
   });

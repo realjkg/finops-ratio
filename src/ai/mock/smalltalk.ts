@@ -1,0 +1,182 @@
+// Small talk: deterministic replies to turns that are ENTIRELY conversational
+// (greetings, how-are-you, thanks, acknowledgements, goodbyes, "who are you",
+// "where do I start"). A message that carries anything else, a question above
+// all, is not small talk and goes to the analytic router unchanged, so every
+// existing answer stays byte for byte the same.
+//
+// Pure: no I/O, no clock, no randomness. The only figures shown are counts and
+// spend read from the dataset, with the usual source line. Headers never name a
+// team, workload or model, so conversation memory (which reads answer headers)
+// keeps the subject the user was discussing.
+
+import { WHAT_I_DO, cannotDo, capabilityAnswer, dataLine, starterQuestions } from './answersMeta';
+import { ladder } from './answerKit';
+import { DOING_WELL_HEADER, GOODBYE_HEADER, GOT_IT_HEADER, IDENTITY_HEADER, WELCOME_HEADER, greetingHeader } from './metaHeaders';
+import type { Answer, Scope, World } from './types';
+
+export type SmallTalkKind = 'greeting' | 'how_are_you' | 'thanks' | 'acknowledge' | 'farewell' | 'identity' | 'start';
+
+const MAX_SMALL_TALK = 120;
+
+/** Phrases per kind, matched at the start of the remaining text, longest first within each kind. */
+const PHRASES: ReadonlyArray<[SmallTalkKind, RegExp]> = [
+  ['identity', /^(?:(?:what (?:is|s) )?(?:your|frank s) (?:role|job|purpose)|who are you|what are you|(?:who|what) (?:is|s) frank(?: coster)?|introduce yourself|tell me about (?:yourself|you|frank(?: coster)?)|what is your name|what s your name|whats your name|are you frank(?: coster)?|(?:are you|is frank(?: coster)?) (?:an? )?(?:ai|bot|robot|chatbot|real|human|person|llm|chatgpt|language model)|who (?:made|built|created|owns) (?:you|frank(?: coster)?))\b/],
+  ['start', /^(?:where (?:do|should|can) i (?:start|begin)|what (?:should|can|could) i ask(?: you)?|how do i use (?:this|you|ratio|frank)|how does this work|how do you work|can you help(?: me)?|help me(?: out)?|i need help|what do you do|what (?:can|does) (?:you|frank(?: coster)?) do)\b/],
+  ['how_are_you', /^(?:how are you(?: doing)?(?: today)?|how are things|how s it going|hows it going|how is it going|how have you been|what s up|whats up|sup)\b/],
+  ['greeting', /^(?:good (?:morning|afternoon|evening|day)|hi there|hello there|hey there|hiya|howdy|heya|hello|hey|hi|yo|greetings)\b/],
+  ['thanks', /^(?:thank you(?: so much| very much)?|thanks(?: a lot| so much)?|many thanks|much appreciated|appreciate it|thx|ty|cheers)\b/],
+  ['farewell', /^(?:good ?bye|bye(?: bye)?|see you(?: later| soon)?|that s all|thats all|that is all|i m done|im done|done for now|have a (?:good|great|nice) (?:day|one)|take care|later)\b/],
+  ['acknowledge', /^(?:sounds good|got it|makes sense|all right|alright|understood|i see|okay|ok|cool|great|nice|perfect|awesome|excellent|good)\b/],
+];
+
+/** Words that may surround small talk without changing it (the user addressing Frank, filler). */
+const FILLER = /^(?:frank(?: coster)?|there|team|everyone|all|so|and|well|oh|please|again|then|very|much)\b/;
+
+function normalize(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[’`]/g, "'")
+    .replace(/'/g, ' ')
+    // Keep every letter and number (any script) so that content the phrases do not
+    // cover makes the parse fail; only punctuation and symbols become spaces.
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** The phrase kinds of normalized text, in order (repeats kept), or null if anything is left over. */
+function parse(text: string): SmallTalkKind[] | null {
+  let rest = text;
+  const seq: SmallTalkKind[] = [];
+  while (rest.length > 0) {
+    // Whole phrases first, so a phrase that starts with a filler word ("all right") is reachable.
+    const hit = PHRASES.map(([kind, rx]) => ({ kind, m: rx.exec(rest) })).find((h) => h.m !== null);
+    if (hit && hit.m) {
+      seq.push(hit.kind);
+      rest = rest.slice(hit.m[0].length).trimStart();
+      continue;
+    }
+    const filler = FILLER.exec(rest);
+    if (!filler) return null;
+    rest = rest.slice(filler[0].length).trimStart();
+  }
+  return seq;
+}
+
+/** Kinds that a question mark turns into a question ("ok?", "that's all?", "thanks?"). */
+const QUESTIONABLE: ReadonlySet<SmallTalkKind> = new Set(['acknowledge', 'farewell', 'thanks']);
+const QUESTION_MARKS = /[?？¿؟‽⁇⁈⁉﹖]/;
+const QUESTION_END = /[?？؟‽⁇⁈⁉﹖]+/;
+
+/**
+ * The small-talk kinds a message consists of, in order, or null when anything
+ * in it is not small talk (a question, a name, a number). `help` alone is not
+ * matched here: it keeps its original legacy reply.
+ */
+export function smallTalkKinds(text: string): SmallTalkKind[] | null {
+  if (typeof text !== 'string' || text.length > MAX_SMALL_TALK) return null;
+  // A number or amount is data the user typed: never acknowledge it and drop it.
+  if (/[\p{N}%$€£]/u.test(text)) return null;
+  const all = normalize(text);
+  if (all === '' || all === 'help') return null;
+  // The bare name ("Frank", "Frank Coster!") is someone getting Frank's attention: a greeting.
+  const seq = /^frank(?: coster)?$/.test(all) ? (['greeting'] as SmallTalkKind[]) : parse(all);
+  if (!seq || seq.length === 0) return null;
+  const kinds = seq.filter((k, i) => seq.indexOf(k) === i);
+  // "that's all?", "ok?!", "¿ok": a question mark with only acknowledgments, thanks or
+  // goodbyes is a question, not small talk.
+  if (QUESTION_MARKS.test(text) && kinds.every((k) => QUESTIONABLE.has(k))) return null;
+  // "Hi Frank, ok?", "hello, that's all?": a clause that ends in a question mark and
+  // whose last phrase is an acknowledgment, thanks or goodbye asks something, even
+  // after a greeting. "Hi Frank, how are you?" still passes.
+  const clauses = text.split(QUESTION_END);
+  const asked = clauses.slice(0, -1);
+  // "hi, ¿ok": the text after an opening ¿ is a question up to its closing mark.
+  for (const opened of text.split('¿').slice(1)) asked.push(opened.split(QUESTION_END)[0]);
+  for (const c of asked) {
+    const clause = parse(normalize(c));
+    if (clause && clause.length > 0 && QUESTIONABLE.has(clause[clause.length - 1])) return null;
+  }
+  return kinds;
+}
+
+/** Polite idioms whose "there" or "it" never points back at a subject ("hi there", "got it"). */
+const IDIOMS = /\b(?:(?:hi|hiya|hey|heya|hello),? there|appreciate it|got it)\b/g;
+
+/**
+ * Text with those idioms blanked, for the back-reference check on small talk. It is
+ * normalized exactly like the phrase parser (punctuation, emoji and extra spaces
+ * become one space), so "hi 👋 there!" and "got… it" match; a real reference such
+ * as "how is it going?" is left intact.
+ */
+export function withoutIdioms(lower: string): string {
+  return normalize(lower).replace(IDIOMS, ' ');
+}
+
+/** The greeting word to echo back, capitalized ("good morning" -> "Good morning"). */
+function greetingWord(text: string): string {
+  const n = normalize(text);
+  const m = /\b(good (?:morning|afternoon|evening|day)|hello|hey|howdy|greetings)\b/.exec(n);
+  const w = m?.[1] ?? 'hi';
+  const shown = w === 'greetings' ? 'hello' : w;
+  return shown.charAt(0).toUpperCase() + shown.slice(1);
+}
+
+/** Next questions: a drill-down on the subject under discussion, else the starter questions. */
+function suggestions(world: World, focus: Scope | null): string[] {
+  if (focus && focus.kind !== 'portfolio') {
+    const next = ladder(world, focus, 'roi');
+    if (next.length > 0) return next;
+  }
+  return starterQuestions(world);
+}
+
+const IDENTITY =
+  'I help leaders see what their AI workloads cost and return: where the money goes, what value it produces and where to save. I show where every figure comes from.';
+const HOW_I_WORK =
+  "I'm a deterministic assistant, not a generative AI model: fixed rules compute every answer from the data in this view, so the same question in the same conversation always gets the same answer.";
+const HOW_ARE_YOU =
+  "I'm running well, thanks for asking. I'm a deterministic assistant, so the same question in the same conversation always gets the same answer.";
+
+/** The reply for a small-talk turn. `focus` is the subject from the conversation so far, if any. */
+export function smallTalkAnswer(kinds: SmallTalkKind[], text: string, world: World, focus: Scope | null): Answer {
+  const next = suggestions(world, focus);
+  const base = { referenced: [] as string[] };
+  if (kinds.includes('start')) return capabilityAnswer(world);
+  if (kinds.includes('identity')) {
+    // The identity answer already says how Frank works, so only the courtesy is added.
+    const how = kinds.includes('how_are_you') ? ["I'm running well, thanks for asking."] : [];
+    const body = [
+      ...how,
+      IDENTITY,
+      'What I do:',
+      ...WHAT_I_DO.map((d) => `• ${d}`),
+      "What I can't do:",
+      ...cannotDo(world).map((c) => `• ${c}`),
+      'How I work:',
+      HOW_I_WORK,
+      dataLine(world),
+    ];
+    return { ...base, header: IDENTITY_HEADER, body, next };
+  }
+  if (kinds.includes('greeting')) {
+    const body = [
+      ...(kinds.includes('how_are_you') ? [HOW_ARE_YOU] : []),
+      "I'm Ratio's FinOps accountability partner. Ask me about cost, value and savings, and I'll show where every figure comes from.",
+      dataLine(world),
+      'Good places to start are below. Ask "Who are you?" to hear what I can and can\'t do, or "What can you answer?" for the full list.',
+    ];
+    return { ...base, header: greetingHeader(greetingWord(text)), body, next };
+  }
+  if (kinds.includes('how_are_you')) {
+    return { ...base, header: DOING_WELL_HEADER, body: [HOW_ARE_YOU, 'What would you like to look at?'], next };
+  }
+  if (kinds.includes('farewell')) {
+    const welcome = kinds.includes('thanks') ? ["You're welcome."] : [];
+    return { ...base, header: GOODBYE_HEADER, body: [...welcome, 'Thanks for the conversation. Come back any time with a question about cost, value or savings.'], next: [] };
+  }
+  if (kinds.includes('thanks')) {
+    return { ...base, header: WELCOME_HEADER, body: ['Happy to help. Want to go a level deeper?'], next };
+  }
+  return { ...base, header: GOT_IT_HEADER, body: ['What would you like to look at next?'], next };
+}

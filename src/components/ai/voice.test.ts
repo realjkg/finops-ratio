@@ -7,6 +7,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   MIC_PERMISSION_DENIED,
+  NO_MICROPHONE,
+  SPEECH_SERVICE_UNAVAILABLE,
+  SPEECH_SERVICE_UNREACHABLE,
   VOICE_INPUT_FAILED,
   VoiceDictationController,
   cancelSpeaking,
@@ -187,8 +190,30 @@ describe('VoiceDictationController', () => {
     const { controller, captured } = makeController(rec);
     controller.start();
 
-    rec.fail('network');
+    rec.fail('bad-grammar');
     expect(captured.errors).toEqual([VOICE_INPUT_FAILED]);
+  });
+
+  // Owner report (iPhone): the mic said "access was denied" although the cause can be
+  // the browser's speech service, not the site permission. Each cause gets its own hint.
+  it.each([
+    ['service-not-allowed', SPEECH_SERVICE_UNAVAILABLE],
+    ['audio-capture', NO_MICROPHONE],
+    ['network', SPEECH_SERVICE_UNREACHABLE],
+  ])('maps %s to its own hint', (code, hint) => {
+    const rec = new FakeRecognition();
+    const { controller, captured } = makeController(rec);
+    controller.start();
+
+    rec.fail(code);
+    expect(captured.errors).toEqual([hint]);
+  });
+
+  it('the hints are distinct and the permission hint says where to allow it on iPhone', () => {
+    const all = [MIC_PERMISSION_DENIED, SPEECH_SERVICE_UNAVAILABLE, NO_MICROPHONE, SPEECH_SERVICE_UNREACHABLE, VOICE_INPUT_FAILED];
+    expect(new Set(all).size).toBe(all.length);
+    expect(MIC_PERMISSION_DENIED).toMatch(/Website Settings/);
+    expect(SPEECH_SERVICE_UNAVAILABLE).toMatch(/Dictation/);
   });
 
   it('stop() asks the recognition to stop (click-to-stop)', () => {

@@ -166,3 +166,63 @@ test('Estimated value: opening it describes the button and announces the text; E
   await page.keyboard.press('Escape');
   await expect(note).toHaveCount(0);
 });
+
+// Owner report (iPhone): typing in the Frank panel left the page zoomed in with the panel
+// cut off on the right. iOS Safari zooms into a focused text field whose font is below 16px
+// and stays zoomed, so on touch screens every text field is at least 16px, whatever the
+// Text setting or orientation; desktops keep the compact sizes.
+const fontPx = (loc: import('@playwright/test').Locator) => loc.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+
+test.describe('touch screens: text fields never trigger iOS zoom', () => {
+  for (const [width, height, scale] of [[390, 844, 90], [390, 844, 100], [390, 844, 130], [320, 640, 100], [844, 390, 100]] as const) {
+    test(`Frank chat box is at least 16px at ${width}x${height}, ${scale}% text, and the panel fits`, async ({ browser }) => {
+      const ctx = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true });
+      const page = await ctx.newPage();
+      await page.addInitScript((s) => localStorage.setItem('ratio.typography', JSON.stringify({ scale: s, family: 'default' })), scale);
+      await page.goto('/');
+      await nav(page).getByRole('button', { name: 'Ask Frank Coster' }).click();
+      const box = page.getByRole('textbox', { name: 'Ask about your initiative portfolio' });
+      await box.focus();
+      expect(await fontPx(box)).toBeGreaterThanOrEqual(16);
+      const fit = await page.evaluate(() => ({ doc: document.documentElement.scrollWidth, inner: window.innerWidth }));
+      expect(fit.doc).toBeLessThanOrEqual(fit.inner);
+      await ctx.close();
+    });
+  }
+
+  const signIn = async (page: import('@playwright/test').Page) => {
+    await page.goto('/simulation');
+    await page.getByRole('button', { name: 'Continue as Morgan', exact: true }).click();
+    await expect(page.getByText('Signed in as Morgan', { exact: false })).toBeVisible();
+  };
+
+  test('the Ask Frank box on Agent workflows is at least 16px on a phone', async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await signIn(page);
+    await page.goto('/agent-workflows');
+    expect(await fontPx(page.getByRole('textbox', { name: 'Ask Frank' }))).toBeGreaterThanOrEqual(16);
+    await ctx.close();
+  });
+
+  test('a field never grows past its designed size: the workspace select fits at 320px with 130% text', async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await page.addInitScript(() => localStorage.setItem('ratio.typography', JSON.stringify({ scale: 130, family: 'default' })));
+    await signIn(page);
+    await page.goto('/workspace');
+    const select = page.getByLabel('Workflow workload');
+    const box = await select.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(320 + 0.5);
+    expect(await fontPx(select)).toBeGreaterThanOrEqual(16);
+    await ctx.close();
+  });
+});
+
+test('Frank chat box stays compact on a desktop screen', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/');
+  await nav(page).getByRole('button', { name: 'Ask Frank Coster' }).click();
+  expect(await fontPx(page.getByRole('textbox', { name: 'Ask about your initiative portfolio' }))).toBeLessThan(16);
+});
