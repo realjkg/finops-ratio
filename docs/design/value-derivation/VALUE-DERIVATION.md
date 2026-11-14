@@ -60,8 +60,8 @@ Every value figure must state its formula inputs, their sources, the period, the
 For one initiative, one period and one currency:
 
 ```
-Value  V = (N_observed − N_counterfactual) × U × A_output
-         + (N_counterfactual × K_counterfactual − N_observed × K_observed) × A_cost
+Value  V = (N_observed − N_counterfactual) × (U − K_observed) × A_output
+         + N_counterfactual × (K_counterfactual − K_observed) × A_cost
          − H
 Cost   C = reconciled model usage + infrastructure + implementation + oversight + labor   (same period, same currency)
 Value / cost = V ÷ C          ROI = (V − C) ÷ C
@@ -77,10 +77,15 @@ Value / cost = V ÷ C          ROI = (V − C) ÷ C
 | `H` | Incremental cost of failed or harmful outcomes | (quality-failed events observed − quality-failed events in the counterfactual) × a harm unit value from the same register, so harm is incremental like the benefit terms. Not attributed: all extra harm is charged to the AI (conservative). The harm unit excludes any rework cost already measured in `K_observed`, so rework is never counted twice | Computed |
 | `C` | Full cost | `cost_facts_published` (reconciled batches only, which needs each batch's reconciliation state; the reader cannot see it until the batch-status view of migration 0005 exists) + supplemental costs, each with its own evidence status | Computed; supplemental costs verified by a second person |
 
-The two benefit terms are separate on purpose. The first counts **more output**: incremental outcomes × their value. The second counts **cheaper output**: the change in the total cost of the work other than the AI, `N_counterfactual × K_counterfactual − N_observed × K_observed`. It credits no avoided cost on extra outcomes that would not have happened at all. The AI's own cost is never in `K`; it is only in `C`, so it is not counted twice.
+The two benefit terms are separate on purpose, and each takes its own attribution.
 
-- **Same volume, cheaper work.** 100 outcomes either way, $10 of manual cost per outcome before and $0 after, AI full cost `C` = $200, `A` = 100%. Then V = 0 + (1,000 − 0) = $1,000, Value / cost = 5.0× and ROI = 400% (a net $800 saved).
-- **More volume and cheaper work.** 100 outcomes before and 150 after, `K` $10 before and $2 after, `U` = $5, `A` = 100%. Then V = 50 × $5 + (100 × $10 − 150 × $2) = $250 + $700 = $950.
+- **More output:** each extra outcome's value, net of the process cost it still needs: `(N_observed − N_counterfactual) × (U − K_observed)`.
+- **Cheaper output:** the unit-cost saving on the outcomes that would have happened anyway: `N_counterfactual × (K_counterfactual − K_observed)`.
+
+Together, at 100% attribution, they equal the added value plus the change in the total cost of the work other than the AI (`N_counterfactual × K_counterfactual − N_observed × K_observed`). They credit no avoided cost on extra outcomes that would not have happened at all. The AI's own cost is never in `K`; it is only in `C`, so it is not counted twice.
+
+- **Same volume, cheaper work.** 100 outcomes either way, $10 of manual cost per outcome before and $0 after, AI full cost `C` = $200, `A_output` = `A_cost` = 100%. Then V = 0 + 100 × ($10 − $0) = $1,000, Value / cost = 5.0× and ROI = 400% (a net $800 saved).
+- **More volume and cheaper work.** 100 outcomes before and 150 after, `K` $10 before and $2 after, `U` = $5, `A_output` = `A_cost` = 100%. Then V = 50 × ($5 − $2) + 100 × ($10 − $2) = $150 + $800 = $950.
 
 Report a **range**, not only a point: low and high values from the uncertainty in `N_counterfactual` (holdout confidence interval or baseline variance), in `U` and in `K`. Proposed: the Value / cost, ROI and evidence status use the **low end** (the conservative point), and the range is shown beside it.
 
@@ -136,7 +141,7 @@ These make today's figures accurate about what they are, without waiting for the
 1. Adopt the formula in §3 and the rule-based status in §4 as the definition of value.
 2. Who owns unit values (proposed: finance), and who approves them.
 3. The minimum evidence for `measured`: holdout only, or also a pre-registered, volume-normalized baseline.
-4. The attribution rule when there is no holdout (proposed: an explicit share with justification; never a 100% default).
+4. The attribution rule when there is no holdout, for each of `A_output` and `A_cost` (proposed: an explicit share with justification; never a 100% default).
 5. Whether the 3× target and the full-cost rates stay fixed policy constants or become configurable, owned settings.
 6. Whether to do the §7 honesty fixes now as small, separate PRs.
 7. Whether this note becomes an ADR (it would add contracts: the unit-value register and value derivation records).
