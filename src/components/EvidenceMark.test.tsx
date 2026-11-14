@@ -116,3 +116,21 @@ describe('EvidenceMark', () => {
     expect(document.querySelector('[role="note"]')).toBeNull();
   });
 });
+
+describe('EvidenceMark names inputs with no recorded provenance', () => {
+  it('the title says which inputs carry no mark and that they count as estimated', () => {
+    mount(<EvidenceMark status="assumed" unmarked={['harm_from_misses', 'quality_floor_pass_rate']} />);
+    const title = box.querySelector('span')?.getAttribute('title') ?? '';
+    expect(title).toContain('No provenance is recorded for harm from misses and quality-floor pass rate; they count as estimated.');
+    expect(title).not.toMatch(/assumed/i);
+  });
+  it('the explanation popup carries the same sentence', () => {
+    mount(<EvidenceMark status="assumed" unmarked={['revenue_protected']} explain />);
+    act(() => box.querySelector('button')!.click());
+    expect(document.querySelector('[data-testid="evidence-note"]')?.textContent).toContain('No provenance is recorded for revenue protected; it counts as estimated.');
+  });
+  it('nothing is added when every input is marked', () => {
+    mount(<EvidenceMark status="assumed" unmarked={[]} />);
+    expect(box.querySelector('span')?.getAttribute('title')).not.toContain('No provenance');
+  });
+});

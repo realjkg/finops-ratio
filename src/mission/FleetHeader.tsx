@@ -2,7 +2,10 @@
 // total value returned, workloads needing attention, and aggregate budget
 // consumed. Aggregates trace to the same engine outputs the cards use.
 import { motion, useReducedMotion } from 'framer-motion';
+import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatRatio } from '@/lib/format';
+import { DEMO_HEADLINE_LABEL } from '@/lib/demoMode';
+import { useRatioMode } from '@/lib/ratioModeContext';
 import { TOKEN_COLOR } from '@/lib/scales';
 import type { FleetSummary } from './missionModel';
 
@@ -12,6 +15,7 @@ interface FleetHeaderProps {
 
 export function FleetHeader({ fleet }: FleetHeaderProps) {
   const reducedMotion = useReducedMotion() ?? false;
+  const demo = useRatioMode() === 'demo';
   const attentionColor = fleet.needsAttention > 0 ? TOKEN_COLOR.shape : TOKEN_COLOR.value;
 
   return (
@@ -31,6 +35,11 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
             </dt>
             <dd className="font-mono text-2xl font-bold" style={{ color: TOKEN_COLOR.value }}>
               {formatRatio(fleet.valueReturned)}
+            </dd>
+            {/* The headline carries its computed provenance, and in the demo says it is illustrative. */}
+            <dd className="mt-1 flex flex-wrap items-center gap-x-2 font-body">
+              <EvidenceMark status={fleet.valueEvidenceStatus} explain />
+              {demo && <span className="text-[11px] text-dim">{DEMO_HEADLINE_LABEL}</span>}
             </dd>
           </div>
 

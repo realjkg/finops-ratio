@@ -15,6 +15,7 @@ import Head from 'next/head';
 import { NavBar, NAV_ITEMS, pageTitle } from './NavBar';
 import { showsDemoBadge, type RatioMode } from '@/lib/demoMode';
 import { ChatPanel } from '@/components/ai/ChatPanel';
+import { RatioModeProvider } from '@/lib/ratioModeContext';
 
 export function AppShell({ children, mode = 'demo' }: { children: ReactNode; mode?: RatioMode }) {
   const router = useRouter();
@@ -29,7 +30,7 @@ export function AppShell({ children, mode = 'demo' }: { children: ReactNode; mod
       <Head><title>{pageTitle(router.pathname)}</title></Head>
       <NavBar active={active} onOpenAgent={toggleAIPanel} agentOpen={aiPanelOpen} demo={showsDemoBadge(router.pathname, mode)} />
       <SimulationBar />
-      <main className="min-h-0 min-w-0 flex-1 overflow-auto">{children}</main>
+      <main className="min-h-0 min-w-0 flex-1 overflow-auto"><RatioModeProvider mode={mode}>{children}</RatioModeProvider></main>
       {/* Launcher lives in the top bar; the panel itself is opened from there. */}
       <ChatPanel showLauncher={false} />
     </div>

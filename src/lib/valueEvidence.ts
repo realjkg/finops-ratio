@@ -17,16 +17,17 @@ const WEAKNESS_RANK: Record<EvidenceStatus, number> = {
 };
 
 /**
- * Weakest status among the given marks. `undefined` entries are skipped (an
- * unmarked input is not "unknown weakness" — it simply doesn't vote); returns
- * `undefined` only when no input carries a mark at all.
+ * Weakest status among the given marks. An unmarked input (`undefined`) counts
+ * as `assumed`: missing provenance is the weakest evidence, never a mark that
+ * silently drops out of the roll-up (owner decision, value-derivation note §4).
+ * Returns `undefined` only for an empty list, where there is no input at all.
  */
 export function weakestStatus(
   statuses: ReadonlyArray<EvidenceStatus | undefined>,
 ): EvidenceStatus | undefined {
   let weakest: EvidenceStatus | undefined;
-  for (const status of statuses) {
-    if (status === undefined) continue;
+  for (const raw of statuses) {
+    const status: EvidenceStatus = raw ?? 'assumed';
     if (weakest === undefined || WEAKNESS_RANK[status] > WEAKNESS_RANK[weakest]) {
       weakest = status;
     }
@@ -34,23 +35,32 @@ export function weakestStatus(
   return weakest;
 }
 
+/** The four value inputs whose marks make up a headline status. */
+export const VALUE_INPUTS = ['revenue_protected', 'cost_avoided', 'harm_from_misses', 'quality_floor_pass_rate'] as const;
+export type ValueInput = (typeof VALUE_INPUTS)[number];
+
+/**
+ * Headline evidence for a workload value: the weakest input mark (an unmarked
+ * input counts as `assumed`), plus the inputs that carry no mark at all, so a
+ * missing provenance field stays visible instead of hiding behind a label.
+ */
+export function headlineEvidence(value: WorkloadValue): { status: EvidenceStatus; unmarked: ValueInput[] } {
+  const marks = VALUE_INPUTS.map((k) => value.evidence?.[k]);
+  return {
+    status: weakestStatus(marks) ?? 'assumed',
+    unmarked: VALUE_INPUTS.filter((_, i) => marks[i] === undefined),
+  };
+}
+
 /**
  * Headline evidence status for a workload value: the weakest input mark,
  * including the defensible-value inputs (harm from misses, quality-floor pass
- * rate — audit C3/C4). `undefined` when the value carries no evidence block
- * (legacy shape) — the UI renders that ratio unmarked rather than inventing a
- * status.
+ * rate — audit C3/C4). Never `undefined`: a value with no evidence block, or
+ * with an unmarked input, is `assumed` (see `headlineEvidence` for which inputs
+ * are unmarked).
  */
-export function headlineEvidenceStatus(
-  value: WorkloadValue,
-): EvidenceStatus | undefined {
-  if (!value.evidence) return undefined;
-  return weakestStatus([
-    value.evidence.revenue_protected,
-    value.evidence.cost_avoided,
-    value.evidence.harm_from_misses,
-    value.evidence.quality_floor_pass_rate,
-  ]);
+export function headlineEvidenceStatus(value: WorkloadValue): EvidenceStatus {
+  return headlineEvidence(value).status;
 }
 
 /**

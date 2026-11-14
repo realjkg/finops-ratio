@@ -9,6 +9,7 @@ import { BudgetProfileTab } from '@/components/detail/BudgetProfileTab';
 import { buildMissionBoard, toMissionView } from './missionModel';
 import { FuelAndValue } from './FuelAndValue';
 import { FleetHeader } from './FleetHeader';
+import { RatioModeProvider } from '@/lib/ratioModeContext';
 
 const w = WORKLOADS[0];
 const withDaily = (daily_budget: number) => ({ ...w, costs: { ...w.costs, daily_budget } });
@@ -98,5 +99,22 @@ describe('monthly trajectory verdict and Budget tab bars', () => {
     expect(html.match(/aria-valuetext="N\/A \([^"]*approved budget/g)).toHaveLength(2);
     const ok = renderToStaticMarkup(<BudgetProfileTab workload={w} budget={budgetFor(w.id)!} now={NOW} />);
     expect(ok).toContain('aria-valuenow');
+  });
+});
+
+describe('portfolio headline shows its evidence status and, in the demo, that it is illustrative', () => {
+  const fleet = buildMissionBoard(WORKLOADS, { now: NOW }).fleet;
+  it('the fleet summary carries the computed status', () => {
+    expect(fleet.valueEvidenceStatus).toBe('assumed');
+  });
+  it('demo mode: the evidence mark and the illustrative label sit beside Value returned', () => {
+    const html = renderToStaticMarkup(<RatioModeProvider mode="demo"><FleetHeader fleet={fleet} /></RatioModeProvider>);
+    expect(html).toContain('Estimated value');
+    expect(html).toContain('Illustrative · offline sandbox data');
+  });
+  it('engagement mode: the evidence mark stays, the demo label does not', () => {
+    const html = renderToStaticMarkup(<RatioModeProvider mode="engagement"><FleetHeader fleet={fleet} /></RatioModeProvider>);
+    expect(html).toContain('Estimated value');
+    expect(html).not.toContain('Illustrative');
   });
 });

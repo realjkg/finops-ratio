@@ -66,6 +66,8 @@ export interface FleetSummary {
   fleetFuelNa: string | null;
   fleetFuelColor: string;
   valueReturned: number;
+  /** Weakest evidence status behind valueReturned (an unmarked input counts as assumed). */
+  valueEvidenceStatus: EvidenceStatus | undefined;
   missionCount: number;
   needsAttention: number;
   /** Missions with an invalid budget: not counted as attention, shown separately. */
@@ -193,6 +195,7 @@ export function buildMissionBoard(
       fleetFuelNa,
       fleetFuelColor: budgetColor(fleetFuelRatio),
       valueReturned: portfolio.portfolio_ratio,
+      valueEvidenceStatus: portfolio.evidence_status,
       missionCount: missions.length,
       needsAttention,
       budgetNa,
