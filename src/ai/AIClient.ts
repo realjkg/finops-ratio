@@ -28,10 +28,11 @@ export interface AIMessage {
 }
 
 /**
- * Serialized snapshot of the current initiative board + optional workload detail.
- * Sent in the /api/ai/chat request body so the server can build the system prompt
- * without a second round-trip to fetch data. Kept lean — enough for the agent to
- * answer executive questions; deeper workload fields available via `workloads`.
+ * Snapshot of the initiative board + optional workload detail that Frank answers from.
+ * The in-browser mock builds it from the store; the /api/v1/ai/chat route builds its own
+ * from server records and never reads one from the request (only the focus id crosses
+ * the wire). Kept lean — enough for the agent to answer executive questions; deeper
+ * workload fields available via `workloads`.
  */
 export interface AIContext {
   // --- Initiative board (executive surface, from initiativeModel.ts) ---
@@ -41,7 +42,7 @@ export interface AIContext {
   workloads?: AIWorkloadSnapshot[];
   /** Which initiative the user currently has focused (e.g. clicked a card). */
   focusInitiativeId?: string | null;
-  /** ISO 8601 instant when the snapshot was taken (client's DEMO_NOW). */
+  /** ISO 8601 instant when the snapshot was taken (DEMO_NOW of whichever side built it). */
   asOf: string;
   /** Initiatives left out of `initiatives` because their budget metric is N/A, with the reason. */
   omitted?: AIOmittedInitiative[];

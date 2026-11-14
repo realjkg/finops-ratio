@@ -25,7 +25,7 @@ import { BUDGET_PROFILES } from '@/data/budgets';
 import { ALERTS } from '@/data/alerts';
 import { MODEL_REGISTRY } from '@/data/models';
 import { allGatesPassed } from '@/lib/derive';
-import { buildAIContext, createAIClient } from '@/ai';
+import { buildAIContext, createAIClient, MAX_MESSAGE_CHARS, MAX_MESSAGES } from '@/ai';
 import { withSourceLine } from '@/ai/mock/format';
 import type { AIMessage, AIProvider } from '@/ai';
 
@@ -328,6 +328,18 @@ export const useStore = create<AppState>((set, get) => ({
     const trimmed = content.trim();
     if (!trimmed) return;
     const { workloads, selectedId, now, aiMessages } = get();
+    // The route rejects a longer message. It is not added to the history, which is resent on every
+    // later turn, so one long paste cannot make the rest of the conversation fail.
+    if (trimmed.length > MAX_MESSAGE_CHARS) {
+      const notice: AIChatMessage = {
+        id: nextMessageId(),
+        role: 'system',
+        content: `Message not sent: it is ${trimmed.length.toLocaleString('en-US')} characters long, and the limit is ${MAX_MESSAGE_CHARS.toLocaleString('en-US')} characters. Shorten it and ask again.`,
+        timestamp: new Date().toISOString(),
+      };
+      set((state) => ({ aiMessages: [...state.aiMessages, notice] }));
+      return;
+    }
 
     const userMessage: AIChatMessage = {
       id: nextMessageId(),
@@ -342,7 +354,9 @@ export const useStore = create<AppState>((set, get) => ({
     // prepends its own system prompt from the context.
     const history: AIMessage[] = [...aiMessages, userMessage]
       .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role, content: m.content }));
+      .map((m) => ({ role: m.role, content: m.content }))
+      // The route accepts at most MAX_MESSAGES turns; send the most recent ones (this question is last).
+      .slice(-MAX_MESSAGES);
     const context = buildAIContext(workloads, selectedId || null, now);
 
     const sim = get().simulation;
