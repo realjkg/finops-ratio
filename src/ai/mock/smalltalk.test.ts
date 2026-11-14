@@ -41,7 +41,7 @@ describe('recognizing purely conversational turns', () => {
     'help',
     'hi, how much can we save?',
     '',
-    // review round 1: numbers, amounts and question marks on acknowledgements and goodbyes
+    // review round 1: numbers, amounts and question marks on acknowledgments and goodbyes
     'ok, 20%?',
     'ok 50%',
     'thanks 100',
