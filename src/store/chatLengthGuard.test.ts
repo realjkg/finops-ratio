@@ -93,13 +93,52 @@ describe('round 4: cutting, failed questions, focus bytes and the simulation lim
     expect(out).toEqual([{ role: 'user', content: 'a' }, { role: 'user', content: 'b' }]);
   });
 
-  it('the extra fields count against the byte budget', async () => {
+  it('the extra fields count against the byte budget: a history that fits only without them loses a turn', async () => {
     const { fitHistory, MAX_REQUEST_BYTES } = await import('@/ai');
     const { requestBytes } = await import('@/ai/limits');
-    const turns = [{ role: 'user' as const, content: 'q'.repeat(8_000) }, ...Array.from({ length: 11 }, (_, n) => ({ role: (n % 2 ? 'user' : 'assistant') as 'user' | 'assistant', content: 'r'.repeat(9_000) }))];
     const focus = { focusInitiativeId: 'f'.repeat(64) };
+    // Pad the first turn so the history alone is 20 bytes under the budget; the focus field pushes it over.
+    const tail = Array.from({ length: 10 }, (_, n) => ({ role: (n % 2 ? 'user' : 'assistant') as 'user' | 'assistant', content: 'r'.repeat(9_000) }));
+    const base = requestBytes({ messages: [{ role: 'user', content: '' }, ...tail] });
+    const turns = [{ role: 'user' as const, content: 'q'.repeat(MAX_REQUEST_BYTES - 20 - base) }, ...tail];
+    expect(requestBytes({ messages: turns })).toBe(MAX_REQUEST_BYTES - 20);
+    expect(fitHistory(turns)).toHaveLength(turns.length);
     const out = fitHistory(turns, focus);
+    expect(out.length).toBeLessThan(turns.length);
     expect(requestBytes({ messages: out, ...focus })).toBeLessThanOrEqual(MAX_REQUEST_BYTES);
+  });
+
+  it('a cut never splits an emoji (a lone surrogate half)', async () => {
+    const { capChars, fitHistory, MAX_MESSAGE_CHARS } = await import('@/ai');
+    const s = 'y'.repeat(MAX_MESSAGE_CHARS - 1) + '\u{1F600}tail';
+    expect(capChars(s)).toBe('y'.repeat(MAX_MESSAGE_CHARS - 1));
+    expect(capChars(s).isWellFormed()).toBe(true);
+    expect(fitHistory([{ role: 'user', content: 'a' }, { role: 'assistant', content: s }, { role: 'user', content: 'b' }])[1].content.isWellFormed()).toBe(true);
+  });
+
+  it('a user turn followed by a notice that is not an error is still resent', async () => {
+    const { MockAIClient } = await import('@/ai');
+    const spy = vi.spyOn(MockAIClient.prototype, 'chat');
+    useStore.setState({
+      aiMessages: [
+        { id: 'u1', role: 'user', content: 'kept question', timestamp: 't' },
+        { id: 's1', role: 'system', content: 'Message not sent: it is 12,000 characters long', timestamp: 't' },
+      ],
+      aiThinking: false,
+      simulation: null,
+    });
+    const p = useStore.getState().sendAIMessage('Next question');
+    await vi.advanceTimersByTimeAsync(400);
+    await p;
+    expect(spy.mock.calls[0][0]).toEqual([{ role: 'user', content: 'kept question' }, { role: 'user', content: 'Next question' }]);
+    spy.mockRestore();
+  });
+
+  it('one question at a time: a send while a turn is in flight is ignored', async () => {
+    useStore.setState({ aiMessages: [], aiThinking: true, simulation: null });
+    await useStore.getState().sendAIMessage('overlapping question');
+    expect(useStore.getState().aiMessages).toEqual([]);
+    useStore.setState({ aiThinking: false });
   });
 
   it('a question that failed is not resent with the next one', async () => {

@@ -6,7 +6,7 @@
 // changes. Browsers without SpeechRecognition get a muted glyph with an
 // explanatory tooltip; the chat itself is unchanged.
 
-import { useState, type KeyboardEvent } from 'react';
+import { useId, useState, type KeyboardEvent } from 'react';
 import { MAX_MESSAGE_CHARS } from '@/ai/limits';
 import { useVoiceDictation } from './useVoiceDictation';
 
@@ -38,6 +38,10 @@ function MicIcon({ className = '' }: { className?: string }) {
 
 export function ChatInput({ disabled, onSend, maxChars = MAX_MESSAGE_CHARS }: ChatInputProps) {
   const [draft, setDraft] = useState('');
+  const countId = useId();
+  const length = draft.trim().length;
+  const near = length > maxChars * 0.9;
+  const over = length > maxChars;
   // A committed transcript lands in the draft (appended, space-joined) so the
   // user can review or edit it — sending still flows through the existing path.
   const dictation = useVoiceDictation({
@@ -47,9 +51,10 @@ export function ChatInput({ disabled, onSend, maxChars = MAX_MESSAGE_CHARS }: Ch
   const submit = () => {
     const text = draft.trim();
     if (!text || disabled) return;
+    // Too long: Send is disabled and the counter says why; the draft stays so it can be shortened.
+    if (text.length > maxChars) return;
     onSend(text);
-    // Too long: the panel refuses it with a notice; keep the draft so it can be shortened, not retyped.
-    if (text.length <= maxChars) setDraft('');
+    setDraft('');
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -113,23 +118,25 @@ export function ChatInput({ disabled, onSend, maxChars = MAX_MESSAGE_CHARS }: Ch
           onKeyDown={onKeyDown}
           rows={1}
           aria-label="Ask about your initiative portfolio"
+          aria-describedby={countId}
           placeholder="Ask about initiative risk, cost, or savings…"
           className="max-h-28 flex-1 resize-none rounded-md border border-edge bg-slab px-3 py-2 font-mono text-xs text-txt outline-none placeholder:text-dim focus:border-purple"
         />
         <button
           type="submit"
-          disabled={disabled || !draft.trim()}
+          disabled={disabled || !draft.trim() || over}
           className="rounded-md border border-purple bg-purple/20 px-3 py-2 font-mono text-xs font-bold text-purple transition-colors hover:bg-purple/30 disabled:opacity-40"
         >
           Send
         </button>
       </div>
-      {/* Shown near and over the limit, so a long paste is never cut silently. */}
-      {draft.length > maxChars * 0.9 && (
-        <p data-testid="chat-char-count" aria-live="polite" className={`pt-1 text-right font-mono text-[11px] ${draft.length > maxChars ? 'text-cost' : 'text-dim'}`}>
-          {draft.length.toLocaleString('en-US')} / {maxChars.toLocaleString('en-US')} characters
-        </p>
-      )}
+      {/* Always present (so the textarea can reference it and a live region exists before it changes);
+          visible only near or over the limit, so a long paste is never cut silently. It counts what
+          would be sent (trimmed), and announces only when the draft crosses the limit. */}
+      <p id={countId} data-testid="chat-char-count" className={near ? `pt-1 text-right font-mono text-[11px] ${over ? 'text-cost' : 'text-dim'}` : 'sr-only'}>
+        {near ? `${length.toLocaleString('en-US')} / ${maxChars.toLocaleString('en-US')} characters${over ? ' (over the limit)' : ''}` : ''}
+      </p>
+      <span className="sr-only" aria-live="polite">{over ? `Over the ${maxChars.toLocaleString('en-US')}-character limit. Shorten the question to send it.` : ''}</span>
     </form>
   );
 }

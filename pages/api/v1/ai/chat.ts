@@ -55,7 +55,7 @@ import {
   type GatewayContext,
   type GatewayValidation,
 } from '@/server/gateway';
-import { MAX_MESSAGE_CHARS, MAX_MESSAGES, MAX_REQUEST_BYTES, NO_ANSWER_TEXT } from '@/ai/limits';
+import { MAX_MESSAGE_CHARS, MAX_MESSAGES, MAX_REQUEST_BYTES, NO_ANSWER_TEXT, capChars } from '@/ai/limits';
 
 // Context-size budget (spec §8.6) — keep prompt + history well under truncation.
 const MAX_FOCUS_ID = 64;
@@ -470,7 +470,7 @@ async function chatHandler(
   // with only the message (no stack trace).
   const raw = await adapter.call(systemPrompt, userMessages);
   // A reply the client resends must pass this route's own checks: never blank, never over the cap.
-  const capped = raw.length > MAX_MESSAGE_CHARS ? raw.slice(0, MAX_MESSAGE_CHARS) : raw;
+  const capped = capChars(raw);
   const text = capped.trim() === '' ? NO_ANSWER_TEXT : capped;
   const initiativesReferenced = context.initiatives
     .filter((i) => typeof i?.name === 'string' && text.toLowerCase().includes(i.name.toLowerCase()))
