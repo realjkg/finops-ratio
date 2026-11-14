@@ -25,7 +25,7 @@ import { BUDGET_PROFILES } from '@/data/budgets';
 import { ALERTS } from '@/data/alerts';
 import { MODEL_REGISTRY } from '@/data/models';
 import { allGatesPassed } from '@/lib/derive';
-import { buildAIContext, createAIClient, MAX_MESSAGE_CHARS, MAX_MESSAGES } from '@/ai';
+import { buildAIContext, createAIClient, fitHistory, MAX_MESSAGE_CHARS } from '@/ai';
 import { withSourceLine } from '@/ai/mock/format';
 import type { AIMessage, AIProvider } from '@/ai';
 
@@ -352,11 +352,12 @@ export const useStore = create<AppState>((set, get) => ({
     // Wire history: prior user/assistant turns + this one. System messages (the
     // welcome line and any inline errors) are dropped — the route builds and
     // prepends its own system prompt from the context.
-    const history: AIMessage[] = [...aiMessages, userMessage]
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({ role: m.role, content: m.content }))
-      // The route accepts at most MAX_MESSAGES turns; send the most recent ones (this question is last).
-      .slice(-MAX_MESSAGES);
+    // fitHistory keeps it within every route limit (turns, characters, request bytes), dropping the
+    // oldest turns first; this question is always last.
+    const history: AIMessage[] = fitHistory(
+      [...aiMessages, userMessage].flatMap((m) => (m.role === 'user' || m.role === 'assistant' ? [{ role: m.role, content: m.content }] : [])),
+      { focusInitiativeId: selectedId || null },
+    );
     const context = buildAIContext(workloads, selectedId || null, now);
 
     const sim = get().simulation;

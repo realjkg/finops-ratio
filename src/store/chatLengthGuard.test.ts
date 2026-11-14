@@ -45,8 +45,43 @@ describe('a long conversation stays within the route turn limit', () => {
     await vi.advanceTimersByTimeAsync(400);
     await p;
     const sent = spy.mock.calls[0][0];
-    expect(sent).toHaveLength(MAX_MESSAGES);
+    // The last 50 turns start with an assistant reply, which is dropped too: the history opens with a user turn.
+    expect(sent.length).toBeLessThanOrEqual(MAX_MESSAGES);
+    expect(sent).toHaveLength(MAX_MESSAGES - 1);
+    expect(sent[0].role).toBe('user');
     expect(sent.at(-1)).toEqual({ role: 'user', content: 'Latest question' });
     spy.mockRestore();
+  });
+});
+
+describe('the history sent always fits the route (review H1)', () => {
+  it('long multi-byte turns: the oldest are dropped until the body fits; the new question is last', async () => {
+    const { MockAIClient, MAX_REQUEST_BYTES } = await import('@/ai');
+    const { requestBytes } = await import('@/ai/limits');
+    const spy = vi.spyOn(MockAIClient.prototype, 'chat');
+    const long = '費'.repeat(10_000);
+    const old = Array.from({ length: 10 }, (_, n) => ({
+      id: `b${n}`, role: (n % 2 ? 'assistant' : 'user') as 'user' | 'assistant', content: n % 2 ? 'ok' : long, timestamp: '2026-01-01T00:00:00Z',
+    }));
+    useStore.setState({ aiMessages: old, aiThinking: false, simulation: null });
+    const p = useStore.getState().sendAIMessage('Latest question');
+    await vi.advanceTimersByTimeAsync(400);
+    await p;
+    const sent = spy.mock.calls[0][0];
+    expect(requestBytes({ messages: sent, focusInitiativeId: null })).toBeLessThanOrEqual(MAX_REQUEST_BYTES);
+    expect(sent.length).toBeLessThan(11);
+    expect(sent[0].role).toBe('user');
+    expect(sent.at(-1)).toEqual({ role: 'user', content: 'Latest question' });
+    spy.mockRestore();
+  });
+
+  it('an over-long or empty assistant reply is trimmed or left out, never sent as is', async () => {
+    const { fitHistory, MAX_MESSAGE_CHARS } = await import('@/ai');
+    const out = fitHistory([
+      { role: 'user', content: 'a' }, { role: 'assistant', content: 'z'.repeat(MAX_MESSAGE_CHARS + 50) },
+      { role: 'user', content: 'b' }, { role: 'assistant', content: '  ' }, { role: 'user', content: 'c' },
+    ]);
+    expect(out.map((t) => t.content.length)).toEqual([1, MAX_MESSAGE_CHARS, 1, 1]);
+    expect(out.at(-1)).toEqual({ role: 'user', content: 'c' });
   });
 });

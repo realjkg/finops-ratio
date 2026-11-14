@@ -2,7 +2,9 @@ import { FRANK } from '@/agent-workflows/frank';
 // POST /api/v1/ai/chat — proxies a chat turn to the configured LLM adapter,
 // behind the composable API gateway (auth, rate-limit, validation, structured
 // errors). Versioned under /v1/ per the repo's API-First rule (.obvious/obvious.md);
-// breaking changes get a new version path.
+// breaking changes get a new version path. One recorded exception: the trust-boundary
+// fix (value-derivation note §7.1) changed /v1 in place, because answering from
+// client-supplied figures was the defect; the change is recorded in the compat golden.
 //
 // Security: API keys NEVER reach the client. Only the conversation (AIMessage[])
 // and, at most, the id of the initiative in focus cross the wire from the browser.
@@ -50,7 +52,7 @@ import {
   type GatewayContext,
   type GatewayValidation,
 } from '@/server/gateway';
-import { MAX_MESSAGE_CHARS, MAX_MESSAGES } from '@/ai/limits';
+import { MAX_MESSAGE_CHARS, MAX_MESSAGES, MAX_REQUEST_BYTES } from '@/ai/limits';
 
 // Context-size budget (spec §8.6) — keep prompt + history well under truncation.
 const MAX_FOCUS_ID = 64;
@@ -85,7 +87,7 @@ const isKnownFocus = (raw: unknown): raw is string =>
  * when no top-level field is sent, and an unknown one is ignored (no focus), so an
  * old client keeps working; it is never used to build the context.
  */
-function readFocus(body: Record<string, unknown>): string | null | undefined {
+export function readFocus(body: Record<string, unknown>): string | null | undefined {
   if ('focusInitiativeId' in body) {
     const raw = body.focusInitiativeId;
     if (raw === undefined || raw === null) return null;
@@ -403,16 +405,19 @@ function isValidBody(body: unknown): body is { messages: AIMessage[] } {
   if (messages.length > MAX_MESSAGES) return false;
   // Only user, assistant and system turns (system is dropped later); string content, length-capped. Any
   // other role (for example `developer`) could reach a provider's instruction channel.
-  let askedSomething = false;
+  let last: string | undefined;
   for (const m of messages) {
     if (typeof m !== 'object' || m === null) return false;
     const { role, content } = m as { role?: unknown; content?: unknown };
     if (typeof role !== 'string' || !CLIENT_ROLES.has(role)) return false;
     if (typeof content !== 'string' || content.length > MAX_MESSAGE_CHARS) return false;
-    if (role === 'user' && content.trim() !== '') askedSomething = true;
+    if (role === 'system') continue; // dropped before any provider sees the turns
+    if (content.trim() === '') return false; // an empty turn answers or asks nothing
+    last = role;
   }
-  // System turns are dropped, so a body without a real user turn would send the provider nothing to answer.
-  if (!askedSomething) return false;
+  // The last turn (system turns aside) must be the user's question. A trailing assistant turn would be
+  // continued by the model as its own words ("prefill"), so client-written text could open Frank's answer.
+  if (last !== 'user') return false;
   // A legacy client still sends `context`; only its focus id is read (below).
   if (context !== undefined && (typeof context !== 'object' || context === null || Array.isArray(context))) return false;
   return readFocus(body as Record<string, unknown>) !== undefined;
@@ -425,7 +430,7 @@ export function validateChatBody(body: unknown): GatewayValidation {
     : {
         ok: false,
         message:
-          'Body must include messages[] (1 to 50 turns; role user, assistant or system; text content of at most 10,000 characters; at least one non-empty user turn); focusInitiativeId, if sent, must be null or the id of a known initiative',
+          'Body must include messages[] (1 to 50 turns; role user, assistant or system; non-empty text content of at most 10,000 characters; the last non-system turn from the user); focusInitiativeId, if sent, must be null or the id of a known initiative',
       };
 }
 
@@ -474,18 +479,24 @@ async function chatHandler(
 const guarded = withGateway(chatHandler, {
   methods: ['POST'],
   validateBody: validateChatBody,
+  // The same budget the panel fits its history to (src/ai/limits.ts), stated rather than defaulted.
+  maxBodyBytes: MAX_REQUEST_BYTES,
 });
 
 /**
- * Sets the context headers before the gateway runs, so every response carries them,
- * rejections (400, 401, 405, 413, 429) included: the context is always the server's,
- * and a legacy client sending its own context is told it was not used.
+ * Sets the context headers before the gateway runs, so every response this route produces
+ * carries them, its rejections (400, 401, 405, 413, 429) included: the context is always the
+ * server's, and a legacy client sending its own context is told it was not used. Next's own
+ * body-parser errors (invalid JSON, over 1 MB) are sent before this runs and carry neither.
+ * `Deprecation` (RFC 9745) is scoped to the resource; the `Link` says only the request's
+ * `context` field is deprecated, not the endpoint.
  */
 export default async function chatRoute(req: NextApiRequest, res: NextApiResponse): Promise<void> {
   res.setHeader('X-Ratio-Context-Source', 'server');
   const body: unknown = req.body;
   if (typeof body === 'object' && body !== null && !Array.isArray(body) && (body as Record<string, unknown>).context !== undefined) {
     res.setHeader('Deprecation', CONTEXT_DEPRECATED_AT);
+    res.setHeader('Link', '<https://github.com/realjkg/finops-ratio/blob/main/docs/design/value-derivation/VALUE-DERIVATION.md>; rel="deprecation"; title="request field context is ignored"');
   }
   await guarded(req, res);
 }
