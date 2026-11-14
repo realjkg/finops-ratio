@@ -127,7 +127,7 @@ describe('engagement report PDF', () => {
   });
 
   for (const kind of ['spaced', 'unbroken'] as const) {
-    it(`a hostile 64 x 32,000-character ${kind} input renders within 15 s and bounded memory (external watchdog)`, () => {
+    it(`a hostile 64 x 32,000-character ${kind} input renders in under 15 s, excluding process start-up, with bounded peak memory (external watchdog)`, () => {
       const out = renderHostileInChild(kind);
       expect(out.ms, 'render time, measured by the child').toBeLessThan(RENDER_BUDGET_MS);
       expect(out.rss).toBeLessThan(700 * 1024 * 1024);
@@ -298,7 +298,7 @@ describe('bundled fonts: declared scripts render faithfully and extract exactly'
   });
 
   for (const kind of ['cjk-spaced', 'cjk-dense'] as const) {
-    it(`a hostile ${kind} input (50 cells of 2,000 CJK characters${kind === 'cjk-spaced' ? ' separated by spaces' : ''}) renders within 15 s and bounded memory (external watchdog)`, () => {
+    it(`a hostile ${kind} input (50 cells of 2,000 CJK characters${kind === 'cjk-spaced' ? ' separated by spaces' : ''}) renders in under 15 s, excluding process start-up, with bounded peak memory (external watchdog)`, () => {
       const out = renderHostileInChild(kind);
       expect(out.ms, 'render time, measured by the child').toBeLessThan(RENDER_BUDGET_MS);
       expect(out.rss).toBeLessThan(700 * 1024 * 1024);
