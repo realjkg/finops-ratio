@@ -121,6 +121,8 @@ describe('/api/v1/ai/chat', () => {
     // The route answers from its own records; the request's hand-built 'i1' is never read.
     expect(payload.initiativesReferenced).not.toContain('i1');
     expect(payload.message.content).not.toContain('GPT Summarizer');
+    expect(payload.initiativesReferenced.length).toBeGreaterThan(0);
+    expect(payload.initiativesReferenced).toContain('wl-support');
   });
 
   it('returns 405 on a non-POST method (gateway method guard)', async () => {

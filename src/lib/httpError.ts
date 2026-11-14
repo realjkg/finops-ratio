@@ -48,7 +48,7 @@ export const SAFE_ERROR_MESSAGES: ReadonlySet<string> = new Set([
   'OPENLLM_BASE_URL and OPENLLM_MODEL are required for AI_PROVIDER=openllm',
   'OPENLLM_BASE_URL is required for AI_PROVIDER=openllm',
   'OPENLLM_MODEL is required for AI_PROVIDER=openllm',
-  'Body must include non-empty messages[] (max 50); focusInitiativeId, if sent, must be the id of a known initiative',
+  'Body must include non-empty messages[] (max 50; role user or assistant, text content); focusInitiativeId, if sent, must be the id of a known initiative',
   // Report export.
   "Query param 'format' must be 'pdf' or 'xlsx'",
   // Change management: 422 provider_misconfigured, 400 body contract, 400 ref.

@@ -54,7 +54,8 @@ describe('M1 prototype-key wire strings never crash', () => {
       }
     }
   });
-  it.each(KEYS)('team and id %s through the real route return 200, not 500', async (k) => {
+  // The route ignores a client context now (chatTrustBoundary.test.ts); this pins that such a body is still a 200.
+  it.each(KEYS)('team and id %s in a legacy context through the real route return 200, not 500', async (k) => {
     for (const ctx of [withSnap(0, { team: k }), withSnap(0, { id: k })]) {
       const r = await viaRoute(ctx, 'Which team is driving the highest cost?');
       expect(r.status).toBe(200);

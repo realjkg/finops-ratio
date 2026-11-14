@@ -9,8 +9,12 @@ import { FRANK } from '@/agent-workflows/frank';
 // Trust boundary (value-derivation note §7.1): the server resolves its own records
 // and derives value, Value / cost and evidence status itself; the same server-built
 // context feeds the mock and every live provider. A legacy `context` in the body is
-// accepted for compatibility, but only its focus id is read. Keys are read here
-// from server-side env and
+// accepted for compatibility, but only its focus id is read, and the response then
+// carries `Deprecation: true`. Known limits, by design: (1) the records are the
+// bundled demo dataset, and this route has a single tenant (one gateway token), so
+// there is no per-caller record scope yet; (2) unsaved edits made in the browser
+// (governance gates, demand shape) are not visible to a live answer, because the
+// server cannot trust them. Keys are read here from server-side env and
 // the provider adapters (Claude / OpenAI / OpenAI-compatible) are defined and
 // instantiated EXCLUSIVELY in this file — never imported from src/. The
 // provider registry (src/ai/providers.ts) carries env names only, never keys.
@@ -49,7 +53,10 @@ import {
 
 // Context-size budget (spec §8.6) — keep prompt + history well under truncation.
 const MAX_MESSAGES = 50;
+const MAX_MESSAGE_CHARS = 10_000;
 const MAX_FOCUS_ID = 64;
+/** Roles a client may send. `system` is accepted and then dropped (the route builds its own). */
+const CLIENT_ROLES: ReadonlySet<string> = new Set(['user', 'assistant', 'system']);
 
 /**
  * The context every provider sees, built on the server from its own records: the
@@ -297,12 +304,13 @@ function isAdapterError(err: unknown): err is AdapterError {
 
 // --- System-prompt builder (spec §5.2) -------------------------------------
 
-const PROMPT_STATUSES: ReadonlySet<string> = new Set<EvidenceStatus>(['measured', 'projected', 'assumed']);
+// Exhaustive over EvidenceStatus: adding a status without listing it here fails to compile.
+const PROMPT_STATUSES: Record<EvidenceStatus, true> = { measured: true, projected: true, assumed: true };
 
 /** The provenance mark for a data line. An unknown status is refused, never written verbatim. */
 function evidenceMark(status: unknown): string {
   if (status === undefined) return '';
-  if (typeof status !== 'string' || !PROMPT_STATUSES.has(status)) throw new Error('Refusing to write an unknown evidence status into the system prompt');
+  if (typeof status !== 'string' || !Object.hasOwn(PROMPT_STATUSES, status)) throw new Error('Refusing to write an unknown evidence status into the system prompt');
   return ` (evidence: ${status})`;
 }
 
@@ -361,6 +369,7 @@ export function buildSystemPrompt(ctx: AIContext): string {
     '5. When recommending action, always state the value at risk, not just the cost saved.',
     '',
     `PORTFOLIO SNAPSHOT (${ctx.asOf.slice(0, 10)}):`,
+    'DATA SOURCE: the bundled demo dataset (illustrative figures, not tenant records). Unsaved changes made in the browser are not included.',
     `Total spend: ${fmt(ctx.summary.totalMonthlySpend)}/mo | Projected savings: ${fmt(ctx.summary.projectedSavings)}/mo`,
     `Initiatives: ${ctx.summary.initiativesActive} active, ${ctx.summary.pendingApproval} pending approval`,
     '',
@@ -380,7 +389,15 @@ function isValidBody(body: unknown): body is { messages: AIMessage[] } {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return false;
   const { messages, context } = body as { messages?: unknown; context?: unknown };
   if (!Array.isArray(messages) || messages.length === 0) return false;
-  if (messages.length > MAX_MESSAGES || !messages.every((m) => typeof m === 'object' && m !== null)) return false;
+  if (messages.length > MAX_MESSAGES) return false;
+  // Only user and assistant turns (system is dropped later); string content, length-capped. Any
+  // other role (for example `developer`) could reach a provider's instruction channel.
+  for (const m of messages) {
+    if (typeof m !== 'object' || m === null) return false;
+    const { role, content } = m as { role?: unknown; content?: unknown };
+    if (typeof role !== 'string' || !CLIENT_ROLES.has(role)) return false;
+    if (typeof content !== 'string' || content.length > MAX_MESSAGE_CHARS) return false;
+  }
   // A legacy client still sends `context`; only its focus id is read (below).
   if (context !== undefined && (typeof context !== 'object' || context === null || Array.isArray(context))) return false;
   return readFocus(body as Record<string, unknown>) !== undefined;
@@ -393,7 +410,7 @@ export function validateChatBody(body: unknown): GatewayValidation {
     : {
         ok: false,
         message:
-          'Body must include non-empty messages[] (max 50); focusInitiativeId, if sent, must be the id of a known initiative',
+          'Body must include non-empty messages[] (max 50; role user or assistant, text content); focusInitiativeId, if sent, must be the id of a known initiative',
       };
 }
 
@@ -410,6 +427,9 @@ async function chatHandler(
   // Validated by the gateway. The context is built here from server records; the
   // request contributes only the focus id, and only when it names a known record.
   const context = serverChatContext(readFocus(req.body as Record<string, unknown>) ?? null);
+  res.setHeader('X-Ratio-Context-Source', 'server');
+  // A legacy client still sends its own context: say plainly that it was not used.
+  if ((req.body as Record<string, unknown>).context !== undefined) res.setHeader('Deprecation', 'true');
 
   let adapter: AIAdapter;
   try {
