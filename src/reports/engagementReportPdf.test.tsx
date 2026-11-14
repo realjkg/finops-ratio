@@ -52,6 +52,21 @@ function expectSubsequence(have: string[], want: string[]) {
   expect(want.slice(i, i + 1), `missing or out of order after ${i} of ${want.length}`).toEqual([]);
 }
 
+// The render budget applies to the render itself, which the child times. The outer
+// kill is only a hang guard: react-pdf's layout is synchronous, so no in-process timer
+// can stop it. Process start-up, TypeScript loading and building the model are not
+// the render, and under CI's parallel lint, typecheck and test jobs they can take
+// several seconds on their own.
+const RENDER_BUDGET_MS = 15_000;
+const HANG_GUARD_MS = 60_000;
+const renderHostileInChild = (kind: string): { ms: number; rss: number; bytes: number } => {
+  const child = path.join(__dirname, 'fixtures', 'pdfRenderChild.tsx');
+  const r = spawnSync(process.execPath, ['--import', 'tsx', child, kind], { cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', timeout: HANG_GUARD_MS, killSignal: 'SIGKILL' });
+  expect(r.signal, `hung: killed by the ${HANG_GUARD_MS / 1000} s hang guard`).toBeNull();
+  expect(r.status, r.stderr).toBe(0);
+  return JSON.parse(r.stdout.trim()) as { ms: number; rss: number; bytes: number };
+};
+
 describe('engagement report PDF', () => {
   it('the element tree shows every section title, column and cell of the model, verbatim and in order', () => {
     const m = sample();
@@ -113,13 +128,11 @@ describe('engagement report PDF', () => {
 
   for (const kind of ['spaced', 'unbroken'] as const) {
     it(`a hostile 64 x 32,000-character ${kind} input renders within 15 s and bounded memory (external watchdog)`, () => {
-      const child = path.join(__dirname, 'fixtures', 'pdfRenderChild.tsx');
-      const r = spawnSync(process.execPath, ['--import', 'tsx', child, kind], { cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', timeout: 15_000, killSignal: 'SIGKILL' });
-      expect(r.signal, 'killed by the watchdog: the render did not finish in time').toBeNull();
-      const out = JSON.parse(r.stdout.trim()) as { ms: number; rss: number; bytes: number };
+      const out = renderHostileInChild(kind);
+      expect(out.ms, 'render time, measured by the child').toBeLessThan(RENDER_BUDGET_MS);
       expect(out.rss).toBeLessThan(700 * 1024 * 1024);
       expect(out.bytes).toBeGreaterThan(0);
-    }, 20_000);
+    }, HANG_GUARD_MS + 10_000);
   }
 
   it('wide-section records never split across pages: every page with an amount line also shows its record key', async () => {
@@ -286,13 +299,11 @@ describe('bundled fonts: declared scripts render faithfully and extract exactly'
 
   for (const kind of ['cjk-spaced', 'cjk-dense'] as const) {
     it(`a hostile ${kind} input (50 cells of 2,000 CJK characters${kind === 'cjk-spaced' ? ' separated by spaces' : ''}) renders within 15 s and bounded memory (external watchdog)`, () => {
-      const child = path.join(__dirname, 'fixtures', 'pdfRenderChild.tsx');
-      const r = spawnSync(process.execPath, ['--import', 'tsx', child, kind], { cwd: path.resolve(__dirname, '..', '..'), encoding: 'utf8', timeout: 15_000, killSignal: 'SIGKILL' });
-      expect(r.signal, 'killed by the watchdog: the render did not finish in time').toBeNull();
-      const out = JSON.parse(r.stdout.trim()) as { ms: number; rss: number; bytes: number };
+      const out = renderHostileInChild(kind);
+      expect(out.ms, 'render time, measured by the child').toBeLessThan(RENDER_BUDGET_MS);
       expect(out.rss).toBeLessThan(700 * 1024 * 1024);
       expect(out.bytes).toBeGreaterThan(0);
-    }, 20_000);
+    }, HANG_GUARD_MS + 10_000);
   }
 
   it("one PDF render at a time (its text layer is set on the shared font objects); a further request is refused as busy", async () => {
