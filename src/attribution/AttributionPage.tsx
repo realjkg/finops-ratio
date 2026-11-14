@@ -85,7 +85,7 @@ export function AttributionPage() {
           <p className="mt-2 text-xs text-dim">
             Value context: the portfolio returned {portfolioValueRatio().toFixed(1)}× its inference
             cost this month{' '}
-            <EvidenceMark status={PORTFOLIO_EVIDENCE.status} unmarkedWorkloads={PORTFOLIO_EVIDENCE.unmarkedWorkloads} />.
+            <EvidenceMark status={PORTFOLIO_EVIDENCE.status} unmarkedWorkloads={PORTFOLIO_EVIDENCE.unmarkedWorkloads} explain />.
             This list ranks absolute burn only — value never sorts it.
           </p>
         </div>
