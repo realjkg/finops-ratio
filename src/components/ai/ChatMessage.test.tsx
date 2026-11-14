@@ -55,3 +55,15 @@ describe('review round 11 (Copilot): inline code keeps its spaces', () => {
     expect(code?.className).toMatch(/whitespace-pre-wrap/);
   });
 });
+
+describe('error notices', () => {
+  it('a system message opening with the shared error prefix is shown as an alert', async () => {
+    const { AI_ERROR_PREFIX } = await import('@/ai/limits');
+    render(<ChatMessage message={{ id: 'e', role: 'system', content: `${AI_ERROR_PREFIX}provider refused`, timestamp: 't' }} />);
+    const el = screen.getByRole('alert');
+    expect(el.className).toContain('text-cost');
+    cleanup();
+    render(<ChatMessage message={{ id: 'n', role: 'system', content: 'Message not sent: too long', timestamp: 't' }} />);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+});

@@ -152,7 +152,7 @@ export const useStore = create<AppState>((set, get) => ({
   connectorSessions: {},
   ingestRuns: {},
   connectorBusy: null,
-  loadSimulation: (session, state) => set({ simulation: { session, state }, workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }),
+  loadSimulation: (session, state) => set((prev) => ({ simulation: { session, state }, aiThinking: prev.simulation?.session.csrf === session.csrf && prev.aiThinking, workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null, connectorSessions: {}, ingestRuns: {}, connectorBusy: null })),
   clearSimulation: () => set({ simulation: null, simulationBusy: false, simulationError: null, workloads: structuredClone(WORKLOADS), budgets: structuredClone(BUDGET_PROFILES), alerts: structuredClone(ALERTS), now: DEMO_NOW, aiMessages: [], aiThinking: false, aiPanelOpen: false, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }),
   simulationCommand: async (command) => {
     const current = get().simulation;

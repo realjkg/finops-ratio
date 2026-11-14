@@ -135,10 +135,25 @@ describe('round 4: cutting, failed questions, focus bytes and the simulation lim
   });
 
   it('one question at a time: a send while a turn is in flight is ignored', async () => {
+    const { MockAIClient } = await import('@/ai');
+    const spy = vi.spyOn(MockAIClient.prototype, 'chat');
     useStore.setState({ aiMessages: [], aiThinking: true, simulation: null });
-    await useStore.getState().sendAIMessage('overlapping question');
+    void useStore.getState().sendAIMessage('overlapping question'); // not awaited: the guard must act synchronously
     expect(useStore.getState().aiMessages).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
     useStore.setState({ aiThinking: false });
+  });
+
+  it('a new simulation session ends an in-flight answer\u2019s hold on the panel; the same session keeps it', () => {
+    const state = { workloads: [], budgets: [], alerts: [], asOf: '2026-06-25T00:00:00.000Z' } as never;
+    useStore.setState({ aiThinking: true, simulation: null });
+    useStore.getState().loadSimulation({ csrf: 'new' } as never, state);
+    expect(useStore.getState().aiThinking).toBe(false);
+    useStore.setState({ aiThinking: true });
+    useStore.getState().loadSimulation({ csrf: 'new' } as never, state);
+    expect(useStore.getState().aiThinking).toBe(true);
+    useStore.setState({ aiThinking: false, simulation: null });
   });
 
   it('a question that failed is not resent with the next one', async () => {
