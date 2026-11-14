@@ -151,8 +151,10 @@ export function buildWorld(ctx: AIContext): World {
       rejected.push(`${name} (${bad.join(', ')})`); rejectedIds.push(id);
       return;
     }
-    const status = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
+    const marked = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
     const unmarked = inputs(s.valueEvidenceUnmarked ?? i.valueEvidenceUnmarked);
+    // A context that names unmarked inputs cannot also claim a stronger status: unmarked counts as assumed.
+    const status = unmarked.length ? 'assumed' : marked;
     rows.push({
       id,
       name,
@@ -201,7 +203,10 @@ function legacyInit(raw: unknown): AIContext['initiatives'][number] | null {
   const nums = Object.entries(INIT_NUMBERS).map(([k, r]) => [k, typeof i[k] === 'number' && within(i[k], r) ? i[k] : null] as const);
   const [id, name] = [str(i.id), str(i.name)];
   if (!id || !name || !(typeof i.status === 'string' && STATUS_OK.has(i.status)) || nums.some(([, v]) => v === null)) return null;
-  return { id, name, status: i.status, valueEvidenceStatus: evidence(i.valueEvidenceStatus), ...Object.fromEntries(nums) } as AIContext['initiatives'][number];
+  const unmarked = inputs(i.valueEvidenceUnmarked);
+  // An unmarked input makes the status assumed, whatever the context claims (same rule as buildWorld).
+  const status = unmarked.length ? 'assumed' : evidence(i.valueEvidenceStatus);
+  return { id, name, status: i.status, valueEvidenceStatus: status, ...(unmarked.length ? { valueEvidenceUnmarked: unmarked } : {}), ...Object.fromEntries(nums) } as AIContext['initiatives'][number];
 }
 
 export function legacyContext(ctx: AIContext, world: World): AIContext {

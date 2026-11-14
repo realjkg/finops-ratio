@@ -20,3 +20,28 @@ describe('unmarked inputs reach the mock answers', () => {
     expect(reply.message.content).toContain('1 workload has inputs with no valid mark');
   });
 });
+
+describe('legacy answers, groups and odd contexts (Copilot, round 3)', () => {
+  const legacy = { ...WORKLOADS[0], value: { ...WORKLOADS[0].value, evidence: undefined } };
+  const ctx = () => buildAIContext([legacy, ...WORKLOADS.slice(1)]);
+  const ask = async (q: string, c = ctx()) => (await new MockAIClient().chat([{ role: 'user', content: q }], c)).message.content;
+
+  it.each(['Which initiatives are at risk?', 'What is our biggest cost driver?'])('legacy "%s" names the unmarked inputs', async (q) => {
+    const all = buildAIContext(WORKLOADS.map((w) => ({ ...w, value: { ...w.value, evidence: undefined } })));
+    expect(await ask(q, all)).toContain('assumed; no valid mark for revenue protected, cost avoided, harm from misses and quality-floor pass rate');
+  });
+  it('a group with a member that has no status at all counts it', async () => {
+    const c = ctx();
+    for (const s of [...(c.workloads ?? []), ...c.initiatives]) if (s.id === legacy.id) { delete s.valueEvidenceStatus; delete s.valueEvidenceUnmarked; }
+    expect(await ask('What is the ROI of the portfolio?', c)).toContain('1 workload has inputs with no valid mark');
+  });
+  it('a context that names unmarked inputs cannot also claim measured', async () => {
+    const c = ctx();
+    for (const s of [...(c.workloads ?? []), ...c.initiatives]) if (s.id === legacy.id) s.valueEvidenceStatus = 'measured';
+    const answer = await ask(`What is the ROI of ${legacy.name}?`, c);
+    expect(answer).not.toMatch(/measured; no valid mark/);
+  });
+  it('an empty group says so instead of "assumed"', () => {
+    expect(evid(undefined, 0)).toBe(' (value evidence: no workloads in scope)');
+  });
+});

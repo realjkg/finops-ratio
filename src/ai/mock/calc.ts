@@ -19,7 +19,8 @@ export function rollup(members: WorkloadFacts[]): Rollup {
     value,
     ratio: spend > 0 ? value / spend : null,
     evidence: weakestStatus(members.map((w) => w.evidence)),
-    unmarked: members.filter((w) => w.unmarked?.length).length,
+    // A member with no status at all (an older or hand-built context) has no mark either.
+    unmarked: members.filter((w) => w.unmarked?.length || w.evidence === undefined).length,
   };
 }
 

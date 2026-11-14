@@ -37,6 +37,7 @@ export function evid(status: EvidenceStatus | undefined, unmarked?: readonly str
 }
 
 export function evidenceWords(status: EvidenceStatus | undefined, unmarked?: readonly string[] | number): string {
+  if (status === undefined && unmarked === 0) return 'no workloads in scope'; // an empty group: nothing to mark
   const base = status ?? 'assumed';
   if (status === undefined && (unmarked === undefined || unmarked === 0 || (Array.isArray(unmarked) && unmarked.length === 0))) return `${base}, no mark recorded`;
   if (typeof unmarked === 'number') return unmarked > 0 ? `${base}; ${unmarked === 1 ? '1 workload has' : `${unmarked} workloads have`} inputs with no valid mark` : base;

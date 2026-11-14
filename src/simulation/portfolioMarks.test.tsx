@@ -21,14 +21,18 @@ function load(strip: boolean) {
 const buttons = (html: string) => html.match(/<button[^>]*aria-expanded="false"[^>]*>Estimated value<\/button>/g) ?? [];
 
 describe('simulation portfolio figures show their status', () => {
-  it('the workspace: Value / cost metric, each source card and the charges line', () => {
+  it('the workspace: Value / cost metric, each of the three source cards and the charges line', () => {
     load(false);
-    const html = renderToStaticMarkup(<WorkspacePage />);
-    // 1 metric + one per source card + the recorded-charges line.
-    expect(buttons(html).length).toBeGreaterThanOrEqual(3);
+    // 1 metric + 3 source cards + the recorded-charges line.
+    expect(buttons(renderToStaticMarkup(<WorkspacePage />))).toHaveLength(5);
   });
   it('the connectors page: every source card', () => {
     load(false);
-    expect(buttons(renderToStaticMarkup(<SimulationConnectors />)).length).toBe(3);
+    expect(buttons(renderToStaticMarkup(<SimulationConnectors />))).toHaveLength(3);
+  });
+  it('a workload with no marks keeps every mark Estimated (the weakest input)', () => {
+    load(true);
+    expect(buttons(renderToStaticMarkup(<WorkspacePage />))).toHaveLength(5);
+    expect(buttons(renderToStaticMarkup(<SimulationConnectors />))).toHaveLength(3);
   });
 });
