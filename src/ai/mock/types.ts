@@ -59,8 +59,11 @@ export interface Rollup {
   value: number;
   ratio: number | null;
   evidence: EvidenceStatus | undefined;
-  /** Members with at least one value input that has no valid mark. */
-  unmarked?: number;
+  /**
+   * Members with at least one value input that has no valid mark; for a one-workload scope, that
+   * workload's unmarked inputs instead, so a single value names its inputs rather than counting itself.
+   */
+  unmarked?: number | string[];
 }
 
 /** An answer body plus the ladder that continues from it. */

@@ -152,7 +152,8 @@ export function buildWorld(ctx: AIContext): World {
       return;
     }
     const marked = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
-    const unmarked = inputs(s.valueEvidenceUnmarked ?? i.valueEvidenceUnmarked);
+    // Both copies are read and merged: an empty list on one never hides a non-empty list on the other.
+    const unmarked = inputs([...arr(s.valueEvidenceUnmarked), ...arr(i.valueEvidenceUnmarked)]);
     // A context that names unmarked inputs cannot also claim a stronger status: unmarked counts as assumed.
     const status = unmarked.length ? 'assumed' : marked;
     rows.push({
@@ -211,7 +212,17 @@ function legacyInit(raw: unknown): AIContext['initiatives'][number] | null {
 
 export function legacyContext(ctx: AIContext, world: World): AIContext {
   const drop = new Set(world.rejectedIds);
-  const initiatives = arr(ctx.initiatives).filter((x) => !drop.has(rec(x).id as string)).map(legacyInit).filter((i) => i !== null);
+  // The legacy answers take each workload's evidence from the same world row the other answers use, so
+  // the two never disagree about one workload (the initiative copy alone can be stale or hand-built).
+  const evidenceOf = new Map(world.workloads.map((w) => [w.id, w]));
+  const initiatives = arr(ctx.initiatives).filter((x) => !drop.has(rec(x).id as string)).map(legacyInit).filter((i) => i !== null)
+    .map((i) => {
+      const w = evidenceOf.get(i.id);
+      if (!w) return i;
+      const rest = { ...i };
+      delete rest.valueEvidenceUnmarked;
+      return { ...rest, valueEvidenceStatus: w.evidence, ...(w.unmarked?.length ? { valueEvidenceUnmarked: w.unmarked } : {}) };
+    });
   const sum = (f: (i: (typeof initiatives)[number]) => number): number => initiatives.reduce((n, i) => n + f(i), 0);
   const sm = rec(ctx.summary);
   const pick = (key: string, range: Range, fallback: number): number => {

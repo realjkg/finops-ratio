@@ -45,3 +45,33 @@ describe('legacy answers, groups and odd contexts (Copilot, round 3)', () => {
     expect(evid(undefined, 0)).toBe(' (value evidence: no workloads in scope)');
   });
 });
+
+describe('confirmation round: legacy force, asymmetric lists, one-workload naming', () => {
+  const W0 = WORKLOADS[0];
+  const ask = async (q: string, c: ReturnType<typeof buildAIContext>) => (await new MockAIClient().chat([{ role: 'user', content: q }], c)).message.content;
+  const measuredWithHarmUnmarked = () => {
+    const c = buildAIContext(WORKLOADS);
+    for (const s of [...(c.workloads ?? []), ...c.initiatives]) if (s.id === W0.id) { s.valueEvidenceStatus = 'measured'; s.valueEvidenceUnmarked = ['harm_from_misses']; }
+    return c;
+  };
+  it('a legacy answer on a "measured but unmarked" context says assumed and names the input', async () => {
+    expect(await ask('What is our biggest cost driver?', measuredWithHarmUnmarked())).toMatch(new RegExp(`${W0.name}[^\\n]*assumed; no valid mark for harm from misses`));
+  });
+  it('an empty list on the workload copy never hides the initiative copy’s list', async () => {
+    const c = buildAIContext(WORKLOADS);
+    for (const s of c.workloads ?? []) if (s.id === W0.id) { s.valueEvidenceStatus = 'measured'; s.valueEvidenceUnmarked = []; }
+    for (const s of c.initiatives) if (s.id === W0.id) { s.valueEvidenceStatus = 'measured'; s.valueEvidenceUnmarked = ['harm_from_misses']; }
+    expect(await ask(`What is the ROI of ${W0.name}?`, c)).toContain('assumed; no valid mark for harm from misses');
+  });
+  it('legacy and main answers agree about one workload when the two copies disagree', async () => {
+    const c = buildAIContext(WORKLOADS);
+    for (const s of c.initiatives) if (s.id === W0.id) { s.valueEvidenceStatus = 'measured'; delete s.valueEvidenceUnmarked; }
+    for (const s of c.workloads ?? []) if (s.id === W0.id) { s.valueEvidenceStatus = 'assumed'; s.valueEvidenceUnmarked = ['harm_from_misses']; }
+    expect(await ask('What is our biggest cost driver?', c)).not.toMatch(new RegExp(`${W0.name}[^\\n]*value evidence: measured`));
+  });
+  it('a one-workload scope names its inputs instead of counting itself', async () => {
+    const answer = await ask(`What is the ROI of ${W0.name}?`, measuredWithHarmUnmarked());
+    expect(answer).toContain('no valid mark for harm from misses');
+    expect(answer).not.toContain('1 workload has inputs with no valid mark');
+  });
+});

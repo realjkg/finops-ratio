@@ -80,11 +80,25 @@ describe('unmarked inputs are named on every surface', () => {
     mount(<FleetHeader fleet={buildMissionBoard([stripped(), ...WORKLOADS.slice(1)]).fleet} />);
     expect(open(marks()[0])).toContain('One workload has value inputs with no recorded provenance');
   });
-  it('finding row: the button’s accessible name carries the status and the unmarked inputs', () => {
+  it('finding row and detail pane: the row’s name and mark title, and the pane’s opened mark, name the inputs', () => {
     useStore.setState({ workloads: [stripped(), ...structuredClone(WORKLOADS.slice(1))], simulation: null, aiPanelOpen: false, selectedId: WORKLOADS[0].id });
-    mount(<FindingsPage />);
-    const row = [...box.querySelectorAll('button[aria-label^="Finding "]')].find((b) => b.getAttribute('aria-label')!.includes(WORKLOADS[0].name));
-    expect(row?.getAttribute('aria-label')).toContain('value evidence: estimated, no valid provenance recorded for revenue protected');
-    useStore.setState({ workloads: structuredClone(WORKLOADS) });
+    try {
+      mount(<FindingsPage />);
+      const row = [...box.querySelectorAll('button[aria-label^="Finding "]')].find((b) => b.getAttribute('aria-label')!.includes(WORKLOADS[0].name)) as HTMLButtonElement;
+      expect(row.getAttribute('aria-label')).toContain('value evidence: estimated, no valid provenance recorded for revenue protected');
+      // The row's visible mark is static text inside the button: its title names the inputs.
+      expect([...row.querySelectorAll('span[title]')].some((el) => el.getAttribute('title')!.includes(ALL))).toBe(true);
+      act(() => row.click());
+      // The detail pane's mark is the keyboard and touch explanation for the selected finding.
+      const pane = marks().filter((b) => !row.contains(b));
+      expect(pane.length).toBeGreaterThan(0);
+      expect(open(pane[0])).toContain(ALL);
+    } finally {
+      useStore.setState({ workloads: structuredClone(WORKLOADS) });
+    }
+  });
+  it('mission card: the visible mark’s title names the inputs', () => {
+    mount(<MissionCard mission={toMissionView(stripped())} onOpen={() => {}} />);
+    expect([...box.querySelectorAll('span[title]')].some((el) => el.getAttribute('title')!.includes(ALL))).toBe(true);
   });
 });
