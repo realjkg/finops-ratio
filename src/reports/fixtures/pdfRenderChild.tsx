@@ -1,7 +1,9 @@
 // Test-only child process for the PDF render-cost watchdog: builds a hostile
 // engagement report model (SYNTHETIC; Latin or CJK) and renders it to PDF, then prints
-// {"ms":..., "rss":..., "bytes":...}. The parent kills it after its budget,
-// because react-pdf's layout is synchronous and no in-process timer can stop it.
+// {"ms":..., "rss":..., "bytes":...}: the render time, the peak resident memory and
+// the PDF size. The parent checks the render budget on "ms" and kills the process
+// only as a hang guard, because react-pdf's layout is synchronous and no in-process
+// timer can stop it.
 import { assembleReportFacts } from '../reportFacts';
 import { buildEngagementReportModel } from '../engagementReportModel';
 import { renderEngagementReportPdf } from '../engagementReportPdf';
@@ -18,5 +20,5 @@ const groups = [g({}), ...Array.from({ length: count }, (_, i) => g({ isTotal: f
 const model = buildEngagementReportModel(assembleReportFacts(sampleInput({ groups })), ENGAGEMENT);
 const t0 = Date.now();
 void renderEngagementReportPdf(model).then((pdf) => {
-  process.stdout.write(JSON.stringify({ ms: Date.now() - t0, rss: process.memoryUsage().rss, bytes: pdf.length }) + '\n');
+  process.stdout.write(JSON.stringify({ ms: Date.now() - t0, rss: process.resourceUsage().maxRSS * 1024, bytes: pdf.length }) + '\n');
 });
