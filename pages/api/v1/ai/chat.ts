@@ -470,7 +470,8 @@ async function chatHandler(
   // with only the message (no stack trace).
   const raw = await adapter.call(systemPrompt, userMessages);
   // A reply the client resends must pass this route's own checks: never blank, never over the cap.
-  const text = raw.trim() === '' ? NO_ANSWER_TEXT : raw.length > MAX_MESSAGE_CHARS ? raw.slice(0, MAX_MESSAGE_CHARS) : raw;
+  const capped = raw.length > MAX_MESSAGE_CHARS ? raw.slice(0, MAX_MESSAGE_CHARS) : raw;
+  const text = capped.trim() === '' ? NO_ANSWER_TEXT : capped;
   const initiativesReferenced = context.initiatives
     .filter((i) => typeof i?.name === 'string' && text.toLowerCase().includes(i.name.toLowerCase()))
     .map((i) => i.id);

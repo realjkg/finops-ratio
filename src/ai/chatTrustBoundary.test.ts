@@ -314,7 +314,11 @@ describe('live providers: the system prompt is built from server records', () =>
     expect(systemPrompt(fetchMock)).toBe(buildSystemPrompt(serverChatContext(FIRST.id)));
   });
 
-  it.each([['an empty reply', '   ', NO_ANSWER_TEXT], ['an over-long reply', 'y'.repeat(12_000), 'y'.repeat(10_000)]])(
+  it.each([
+    ['an empty reply', '   ', NO_ANSWER_TEXT],
+    ['an over-long reply', 'y'.repeat(12_000), 'y'.repeat(10_000)],
+    ['a reply blank after capping', `${' '.repeat(10_000)}answer`, NO_ANSWER_TEXT],
+  ])(
     '%s is never returned as is: a resent history must pass this route',
     async (_n, reply, expected) => {
       vi.stubGlobal('fetch', vi.fn(async () => Response.json({ choices: [{ message: { content: reply } }] })));
