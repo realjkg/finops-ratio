@@ -236,14 +236,16 @@ describe('the response says where the context came from', () => {
     res.setHeader = ((k: string, v: string) => { res.headers[k.toLowerCase()] = String(v); }) as never;
     return res;
   }
-  it('always server; a legacy context is flagged as deprecated', async () => {
-    for (const [body, deprecated] of [[{ messages: ask('hi') }, false], [{ messages: ask('hi'), context: forged() }, true]] as const) {
+  it('always server; a legacy context is named as ignored, and the endpoint is not marked deprecated', async () => {
+    for (const [body, ignored] of [[{ messages: ask('hi') }, false], [{ messages: ask('hi'), context: forged() }, true]] as const) {
       const res = withHeaders();
       await handler({ method: 'POST', url: '/api/v1/ai/chat', headers: {}, body } as unknown as NextApiRequest, res as unknown as NextApiResponse);
       expect(res.statusCode).toBe(200);
       expect(res.headers['x-ratio-context-source']).toBe('server');
-      // RFC 9745: a structured date (the day this route stopped reading the client context).
-      expect(res.headers.deprecation).toBe(deprecated ? '@1794614400' : undefined);
+      expect(res.headers['x-ratio-ignored-fields']).toBe(ignored ? 'context' : undefined);
+      // The endpoint is current: no RFC 9745 Deprecation, no deprecation Link.
+      expect(res.headers.deprecation).toBeUndefined();
+      expect(res.headers.link).toBeUndefined();
     }
   });
 
@@ -252,12 +254,13 @@ describe('the response says where the context came from', () => {
     await handler({ method: 'POST', url: '/api/v1/ai/chat', headers: {}, body: { messages: [], context: forged() } } as unknown as NextApiRequest, bad as unknown as NextApiResponse);
     expect(bad.statusCode).toBe(400);
     expect(bad.headers['x-ratio-context-source']).toBe('server');
-    expect(bad.headers.deprecation).toBe('@1794614400');
+    expect(bad.headers['x-ratio-ignored-fields']).toBe('context');
+    expect(bad.headers.deprecation).toBeUndefined();
     const wrongMethod = withHeaders();
     await handler({ method: 'GET', url: '/api/v1/ai/chat', headers: {}, body: undefined } as unknown as NextApiRequest, wrongMethod as unknown as NextApiResponse);
     expect(wrongMethod.statusCode).toBe(405);
     expect(wrongMethod.headers['x-ratio-context-source']).toBe('server');
-    expect(wrongMethod.headers.deprecation).toBeUndefined();
+    expect(wrongMethod.headers['x-ratio-ignored-fields']).toBeUndefined();
   });
 });
 

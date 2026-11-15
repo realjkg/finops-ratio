@@ -15,7 +15,7 @@ import { FRANK } from '@/agent-workflows/frank';
 // and derives value, Value / cost and evidence status itself; the same server-built
 // context feeds the mock and every live provider. A legacy `context` in the body is
 // accepted for compatibility, but only its focus id is read, and the response then
-// carries a `Deprecation` header (RFC 9745). An unknown legacy focus id is ignored. Known limits, by design: (1) the records are the
+// carries `X-Ratio-Ignored-Fields: context`. An unknown legacy focus id is ignored. Known limits, by design: (1) the records are the
 // bundled demo dataset, and this route has a single tenant (one gateway token), so
 // there is no per-caller record scope yet; (2) unsaved edits made in the browser
 // (governance gates, demand shape) are not visible to a live answer, because the
@@ -77,8 +77,12 @@ const KNOWN_FOCUS_IDS: ReadonlySet<string> = (() => {
   return new Set([...c.initiatives.map((i) => i.id), ...(c.omitted ?? []).map((o) => o.id), ...WORKLOADS.map((w) => w.id)]);
 })();
 
-/** RFC 9745 `Deprecation` value: the date (2026-11-14) this route stopped reading the client context. */
-export const CONTEXT_DEPRECATED_AT = '@1794614400';
+/**
+ * Names the request fields this route accepted but did not use, so a legacy client can see that its
+ * `context` was ignored. Field-scoped on purpose: RFC 9745 `Deprecation` would mark the whole endpoint
+ * as deprecated, and it is not.
+ */
+export const IGNORED_FIELDS_HEADER = 'X-Ratio-Ignored-Fields';
 
 const isKnownFocus = (raw: unknown): raw is string =>
   typeof raw === 'string' && raw.length <= MAX_FOCUS_ID && KNOWN_FOCUS_IDS.has(raw);
@@ -495,15 +499,13 @@ const guarded = withGateway(chatHandler, {
  * carries them, its rejections (400, 401, 405, 413, 429) included: the context is always the
  * server's, and a legacy client sending its own context is told it was not used. Next's own
  * body-parser errors (invalid JSON, over 1 MB) are sent before this runs and carry neither.
- * `Deprecation` (RFC 9745) is scoped to the resource; the `Link` says only the request's
- * `context` field is deprecated, not the endpoint.
+ * The ignored-fields header names the request field, not the endpoint: `/api/v1/ai/chat` is current.
  */
 export default async function chatRoute(req: NextApiRequest, res: NextApiResponse): Promise<void> {
   res.setHeader('X-Ratio-Context-Source', 'server');
   const body: unknown = req.body;
   if (typeof body === 'object' && body !== null && !Array.isArray(body) && (body as Record<string, unknown>).context !== undefined) {
-    res.setHeader('Deprecation', CONTEXT_DEPRECATED_AT);
-    res.setHeader('Link', '<https://github.com/realjkg/finops-ratio/blob/main/docs/design/value-derivation/VALUE-DERIVATION.md>; rel="deprecation"; title="request field context is ignored"');
+    res.setHeader(IGNORED_FIELDS_HEADER, 'context');
   }
   await guarded(req, res);
 }
