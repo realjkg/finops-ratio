@@ -1,5 +1,6 @@
 // Pilot P0: the daily/portfolio gauges and the Budget tab show N/A with a reason
 // for an invalid budget (never 0%), and no longer clamp an overrun to 100%.
+import { evidenceExplanation } from '@/lib/valueEvidence';
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { WORKLOADS } from '@/data/workloads';
@@ -9,6 +10,7 @@ import { BudgetProfileTab } from '@/components/detail/BudgetProfileTab';
 import { buildMissionBoard, toMissionView } from './missionModel';
 import { FuelAndValue } from './FuelAndValue';
 import { FleetHeader } from './FleetHeader';
+import { RatioModeProvider } from '@/lib/ratioModeContext';
 
 const w = WORKLOADS[0];
 const withDaily = (daily_budget: number) => ({ ...w, costs: { ...w.costs, daily_budget } });
@@ -98,5 +100,38 @@ describe('monthly trajectory verdict and Budget tab bars', () => {
     expect(html.match(/aria-valuetext="N\/A \([^"]*approved budget/g)).toHaveLength(2);
     const ok = renderToStaticMarkup(<BudgetProfileTab workload={w} budget={budgetFor(w.id)!} now={NOW} />);
     expect(ok).toContain('aria-valuenow');
+  });
+});
+
+describe('portfolio headline shows its evidence status and, in the demo, that it is illustrative', () => {
+  const fleet = buildMissionBoard(WORKLOADS, { now: NOW }).fleet;
+  it('the fleet summary carries the computed status', () => {
+    expect(fleet.valueEvidenceStatus).toBe('assumed');
+  });
+  it('demo mode: the evidence mark and the illustrative label sit beside Value returned', () => {
+    const html = renderToStaticMarkup(<RatioModeProvider mode="demo"><FleetHeader fleet={fleet} /></RatioModeProvider>);
+    expect(html).toContain('Estimated value');
+    // Seen as "Illustrative · offline sandbox data"; a screen reader hears a comma, not "middle dot".
+    expect(html).toContain('Illustrative<span aria-hidden="true"> · </span><span class="sr-only">, </span>offline sandbox data');
+  });
+  it('the headline explanation counts workloads whose value inputs have no recorded provenance', () => {
+    const w = structuredClone(WORKLOADS);
+    delete (w[0].value as { evidence?: unknown }).evidence;
+    const f = buildMissionBoard(w, { now: NOW }).fleet;
+    expect(f.valueEvidenceUnmarkedWorkloads).toBe(1);
+    expect(f.valueEvidenceStatus).toBe('assumed');
+    // The rendered headline's explanation says so (the live region carries the text once opened).
+    expect(evidenceExplanation('assumed', undefined, f.valueEvidenceUnmarkedWorkloads)).toContain('One workload has value inputs with no recorded provenance');
+  });
+  it('engagement mode with an empty portfolio renders no empty line under the headline', () => {
+    const empty = buildMissionBoard([], { now: NOW }).fleet;
+    const html = renderToStaticMarkup(<RatioModeProvider mode="engagement"><FleetHeader fleet={empty} /></RatioModeProvider>);
+    // Only the "Value returned" term and its figure: no second, empty <dd>.
+    expect(html.match(/Value returned<\/dt>(.*?)<\/div>/)?.[1].match(/<dd/g)).toHaveLength(1);
+  });
+  it('engagement mode: the evidence mark stays, the demo label does not', () => {
+    const html = renderToStaticMarkup(<RatioModeProvider mode="engagement"><FleetHeader fleet={fleet} /></RatioModeProvider>);
+    expect(html).toContain('Estimated value');
+    expect(html).not.toContain('Illustrative');
   });
 });

@@ -33,7 +33,7 @@ export function dataLine(world: World): string {
   if (world.workloads.length === 0) return 'No workloads are in this view yet.';
   const r = rollup(world.workloads);
   const teams = world.teams.length > 0 ? ` across ${plural(world.teams.length, 'team')}` : '';
-  const spend = r.spend > 0 ? `, ${usd(r.spend)}/mo of spend at ${returnText(r.ratio)}${evid(r.evidence)}` : '';
+  const spend = r.spend > 0 ? `, ${usd(r.spend)}/mo of spend at ${returnText(r.ratio)}${evid(r.evidence, r.unmarked)}` : '';
   return `In this view: ${plural(world.workloads.length, 'workload')}${teams}${spend}.`;
 }
 

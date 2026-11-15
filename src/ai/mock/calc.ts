@@ -19,6 +19,11 @@ export function rollup(members: WorkloadFacts[]): Rollup {
     value,
     ratio: spend > 0 ? value / spend : null,
     evidence: weakestStatus(members.map((w) => w.evidence)),
+    // A member with no status at all (an older or hand-built context) has no mark either, so it is
+    // counted. A single workload that has a status names its own unmarked inputs instead.
+    unmarked: members.length === 1 && members[0].evidence !== undefined
+      ? (members[0].unmarked ?? [])
+      : members.filter((w) => w.unmarked?.length || w.evidence === undefined).length,
   };
 }
 

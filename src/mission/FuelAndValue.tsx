@@ -20,6 +20,8 @@ interface FuelAndValueProps {
   valueColor: string;
   /** Provenance mark beside the badge (audit C1) — absent renders nothing. */
   evidenceStatus?: EvidenceStatus;
+  /** Value inputs with no recorded mark, named by the mark. */
+  evidenceUnmarked?: readonly string[];
 }
 
 export function FuelAndValue({
@@ -31,6 +33,7 @@ export function FuelAndValue({
   valueRatio,
   valueColor,
   evidenceStatus,
+  evidenceUnmarked,
 }: FuelAndValueProps) {
   const reducedMotion = useReducedMotion() ?? false;
   const shown = fuelPct === null ? 'N/A' : `${fuelPct}%`;
@@ -52,7 +55,7 @@ export function FuelAndValue({
           >
             {formatReturn(valueRatio)}
           </span>
-          <EvidenceMark status={evidenceStatus} />
+          <EvidenceMark status={evidenceStatus} unmarked={evidenceUnmarked} />
         </span>
       </div>
 

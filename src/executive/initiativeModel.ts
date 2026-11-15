@@ -14,7 +14,7 @@ import { budgetFor } from '@/data/budgets';
 import { DEMO_NOW, WORKLOADS } from '@/data/workloads';
 import { computeBudgetStatus } from '@/lib/budgetStatus';
 import { budgetConsumed } from '@/lib/metricContracts';
-import { headlineEvidenceStatus } from '@/lib/valueEvidence';
+import { headlineEvidence, type ValueInput } from '@/lib/valueEvidence';
 import { budgetColor, TOKEN_COLOR } from '@/lib/scales';
 import type { EvidenceStatus, Workload } from '@/types';
 import { headlineFindings } from '@/costsource/headline';
@@ -59,8 +59,10 @@ export interface InitiativeView {
   /** Modeled (sample workspace) or recorded (postings): decides how the budget figure is named. */
   costSource: CostSource;
   valueColor: string;
-  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
-  valueEvidenceStatus?: EvidenceStatus;
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2); unmarked counts as assumed. */
+  valueEvidenceStatus: EvidenceStatus;
+  /** Value inputs with no valid mark; the mark names them. */
+  valueEvidenceUnmarked: ValueInput[];
 }
 
 export interface SpendSummary {
@@ -92,7 +94,8 @@ export function toInitiativeView(workload: Workload, context: ProjectionContext 
     valueRatio: mission.valueRatio,
     costSource: costSourceOf(workload),
     valueColor: mission.valueColor,
-    valueEvidenceStatus: headlineEvidenceStatus(workload.value),
+    valueEvidenceStatus: headlineEvidence(workload.value).status,
+    valueEvidenceUnmarked: headlineEvidence(workload.value).unmarked,
   };
 }
 

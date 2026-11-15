@@ -68,8 +68,10 @@ export interface AIInitiativeSnapshot {
   budgetConsumedPct: number; // whole percent of the approved budget; can exceed 100 (not clamped)
   status: 'On Track' | 'At Risk' | 'Pending Approval';
   valueRatio: number; // R4: cost-efficiency denominator
-  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2); unmarked counts as assumed. */
   valueEvidenceStatus?: EvidenceStatus;
+  /** Value inputs with no recorded mark (sent only when there are some). */
+  valueEvidenceUnmarked?: string[];
   savingsOpportunity: number; // USD/mo from configured findings sources
 }
 
@@ -79,6 +81,10 @@ export interface AISpendSummary {
   projectedSavings: number;
   initiativesActive: number;
   pendingApproval: number;
+  /** Weakest evidence status across the portfolio's value (absent for an empty portfolio). */
+  valueEvidenceStatus?: EvidenceStatus;
+  /** Workloads with at least one value input that has no recorded mark. */
+  valueEvidenceUnmarkedWorkloads?: number;
 }
 
 /** Workload-level snapshot for technical drill-down questions. */
@@ -88,8 +94,10 @@ export interface AIWorkloadSnapshot {
   model: string;
   monthlySpend: number;
   valueRatio: number;
-  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2). */
+  /** Provenance mark on the ratio — weakest value input's status (audit C1/C2); unmarked counts as assumed. */
   valueEvidenceStatus?: EvidenceStatus;
+  /** Value inputs with no recorded mark (sent only when there are some). */
+  valueEvidenceUnmarked?: string[];
   demandShape: string;
   governanceGatesPassed: number; // 0–4
   costTrendPct: number;

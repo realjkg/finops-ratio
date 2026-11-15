@@ -1,7 +1,10 @@
 // EvidenceMark — the quiet provenance mark beside a value number (audit C1/C8).
 // Says how firm the value is: "Estimated value" (assumptions), "Projected value" or
-// "Measured value". Renders nothing when no evidence status exists (the UI never invents
-// provenance).
+// "Measured value". Renders nothing only when no status is passed; a value with missing
+// provenance arrives as `assumed` (lib/valueEvidence.ts), and `unmarked` names the inputs, whose
+// sentence then replaces the "stated assumptions" one (there is no assumption, only no record).
+// A status that is not a known one is shown as Estimated, never trusted or crashed on.
+// `unmarkedWorkloads` is the portfolio form: how many workloads have an unmarked input.
 //
 // `explain` turns the label into a button that opens a short explanation. It works by tap,
 // click or keyboard (Enter and Space; Escape or an outside tap closes), unlike a title
@@ -18,7 +21,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { EvidenceStatus } from '@/types';
-import { EVIDENCE_META } from '@/lib/valueEvidence';
+import { EVIDENCE_META, evidenceExplanation, isEvidenceStatus } from '@/lib/valueEvidence';
 import { placePopup, type Placement } from '@/lib/popupPlacement';
 
 /** The ChatPanel <aside> id (Frank): Escape pressed inside it is the panel's, not this popup's. */
@@ -28,10 +31,16 @@ export function EvidenceMark({
   status,
   className = '',
   explain = false,
+  unmarked,
+  unmarkedWorkloads,
 }: {
   status?: EvidenceStatus;
   className?: string;
   explain?: boolean;
+  /** Value inputs with no recorded mark (they count as assumed); named in the explanation. */
+  unmarked?: readonly string[];
+  /** Portfolio marks: workloads with at least one unmarked value input. */
+  unmarkedWorkloads?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [place, setPlace] = useState<Placement | null>(null);
@@ -77,14 +86,16 @@ export function EvidenceMark({
     };
   }, [open]);
 
-  if (!status) return null;
-  const meta = EVIDENCE_META[status];
+  if (status === undefined || status === null) return null;
+  const known: EvidenceStatus = isEvidenceStatus(status) ? status : 'assumed';
+  const meta = EVIDENCE_META[known];
+  const explanation = evidenceExplanation(known, unmarked, unmarkedWorkloads);
   const style = { color: meta.color };
   const base = `text-[11px] font-medium ${className}`;
 
   if (!explain) {
     return (
-      <span className={base} style={style} title={meta.title}>
+      <span className={base} style={style} title={explanation}>
         {meta.label}
       </span>
     );
@@ -104,7 +115,7 @@ export function EvidenceMark({
         {meta.label}
       </button>
       {/* Announces the explanation when it opens (polite: it does not interrupt). Empty when closed. */}
-      <span className="sr-only" aria-live="polite" data-testid="evidence-live">{open ? meta.title : ''}</span>
+      <span className="sr-only" aria-live="polite" data-testid="evidence-live">{open ? explanation : ''}</span>
       {open &&
         createPortal(
           <span
@@ -115,7 +126,7 @@ export function EvidenceMark({
             className="fixed z-50 rounded border border-edge bg-raised p-2 text-xs font-normal text-txt shadow-lg"
             style={place ? { left: place.left, top: place.top, width: place.width } : { left: 0, top: 0, width: 224, visibility: 'hidden' }}
           >
-            {meta.title}
+            {explanation}
           </span>,
           document.body,
         )}

@@ -3,6 +3,8 @@
 // is the demo; "engagement" is a customer instance; anything else is invalid (fails closed, not a demo).
 
 export const DEMO_LABEL = 'Demo environment — figures are illustrative';
+/** Beside a headline value figure in the demo: the figure is illustrative, from the offline sandbox. */
+export const DEMO_HEADLINE_LABEL = 'Illustrative · offline sandbox data';
 
 export type RatioMode = 'demo' | 'engagement' | 'invalid';
 

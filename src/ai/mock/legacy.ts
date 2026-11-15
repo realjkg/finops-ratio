@@ -6,11 +6,13 @@ import { budgetLabel } from '@/lib/vocabulary';
 import type { AIContext, AIResponse } from '../AIClient';
 import { CACHE_HIT_RATE_MATERIAL } from '@/lib/derive';
 import type { EvidenceStatus } from '@/types';
+import { evidenceWords } from './format';
 
 const BUDGET_USED = budgetLabel('modeled').toLowerCase();
 
-function evidenceNote(status?: EvidenceStatus): string {
-  return status ? ` (value evidence: ${status})` : '';
+/** The same evidence wording as the other answers: a missing record is never read as a stated assumption. */
+function evidenceNote(status?: EvidenceStatus, unmarked?: readonly string[]): string {
+  return ` (value evidence: ${evidenceWords(status, unmarked)})`;
 }
 
 function formatUSD(n: number): string {
@@ -23,7 +25,7 @@ export function atRisk(ctx: AIContext): AIResponse {
   const naRisky = (ctx.omitted ?? []).filter((o) => o.status === 'At Risk' || o.status === 'Pending Approval');
   const lines = risky.map(
     (i) =>
-      `• **${i.name}** — ${i.status}, ${formatUSD(i.monthlyCost)}/mo at ${i.valueRatio.toFixed(1)}× return${evidenceNote(i.valueEvidenceStatus)}` +
+      `• **${i.name}** — ${i.status}, ${formatUSD(i.monthlyCost)}/mo at ${i.valueRatio.toFixed(1)}× return${evidenceNote(i.valueEvidenceStatus, i.valueEvidenceUnmarked)}` +
       (i.savingsOpportunity > 0 ? `, ${formatUSD(i.savingsOpportunity)}/mo savings identified` : ''),
   );
   const text =
@@ -51,7 +53,7 @@ export function costDriver(ctx: AIContext): AIResponse {
   const top = [...ctx.initiatives].sort((a, b) => b.monthlyCost - a.monthlyCost)[0];
   if (!top) return help();
   const text = [
-    `The largest cost driver is **${top.name}** at ${formatUSD(top.monthlyCost)}/mo (${top.valueRatio.toFixed(1)}× return${evidenceNote(top.valueEvidenceStatus)} — R4: cost paired with value).`,
+    `The largest cost driver is **${top.name}** at ${formatUSD(top.monthlyCost)}/mo (${top.valueRatio.toFixed(1)}× return${evidenceNote(top.valueEvidenceStatus, top.valueEvidenceUnmarked)} — R4: cost paired with value).`,
     top.status !== 'On Track'
       ? `It is currently **${top.status}** — consider a budget review.`
       : `Its value ratio justifies the spend; monitor ${BUDGET_USED} (${top.budgetConsumedPct}% this period).`,

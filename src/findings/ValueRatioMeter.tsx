@@ -23,6 +23,8 @@ interface ValueRatioMeterProps {
   size?: 'inline' | 'large';
   /** Provenance mark rendered beside the enlarged ratio (large size only). */
   evidenceStatus?: EvidenceStatus;
+  /** Value inputs with no valid mark, named by the mark (pass with evidenceStatus). */
+  evidenceUnmarked?: readonly string[];
   /**
    * Shared axis for every meter on the page, so rows stay comparable. Defaults to the
    * domain that fits this one ratio.
@@ -36,6 +38,7 @@ export function ValueRatioMeter({
   ratio,
   size = 'inline',
   evidenceStatus,
+  evidenceUnmarked,
   domain: domainProp,
   hideHeadline = false,
 }: ValueRatioMeterProps) {
@@ -64,7 +67,7 @@ export function ValueRatioMeter({
           >
             {formatRatio(ratio)}
           </span>
-          <EvidenceMark status={evidenceStatus} className="self-center" />
+          <EvidenceMark status={evidenceStatus} unmarked={evidenceUnmarked} className="self-center" />
         </div>
       )}
 

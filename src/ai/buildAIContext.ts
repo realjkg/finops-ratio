@@ -14,7 +14,7 @@ import {
   INITIATIVE_STATUS_META,
 } from '@/executive/initiativeModel';
 import type { ProjectionContext } from '@/mission/missionModel';
-import { headlineEvidenceStatus } from '@/lib/valueEvidence';
+import { headlineEvidence, portfolioEvidence } from '@/lib/valueEvidence';
 import type { Workload } from '@/types';
 import type {
   AIContext,
@@ -54,6 +54,7 @@ export function buildAIContext(
     status: INITIATIVE_STATUS_META[i.status].label as AIInitiativeSnapshot['status'],
     valueRatio: i.valueRatio ?? Number.NaN, // N/A travels as NaN (null in JSON); Frank reads it as n/a, never 0
     valueEvidenceStatus: i.valueEvidenceStatus,
+    ...(i.valueEvidenceUnmarked.length ? { valueEvidenceUnmarked: i.valueEvidenceUnmarked } : {}),
     savingsOpportunity: Math.round(savings.get(i.id) ?? 0),
   }]);
 
@@ -63,7 +64,8 @@ export function buildAIContext(
     model: w.model,
     monthlySpend: w.costs.monthly_spend,
     valueRatio: workloadValueRatioOrNaN(w),
-    valueEvidenceStatus: headlineEvidenceStatus(w.value),
+    valueEvidenceStatus: headlineEvidence(w.value).status,
+    ...(headlineEvidence(w.value).unmarked.length ? { valueEvidenceUnmarked: headlineEvidence(w.value).unmarked } : {}),
     demandShape: w.demand_shape,
     governanceGatesPassed: gatesPassed(w),
     costTrendPct: w.cost_trend_pct,
@@ -99,6 +101,10 @@ export function buildAIContext(
       projectedSavings: summary.projectedSavings,
       initiativesActive: summary.initiativesActive,
       pendingApproval: summary.pendingApproval,
+      ...(() => {
+        const e = portfolioEvidence(workloads.map((w) => w.value));
+        return e.status ? { valueEvidenceStatus: e.status, valueEvidenceUnmarkedWorkloads: e.unmarkedWorkloads } : {};
+      })(),
     },
     workloads: workloadSnapshots,
     focusInitiativeId,

@@ -6,6 +6,7 @@
 // from the wire's own numbers. Anything still unknown stays null and the
 // answers say so instead of guessing.
 
+import { VALUE_INPUTS } from '@/lib/valueEvidence';
 import { OMITTED_STATUSES, type AIAlertSnapshot, type AIContext, type AIOmittedInitiative } from '../AIClient';
 import { alertsFor } from '@/data/alerts';
 import { WORKLOADS } from '@/data/workloads';
@@ -65,6 +66,11 @@ function field(r: Record<string, unknown>, key: string, range: Range, bad: strin
   if (typeof v === 'number' && within(v, range)) return v;
   if (!bad.includes(key)) bad.push(key);
   return null;
+}
+
+/** Known value-input keys from a context list; anything else is dropped (never echoed into an answer). */
+function inputs(v: unknown): string[] {
+  return Array.isArray(v) ? [...new Set(v.filter((k): k is string => typeof k === 'string' && (VALUE_INPUTS as readonly string[]).includes(k)))] : [];
 }
 
 function evidence(v: unknown): EvidenceStatus | undefined {
@@ -145,7 +151,11 @@ export function buildWorld(ctx: AIContext): World {
       rejected.push(`${name} (${bad.join(', ')})`); rejectedIds.push(id);
       return;
     }
-    const status = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
+    const marked = evidence(s.valueEvidenceStatus) ?? evidence(i.valueEvidenceStatus);
+    // Both copies are read and merged: an empty list on one never hides a non-empty list on the other.
+    const unmarked = [...new Set([...inputs(s.valueEvidenceUnmarked), ...inputs(i.valueEvidenceUnmarked)])];
+    // A context that names unmarked inputs cannot also claim a stronger status: unmarked counts as assumed.
+    const status = unmarked.length ? 'assumed' : marked;
     rows.push({
       id,
       name,
@@ -156,6 +166,7 @@ export function buildWorld(ctx: AIContext): World {
       monthlyValue: value,
       ratio: spend > 0 ? value / spend : null,
       evidence: status,
+      ...(unmarked.length ? { unmarked } : {}),
       status: str(i.status),
       budgetConsumedPct: consumed,
       monthlyBudget: budget,
@@ -193,12 +204,25 @@ function legacyInit(raw: unknown): AIContext['initiatives'][number] | null {
   const nums = Object.entries(INIT_NUMBERS).map(([k, r]) => [k, typeof i[k] === 'number' && within(i[k], r) ? i[k] : null] as const);
   const [id, name] = [str(i.id), str(i.name)];
   if (!id || !name || !(typeof i.status === 'string' && STATUS_OK.has(i.status)) || nums.some(([, v]) => v === null)) return null;
-  return { id, name, status: i.status, valueEvidenceStatus: evidence(i.valueEvidenceStatus), ...Object.fromEntries(nums) } as AIContext['initiatives'][number];
+  const unmarked = inputs(i.valueEvidenceUnmarked);
+  // An unmarked input makes the status assumed, whatever the context claims (same rule as buildWorld).
+  const status = unmarked.length ? 'assumed' : evidence(i.valueEvidenceStatus);
+  return { id, name, status: i.status, valueEvidenceStatus: status, ...(unmarked.length ? { valueEvidenceUnmarked: unmarked } : {}), ...Object.fromEntries(nums) } as AIContext['initiatives'][number];
 }
 
 export function legacyContext(ctx: AIContext, world: World): AIContext {
   const drop = new Set(world.rejectedIds);
-  const initiatives = arr(ctx.initiatives).filter((x) => !drop.has(rec(x).id as string)).map(legacyInit).filter((i) => i !== null);
+  // The legacy answers take each workload's evidence from the same world row the other answers use, so
+  // the two never disagree about one workload (the initiative copy alone can be stale or hand-built).
+  const evidenceOf = new Map(world.workloads.map((w) => [w.id, w]));
+  const initiatives = arr(ctx.initiatives).filter((x) => !drop.has(rec(x).id as string)).map(legacyInit).filter((i) => i !== null)
+    .map((i) => {
+      const w = evidenceOf.get(i.id);
+      if (!w) return i;
+      const rest = { ...i };
+      delete rest.valueEvidenceUnmarked;
+      return { ...rest, valueEvidenceStatus: w.evidence, ...(w.unmarked?.length ? { valueEvidenceUnmarked: w.unmarked } : {}) };
+    });
   const sum = (f: (i: (typeof initiatives)[number]) => number): number => initiatives.reduce((n, i) => n + f(i), 0);
   const sm = rec(ctx.summary);
   const pick = (key: string, range: Range, fallback: number): number => {

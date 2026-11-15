@@ -93,8 +93,8 @@ export interface WorkloadValue {
   value_ratio: number;
   /**
    * Evidence status of the value inputs. Absent on legacy shapes (values built
-   * before provenance tracking) — the UI renders such ratios unmarked rather
-   * than inventing a status.
+   * before provenance tracking); an absent block, or an unmarked input, counts as
+   * `assumed` (lib/valueEvidence.ts) and the unmarked inputs are named where shown.
    */
   evidence?: WorkloadValueEvidence;
 }

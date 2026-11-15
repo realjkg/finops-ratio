@@ -2,6 +2,7 @@
 // workload rendered as a data tile: name, status dot, budget gauge + value badge
 // (R4), trajectory verdict, and a drill-down affordance. Left-border accent
 // replaces the gamified top-border + card-lift pattern.
+import { evidenceAriaText } from '@/lib/valueEvidence';
 import { formatRatio } from '@/lib/format';
 import { TOKEN_COLOR, tint } from '@/lib/scales';
 import { FuelAndValue } from './FuelAndValue';
@@ -28,7 +29,7 @@ export function MissionCard({ mission, onOpen }: MissionCardProps) {
     <button
       type="button"
       onClick={onOpen}
-      aria-label={`Open ${mission.name} workload detail — ${meta.label}, ${mission.fuelPct === null ? 'estimated budget consumption N/A' : `${mission.fuelPct}% estimated budget consumption today`}, Value / cost ${formatRatio(mission.valueRatio)}`}
+      aria-label={`Open ${mission.name} workload detail — ${meta.label}, ${mission.fuelPct === null ? 'estimated budget consumption N/A' : `${mission.fuelPct}% estimated budget consumption today`}, Value / cost ${formatRatio(mission.valueRatio)}, ${evidenceAriaText(mission.valueEvidenceStatus, mission.valueEvidenceUnmarked)}`}
       data-mission-id={mission.id}
       className="flex w-full flex-col gap-4 rounded-card border border-edge bg-slab p-5 text-left transition-colors hover:bg-raised focus:outline-none focus-visible:ring-2 focus-visible:ring-gate"
       style={{ borderLeft: `2px solid ${meta.color}` }}
@@ -69,6 +70,7 @@ export function MissionCard({ mission, onOpen }: MissionCardProps) {
         valueRatio={mission.valueRatio}
         valueColor={mission.valueColor}
         evidenceStatus={mission.valueEvidenceStatus}
+        evidenceUnmarked={mission.valueEvidenceUnmarked}
       />
 
       {/* Trajectory verdict (monthly forecast, plain language) */}
