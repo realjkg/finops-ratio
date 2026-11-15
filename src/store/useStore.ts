@@ -152,7 +152,7 @@ export const useStore = create<AppState>((set, get) => ({
   connectorSessions: {},
   ingestRuns: {},
   connectorBusy: null,
-  loadSimulation: (session, state) => set((prev) => { const same = prev.simulation?.session.csrf === session.csrf; if (!same) chatEpoch += 1; return { simulation: { session, state }, aiThinking: same && prev.aiThinking, ...(!same && prev.aiThinking ? { aiMessages: [...prev.aiMessages, { id: nextMessageId(), role: 'system' as const, content: SESSION_CHANGED_NOTICE, timestamp: new Date().toISOString() }] } : {}), workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }; }),
+  loadSimulation: (session, state) => set((prev) => ({ ...chatOnSessionLoad(prev, session), simulation: { session, state }, workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null, connectorSessions: {}, ingestRuns: {}, connectorBusy: null })),
   clearSimulation: () => { chatEpoch += 1; set({ simulation: null, simulationBusy: false, simulationError: null, workloads: structuredClone(WORKLOADS), budgets: structuredClone(BUDGET_PROFILES), alerts: structuredClone(ALERTS), now: DEMO_NOW, aiMessages: [], aiThinking: false, aiPanelOpen: false, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }); },
   simulationCommand: async (command) => {
     const current = get().simulation;
@@ -392,7 +392,8 @@ export const useStore = create<AppState>((set, get) => ({
     } catch (error) {
       if (chatEpoch !== epoch) return; // the conversation was reset or the session changed: this answer is stale
       // Never swallow the failure — surface it inline so the user can retry.
-      const message = error instanceof Error ? error.message : 'Unknown error';
+      // A timeout reads the same on the live and the simulation path (the browser's own wording varies).
+      const message = error instanceof Error ? (error.name === 'TimeoutError' ? 'The request timed out. Ask again.' : error.message) : 'Unknown error';
       const errorMessage: AIChatMessage = {
         id: nextMessageId(),
         role: 'system',
@@ -415,5 +416,20 @@ export const useStore = create<AppState>((set, get) => ({
  * not belong to (a reset with no session, or a session that changes and comes back).
  */
 let chatEpoch = 0;
-/** Shown when a question in flight was dropped because the session changed under it. */
-const SESSION_CHANGED_NOTICE = 'The previous question was not answered because the session changed. Ask it again.';
+/** Shown when a question in flight was dropped because a simulation session was loaded under it. */
+const SESSION_CHANGED_NOTICE = 'The previous question was not answered because a simulation session was loaded. Ask it again.';
+
+/**
+ * The chat part of loadSimulation. Rule: the epoch is bumped only when the session token changes, and
+ * every bump comes with aiThinking false, so a dropped answer never leaves the panel waiting; a question
+ * dropped that way gets a notice. A load for the same session (a command, a refresh) changes nothing,
+ * so its in-flight answer still lands.
+ */
+function chatOnSessionLoad(prev: AppState, session: SimSession): Partial<AppState> {
+  if (prev.simulation?.session.csrf === session.csrf) return {};
+  chatEpoch += 1;
+  return {
+    aiThinking: false,
+    ...(prev.aiThinking ? { aiMessages: [...prev.aiMessages, { id: nextMessageId(), role: 'system' as const, content: SESSION_CHANGED_NOTICE, timestamp: new Date().toISOString() }] } : {}),
+  };
+}

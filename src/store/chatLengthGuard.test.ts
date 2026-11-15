@@ -183,7 +183,7 @@ describe('round 4: cutting, failed questions, focus bytes and the simulation lim
     await vi.advanceTimersByTimeAsync(1_000);
     await q;
     const msgs = useStore.getState().aiMessages;
-    expect(msgs.at(-1)).toMatchObject({ role: 'system', content: expect.stringContaining('not answered because the session changed') });
+    expect(msgs.at(-1)).toMatchObject({ role: 'system', content: expect.stringContaining('not answered because a simulation session was loaded') });
     expect(msgs.some((m) => m.role === 'assistant')).toBe(false);
     expect(useStore.getState().aiThinking).toBe(false);
     useStore.setState({ simulation: null, aiMessages: [] });
