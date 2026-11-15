@@ -35,8 +35,10 @@ describe('ChatInput length limit', () => {
   });
   it('near the limit: the counter shows; trailing whitespace is not counted', () => {
     render(<ChatInput disabled={false} onSend={() => {}} maxChars={2000} />);
-    fireEvent.change(box(), { target: { value: 'x'.repeat(1500) } });
+    fireEvent.change(box(), { target: { value: 'x'.repeat(1800) } }); // exactly 90%: still hidden
     expect(count().textContent).toBe('');
+    fireEvent.change(box(), { target: { value: 'x'.repeat(1801) } }); // just over 90%: shown
+    expect(count().textContent).toBe('1,801 / 2,000 characters');
     fireEvent.change(box(), { target: { value: 'x'.repeat(1900) } });
     expect(count().textContent).toBe('1,900 / 2,000 characters');
     fireEvent.change(box(), { target: { value: `${'x'.repeat(2000)}\n` } });

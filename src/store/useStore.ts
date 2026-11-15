@@ -152,8 +152,8 @@ export const useStore = create<AppState>((set, get) => ({
   connectorSessions: {},
   ingestRuns: {},
   connectorBusy: null,
-  loadSimulation: (session, state) => set((prev) => ({ simulation: { session, state }, aiThinking: prev.simulation?.session.csrf === session.csrf && prev.aiThinking, workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null, connectorSessions: {}, ingestRuns: {}, connectorBusy: null })),
-  clearSimulation: () => set({ simulation: null, simulationBusy: false, simulationError: null, workloads: structuredClone(WORKLOADS), budgets: structuredClone(BUDGET_PROFILES), alerts: structuredClone(ALERTS), now: DEMO_NOW, aiMessages: [], aiThinking: false, aiPanelOpen: false, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }),
+  loadSimulation: (session, state) => set((prev) => { const same = prev.simulation?.session.csrf === session.csrf; if (!same) chatEpoch += 1; return { simulation: { session, state }, aiThinking: same && prev.aiThinking, ...(!same && prev.aiThinking ? { aiMessages: [...prev.aiMessages, { id: nextMessageId(), role: 'system' as const, content: SESSION_CHANGED_NOTICE, timestamp: new Date().toISOString() }] } : {}), workloads: state.workloads, budgets: state.budgets, alerts: state.alerts, now: new Date(state.asOf), simulationError: null, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }; }),
+  clearSimulation: () => { chatEpoch += 1; set({ simulation: null, simulationBusy: false, simulationError: null, workloads: structuredClone(WORKLOADS), budgets: structuredClone(BUDGET_PROFILES), alerts: structuredClone(ALERTS), now: DEMO_NOW, aiMessages: [], aiThinking: false, aiPanelOpen: false, connectorSessions: {}, ingestRuns: {}, connectorBusy: null }); },
   simulationCommand: async (command) => {
     const current = get().simulation;
     if (!current || get().simulationBusy) return;
@@ -367,11 +367,14 @@ export const useStore = create<AppState>((set, get) => ({
     const context = buildAIContext(workloads, selectedId || null, now);
 
     const sim = get().simulation;
+    // Every reset of the conversation (clearSimulation) and every session change (loadSimulation) bumps
+    // the epoch; an answer that comes back under a different epoch belongs to a conversation that is gone.
+    const epoch = chatEpoch;
     try {
       const reply = sim
         ? await simulationRequest<import('@/ai/AIClient').AIResponse>('chat', { message: trimmed, workloadId: selectedId }, sim.session.csrf)
         : await aiClient.chat(history, context);
-      if (get().simulation?.session.csrf !== sim?.session.csrf) return;
+      if (chatEpoch !== epoch) return; // the conversation was reset or the session changed: this answer is stale
       const assistantMessage: AIChatMessage = {
         id: nextMessageId(),
         role: 'assistant',
@@ -387,7 +390,7 @@ export const useStore = create<AppState>((set, get) => ({
         aiThinking: false,
       }));
     } catch (error) {
-      if (get().simulation?.session.csrf !== sim?.session.csrf) return;
+      if (chatEpoch !== epoch) return; // the conversation was reset or the session changed: this answer is stale
       // Never swallow the failure — surface it inline so the user can retry.
       const message = error instanceof Error ? error.message : 'Unknown error';
       const errorMessage: AIChatMessage = {
@@ -405,3 +408,12 @@ export const useStore = create<AppState>((set, get) => ({
 
   toggleAIPanel: () => set((state) => ({ aiPanelOpen: !state.aiPanelOpen })),
 }));
+
+/**
+ * Chat epoch: bumped whenever the conversation is reset or the simulation session changes. A reply is
+ * accepted only under the epoch it was sent in, so an answer can never land in a conversation it does
+ * not belong to (a reset with no session, or a session that changes and comes back).
+ */
+let chatEpoch = 0;
+/** Shown when a question in flight was dropped because the session changed under it. */
+const SESSION_CHANGED_NOTICE = 'The previous question was not answered because the session changed. Ask it again.';

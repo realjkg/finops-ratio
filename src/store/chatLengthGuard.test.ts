@@ -145,15 +145,48 @@ describe('round 4: cutting, failed questions, focus bytes and the simulation lim
     useStore.setState({ aiThinking: false });
   });
 
-  it('a new simulation session ends an in-flight answer\u2019s hold on the panel; the same session keeps it', () => {
+  it('loadSimulation: a new session clears aiThinking (A to B too); the same session keeps it either way', () => {
     const state = { workloads: [], budgets: [], alerts: [], asOf: '2026-06-25T00:00:00.000Z' } as never;
-    useStore.setState({ aiThinking: true, simulation: null });
-    useStore.getState().loadSimulation({ csrf: 'new' } as never, state);
-    expect(useStore.getState().aiThinking).toBe(false);
+    const load = (csrf: string) => useStore.getState().loadSimulation({ csrf } as never, state);
+    useStore.setState({ aiThinking: true, simulation: null, aiMessages: [] });
+    load('A');
+    expect(useStore.getState().aiThinking).toBe(false); // none -> A
     useStore.setState({ aiThinking: true });
-    useStore.getState().loadSimulation({ csrf: 'new' } as never, state);
-    expect(useStore.getState().aiThinking).toBe(true);
-    useStore.setState({ aiThinking: false, simulation: null });
+    load('A');
+    expect(useStore.getState().aiThinking).toBe(true); // same session: an in-flight answer still holds the panel
+    useStore.setState({ aiThinking: false });
+    load('A');
+    expect(useStore.getState().aiThinking).toBe(false); // same session, idle: stays idle (no lock after a command)
+    useStore.setState({ aiThinking: true });
+    load('B');
+    expect(useStore.getState().aiThinking).toBe(false); // A -> B
+    useStore.setState({ aiThinking: false, simulation: null, aiMessages: [] });
+  });
+
+  it('an answer whose conversation was reset never lands in the new one (failed sign-in, no session)', async () => {
+    useStore.setState({ aiMessages: [], aiThinking: false, simulation: null });
+    const q1 = useStore.getState().sendAIMessage('first question');
+    useStore.getState().clearSimulation(); // e.g. a failed sign-in: no session before or after
+    const q2 = useStore.getState().sendAIMessage('second question');
+    await vi.advanceTimersByTimeAsync(1_000);
+    await Promise.all([q1, q2]);
+    const msgs = useStore.getState().aiMessages;
+    expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant']);
+    expect(msgs[0].content).toBe('second question');
+  });
+
+  it('a question dropped by a session change gets a notice instead of silence', async () => {
+    const state = { workloads: [], budgets: [], alerts: [], asOf: '2026-06-25T00:00:00.000Z' } as never;
+    useStore.setState({ aiMessages: [], aiThinking: false, simulation: null });
+    const q = useStore.getState().sendAIMessage('which initiative is riskiest?');
+    useStore.getState().loadSimulation({ csrf: 'restored' } as never, state); // a saved session is restored mid-answer
+    await vi.advanceTimersByTimeAsync(1_000);
+    await q;
+    const msgs = useStore.getState().aiMessages;
+    expect(msgs.at(-1)).toMatchObject({ role: 'system', content: expect.stringContaining('not answered because the session changed') });
+    expect(msgs.some((m) => m.role === 'assistant')).toBe(false);
+    expect(useStore.getState().aiThinking).toBe(false);
+    useStore.setState({ simulation: null, aiMessages: [] });
   });
 
   it('a question that failed is not resent with the next one', async () => {

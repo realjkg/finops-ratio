@@ -65,5 +65,8 @@ describe('error notices', () => {
     cleanup();
     render(<ChatMessage message={{ id: 'n', role: 'system', content: 'Message not sent: too long', timestamp: 't' }} />);
     expect(screen.queryByRole('alert')).toBeNull();
+    const notice = screen.getByText('Message not sent: too long');
+    expect(notice.className).toContain('text-value');
+    expect(notice.className).not.toContain('text-cost');
   });
 });

@@ -8,6 +8,8 @@ import { withBasePath } from '@/lib/basePath';
 import { describeHttpError, readJsonResponse } from '@/lib/httpError';
 
 const CHAT_URL = withBasePath('/api/v1/ai/chat');
+/** A live answer that takes longer is abandoned, so a hung provider never leaves the panel waiting. */
+export const CHAT_TIMEOUT_MS = 90_000;
 
 export class LiveAIClient implements AIClient {
   readonly mode = 'live' as const;
@@ -21,8 +23,12 @@ export class LiveAIClient implements AIClient {
         // Only the conversation and the focus id cross the wire: the server derives
         // every figure, name and evidence status from its own records.
         body: JSON.stringify({ messages, focusInitiativeId: context.focusInitiativeId ?? null }),
+        signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
       });
     } catch (err) {
+      if (err instanceof Error && err.name === 'TimeoutError') {
+        throw new Error(`AI chat timed out after ${CHAT_TIMEOUT_MS / 1000} seconds. Ask again.`);
+      }
       throw new Error(
         `AI chat unreachable: ${err instanceof Error ? err.message : String(err)}`,
       );
