@@ -3,6 +3,7 @@
 // / red error). Uses the shared dark surface + purple AI tokens so the panel
 // renders identically on both the executive (light) and technical (dark) surfaces.
 
+import { AI_ERROR_PREFIX } from '@/ai/limits';
 import type { AIChatMessage } from '@/store/useStore';
 import { FormattedReply } from './FormattedReply';
 
@@ -16,7 +17,7 @@ export function ChatMessage({ message }: { message: AIChatMessage }) {
   }
 
   if (message.role === 'system') {
-    const isError = message.content.startsWith('AI error');
+    const isError = message.content.startsWith(AI_ERROR_PREFIX);
     return (
       <div
         className={`whitespace-pre-wrap font-mono text-[11px] leading-relaxed ${

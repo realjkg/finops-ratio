@@ -133,7 +133,7 @@ function copyTree(name) {
 function run(tree, tag) {
   return new Promise((done) => {
     const out = join(work, `${tag}.json`);
-    const p = spawn('npx', ['vitest', 'run', 'src/ai/mock', '--reporter=json', `--outputFile=${out}`], { cwd: tree, stdio: 'ignore' });
+    const p = spawn('npx', ['vitest', 'run', 'src/ai/mock', 'src/ai/chatTrustBoundary.test.ts', '--reporter=json', `--outputFile=${out}`], { cwd: tree, stdio: 'ignore' });
     p.on('close', () => {
       if (!existsSync(out)) return done({ failed: ['<runner produced no report>'], total: 0 });
       const j = JSON.parse(readFileSync(out, 'utf8'));

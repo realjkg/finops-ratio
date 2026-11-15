@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { MAX_MESSAGE_CHARS, SIM_MAX_QUESTION_CHARS } from '@/ai/limits';
 import { FRANK } from '@/agent-workflows/frank';
 // ChatPanel (Wave3b) — collapsible AI chat drawer, anchored right. Closed: a
 // floating launcher button; open: a 340px panel with quick prompts, the scrolling
@@ -54,6 +55,7 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
   const aiMode = useStore((s) => s.aiMode);
   const aiPanelOpen = useStore((s) => s.aiPanelOpen);
   const sendAIMessage = useStore((s) => s.sendAIMessage);
+  const simulated = useStore((s) => s.simulation !== null);
   const toggleAIPanel = useStore((s) => s.toggleAIPanel);
   const spoken = useSpokenReplies(aiMessages, aiPanelOpen);
   const reduceMotion = useReducedMotion();
@@ -175,7 +177,7 @@ export function ChatPanel({ showLauncher = true }: { showLauncher?: boolean } = 
               )}
             </div>
 
-            <ChatInput disabled={aiThinking} onSend={submit} />
+            <ChatInput disabled={aiThinking} onSend={submit} maxChars={simulated ? SIM_MAX_QUESTION_CHARS : MAX_MESSAGE_CHARS} />
           </motion.aside>
         )}
       </AnimatePresence>
