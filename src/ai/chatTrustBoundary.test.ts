@@ -249,6 +249,27 @@ describe('the response says where the context came from', () => {
     }
   });
 
+  it.each([
+    ['a JSON null body', null, 400, undefined],
+    ['an array body', [], 400, undefined],
+    ['a string body', 'x', 400, undefined],
+    ['context: null (rejected, not ignored)', { messages: ask('hi'), context: null }, 400, undefined],
+    ['context: an array (rejected, not ignored)', { messages: ask('hi'), context: [] }, 400, undefined],
+    ['a forged context with no focus', { messages: ask('hi'), context: { initiatives: [], summary: {} } }, 200, 'context'],
+    ['a forged context whose focus is overridden by the top-level field', { messages: ask('hi'), focusInitiativeId: null, context: { focusInitiativeId: 'wl-support', initiatives: [] } }, 200, 'context'],
+    ['a legacy focus that is honored, plus other fields', { messages: ask('hi'), context: { focusInitiativeId: 'wl-support', initiatives: [], summary: {} } }, 200, 'context.initiatives, context.summary'],
+    ['a legacy focus alone (nothing ignored)', { messages: ask('hi'), context: { focusInitiativeId: 'wl-support' } }, 200, undefined],
+    ['an unknown legacy focus (ignored with the rest)', { messages: ask('hi'), context: { focusInitiativeId: 'wl-nope', initiatives: [] } }, 200, 'context'],
+    ['a key that is not an identifier is never echoed', { messages: ask('hi'), context: { focusInitiativeId: 'wl-support', 'x\r\nSet-Cookie: a=b': 1 } }, 200, 'context.*'],
+  ])('%s', async (_n, body, status, ignored) => {
+    const res = withHeaders();
+    await handler({ method: 'POST', url: '/api/v1/ai/chat', headers: {}, body } as unknown as NextApiRequest, res as unknown as NextApiResponse);
+    expect(res.statusCode).toBe(status);
+    expect(res.headers['x-ratio-context-source']).toBe('server');
+    expect(res.headers['x-ratio-ignored-fields']).toBe(ignored);
+    expect(res.headers.deprecation).toBeUndefined();
+  });
+
   it('a rejected request carries the same headers (400 legacy body, 405 method)', async () => {
     const bad = withHeaders();
     await handler({ method: 'POST', url: '/api/v1/ai/chat', headers: {}, body: { messages: [], context: forged() } } as unknown as NextApiRequest, bad as unknown as NextApiResponse);

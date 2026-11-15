@@ -42,6 +42,8 @@ Every value figure must state its formula inputs, their sources, the period, the
 | **Frank chat** (`/api/v1/ai/chat`, `pages/api/v1/ai/chat.ts`) | The browser sends `monthlyValue`, `valueRatio` and `valueEvidenceStatus` | Taken as sent. The route's `isValidBody` (l.352-372) checks only the context containers. On the mock path, `src/ai/mock/world.ts:118-150` range-checks the fields; on a live provider, `buildSystemPrompt` (l.282, called at l.416) writes `valueRatio` (any number) and `valueEvidenceStatus` (any string, verbatim) into the prompt with no range or value check | **No.** A client can send any value and claim `measured`, and a live provider sees it without even the mock's range checks. The verbatim status string is also a channel for injecting text into the prompt |
 | **Engagement report** (`src/reports/*`) | Cost only | — | Value is not reported at all |
 
+> **Update, 2026-11-15:** the Frank chat row above describes the route before #196 and #198. The route now builds its context on the server from its own records; the browser sends only the conversation and, at most, a focus id. The other rows are unchanged.
+
 ### 2.3 Why it is not yet objective
 
 1. **Circular headline.** The demo value is the seed ratio multiplied back by the cost (then gated by the quality pass rate and reduced by harm), so the displayed ratio is derived from the input ratio and cannot be checked against anything.

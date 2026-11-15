@@ -15,7 +15,7 @@ import { FRANK } from '@/agent-workflows/frank';
 // and derives value, Value / cost and evidence status itself; the same server-built
 // context feeds the mock and every live provider. A legacy `context` in the body is
 // accepted for compatibility, but only its focus id is read, and the response then
-// carries `X-Ratio-Ignored-Fields: context`. An unknown legacy focus id is ignored. Known limits, by design: (1) the records are the
+// names the parts of it that were ignored in `X-Ratio-Ignored-Fields`. An unknown legacy focus id is ignored. Known limits, by design: (1) the records are the
 // bundled demo dataset, and this route has a single tenant (one gateway token), so
 // there is no per-caller record scope yet; (2) unsaved edits made in the browser
 // (governance gates, demand shape) are not visible to a live answer, because the
@@ -78,11 +78,29 @@ const KNOWN_FOCUS_IDS: ReadonlySet<string> = (() => {
 })();
 
 /**
- * Names the request fields this route accepted but did not use, so a legacy client can see that its
- * `context` was ignored. Field-scoped on purpose: RFC 9745 `Deprecation` would mark the whole endpoint
- * as deprecated, and it is not.
+ * Lists, comma-separated, the request fields this route accepted but did not use: `context` when none
+ * of it was used, or `context.<key>` for each other key when its legacy focus id was used (the focus id
+ * itself is then not listed, because it was honored). Absent when nothing was ignored. Keys a client
+ * sends are listed only if they are plain identifiers (up to 64 characters; at most 20 listed); any
+ * other key is reported once as `context.*`, so no client text is echoed into a header. Field-scoped on
+ * purpose: RFC 9745 `Deprecation` would mark the whole endpoint as deprecated, and it is not.
  */
 export const IGNORED_FIELDS_HEADER = 'X-Ratio-Ignored-Fields';
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+/** The header value for a body, or undefined when nothing it sent was ignored (see IGNORED_FIELDS_HEADER). */
+export function ignoredFields(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined;
+  const ctx = (body as Record<string, unknown>).context;
+  // Only a plain-object context is accepted (and so ignored); any other shape is rejected with a 400.
+  if (typeof ctx !== 'object' || ctx === null || Array.isArray(ctx)) return undefined;
+  const legacyFocusUsed = !('focusInitiativeId' in body) && isKnownFocus((ctx as Record<string, unknown>).focusInitiativeId);
+  if (!legacyFocusUsed) return 'context';
+  const others = Object.keys(ctx).filter((k) => k !== 'focusInitiativeId');
+  const named = others.filter((k) => IDENTIFIER.test(k)).slice(0, 20).map((k) => `context.${k}`);
+  if (named.length < others.length) named.push('context.*');
+  return named.length ? named.join(', ') : undefined;
+}
 
 const isKnownFocus = (raw: unknown): raw is string =>
   typeof raw === 'string' && raw.length <= MAX_FOCUS_ID && KNOWN_FOCUS_IDS.has(raw);
@@ -503,10 +521,8 @@ const guarded = withGateway(chatHandler, {
  */
 export default async function chatRoute(req: NextApiRequest, res: NextApiResponse): Promise<void> {
   res.setHeader('X-Ratio-Context-Source', 'server');
-  const body: unknown = req.body;
-  if (typeof body === 'object' && body !== null && !Array.isArray(body) && (body as Record<string, unknown>).context !== undefined) {
-    res.setHeader(IGNORED_FIELDS_HEADER, 'context');
-  }
+  const ignored = ignoredFields(req.body);
+  if (ignored) res.setHeader(IGNORED_FIELDS_HEADER, ignored);
   await guarded(req, res);
 }
 
