@@ -32,7 +32,7 @@ function activityRow(i: number, w: WorkloadFacts): string {
 /** One workload in full: where it sits, what it costs, what it does. */
 function workloadDetail(world: World, w: WorkloadFacts): Answer {
   const body = [
-    `Cost ${usd(w.monthlySpend)}/mo · value ${usd(w.monthlyValue)}/mo · ${returnText(w.ratio)}${evid(w.evidence)}`,
+    `Cost ${usd(w.monthlySpend)}/mo · value ${usd(w.monthlyValue)}/mo · ${returnText(w.ratio)}${evid(w.evidence, w.unmarked)}`,
     `Team: ${w.team ?? 'not present in this context'} · model: ${w.model ?? 'unknown'}${w.provider ? ` (${w.provider})` : ''}`,
     `Status: ${w.status ?? 'n/a'}` +
       (w.budgetNa ? ' · budget N/A' : '') +
@@ -72,7 +72,7 @@ function listAnswer(world: World, scope: Scope, word: string): Answer {
   const label = scopeLabel(world, scope);
   const head = scope.kind === 'model' ? `**${word} on ${label} (model)**` : `**${word} — ${scopeTitle(world, scope)}**`;
   const r = rollup(members);
-  const body = [`${scope.kind === 'portfolio' ? 'Portfolio' : label} costs ${usd(r.spend)}/mo at ${returnText(r.ratio)}${evid(r.evidence)}.`];
+  const body = [`${scope.kind === 'portfolio' ? 'Portfolio' : label} costs ${usd(r.spend)}/mo at ${returnText(r.ratio)}${evid(r.evidence, r.unmarked)}.`];
   if (members.length === 0) body.push('No workloads are in this scope in the data I was given.');
   else {
     body.push('Workloads, ranked by monthly cost:');
@@ -88,7 +88,7 @@ function tokenRow(i: number, w: WorkloadFacts): string {
     `${i + 1}. ${w.name} — ${w.model ?? 'model unknown'}` +
     (w.cacheHitRate !== null ? ` · cache hit ${pct1(w.cacheHitRate * 100)}` : '') +
     (per1k !== null ? ` · ${usd2(per1k)} per 1,000 calls at list price` : '') +
-    ` · ${x(w.ratio)} ${short(w.evidence)}`
+    ` · ${x(w.ratio)} ${short(w.evidence, w.unmarked)}`
   );
 }
 
@@ -105,7 +105,7 @@ export function tokensAnswer(world: World, scope: Scope): Answer {
   const members = membersOf(world, scope);
   const label = scopeLabel(world, scope);
   const r = rollup(members);
-  const body: string[] = [`${label} costs ${usd(r.spend)}/mo at ${returnText(r.ratio)}${evid(r.evidence)}.`];
+  const body: string[] = [`${label} costs ${usd(r.spend)}/mo at ${returnText(r.ratio)}${evid(r.evidence, r.unmarked)}.`];
   if (scope.kind === 'workload' && members[0]) {
     const w = members[0];
     body.push(`Model: ${w.model ?? 'unknown'}${w.provider ? ` (${w.provider})` : ''} · list price ${modelPrices(w.model)}.`);
@@ -165,7 +165,7 @@ export function outcomesAnswer(world: World, scope: Scope): Answer {
   const label = scopeLabel(world, scope);
   const r = rollup(members);
   const body = [
-    `There is no measured outcome evidence for ${label} in this data. Its Value / cost is ${returnText(r.ratio)}${evid(r.evidence)}.`,
+    `There is no measured outcome evidence for ${label} in this data. Its Value / cost is ${returnText(r.ratio)}${evid(r.evidence, r.unmarked)}.`,
     'Every value measure in the demo’s outcome records is marked assumed, so realized value and realized savings are not established (Realized savings: $0).',
     'Recording a ledger-referenced value measure with a verifier in the Outcomes panel is what upgrades a claim beyond assumed; until then Frank keeps calling it assumed or projected.',
     ...(members.length > 1 ? [`Weakest-link rule: a group shows the weakest status of its members (${members.length} here).`] : []),

@@ -2,14 +2,14 @@
 // scope-aware "next questions" ladder, and the standing realized-savings line.
 
 import type { EvidenceStatus } from '@/types';
-import { evid, returnText, usd, x } from './format';
+import { evid, evidenceWords, returnText, usd, x } from './format';
 import { membersOf, rollup, scopeLabel } from './calc';
 import type { Scope, World, WorkloadFacts } from './types';
 
 export const REALIZED_LINE =
   'Realized savings: $0 — no measured outcome evidence exists in this data (everything here is projected or assumed).';
 
-export const short = (s: EvidenceStatus | undefined): string => `(${s ?? 'unmarked'})`;
+export const short = (s: EvidenceStatus | undefined, unmarked?: readonly string[] | number): string => `(${evidenceWords(s, unmarked)})`;
 
 /** "the Legal team" — always qualified so the question parses back to the team. */
 export const T = (team: string): string => `the ${team} team`;
@@ -18,12 +18,12 @@ export const T = (team: string): string => `the ${team} team`;
 export function contextLine(world: World, scope: Scope): string {
   const members = membersOf(world, scope);
   const r = rollup(members);
-  return `Context: ${scopeLabel(world, scope)} costs ${usd(r.spend)}/mo at ${returnText(r.ratio)}${evid(r.evidence)}.`;
+  return `Context: ${scopeLabel(world, scope)} costs ${usd(r.spend)}/mo at ${returnText(r.ratio)}${evid(r.evidence, r.unmarked)}.`;
 }
 
 /** Numbered workload row: cost, value, ratio, evidence. */
 export function workloadRow(i: number, w: WorkloadFacts): string {
-  return `${i + 1}. ${w.name} — cost ${usd(w.monthlySpend)}/mo · value ${usd(w.monthlyValue)}/mo · ${x(w.ratio)} ${short(w.evidence)}`;
+  return `${i + 1}. ${w.name} — cost ${usd(w.monthlySpend)}/mo · value ${usd(w.monthlyValue)}/mo · ${x(w.ratio)} ${short(w.evidence, w.unmarked)}`;
 }
 
 /** Next-question ladder for a scope: drill one level down, sideways, or into finance. */

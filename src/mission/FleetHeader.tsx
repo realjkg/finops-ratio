@@ -2,7 +2,10 @@
 // total value returned, workloads needing attention, and aggregate budget
 // consumed. Aggregates trace to the same engine outputs the cards use.
 import { motion, useReducedMotion } from 'framer-motion';
+import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatRatio } from '@/lib/format';
+import { DEMO_HEADLINE_LABEL } from '@/lib/demoMode';
+import { useRatioMode } from '@/lib/ratioModeContext';
 import { TOKEN_COLOR } from '@/lib/scales';
 import type { FleetSummary } from './missionModel';
 
@@ -12,6 +15,7 @@ interface FleetHeaderProps {
 
 export function FleetHeader({ fleet }: FleetHeaderProps) {
   const reducedMotion = useReducedMotion() ?? false;
+  const demo = useRatioMode() === 'demo';
   const attentionColor = fleet.needsAttention > 0 ? TOKEN_COLOR.shape : TOKEN_COLOR.value;
 
   return (
@@ -32,6 +36,13 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
             <dd className="font-mono text-2xl font-bold" style={{ color: TOKEN_COLOR.value }}>
               {formatRatio(fleet.valueReturned)}
             </dd>
+            {/* The headline carries its computed provenance, and in the demo says it is illustrative. */}
+            {(fleet.valueEvidenceStatus || demo) && (
+              <dd className="mt-1 flex flex-wrap items-center gap-x-2 font-body">
+                <EvidenceMark status={fleet.valueEvidenceStatus} unmarkedWorkloads={fleet.valueEvidenceUnmarkedWorkloads} explain />
+                {demo && <DemoLabel />}
+              </dd>
+            )}
           </div>
 
           {/* Missions needing attention */}
@@ -76,3 +87,15 @@ export function FleetHeader({ fleet }: FleetHeaderProps) {
   );
 }
 
+/** "Illustrative · offline sandbox data", with the separator hidden from screen readers (read as a comma). */
+function DemoLabel() {
+  const [first, ...rest] = DEMO_HEADLINE_LABEL.split(' · ');
+  return (
+    <span className="text-[11px] text-dim">
+      {first}
+      <span aria-hidden="true"> · </span>
+      <span className="sr-only">, </span>
+      {rest.join(', ')}
+    </span>
+  );
+}

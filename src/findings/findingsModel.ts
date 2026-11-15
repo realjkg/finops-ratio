@@ -7,7 +7,7 @@
 import { WORKLOADS } from '@/data/workloads';
 import { ratioColor } from '@/lib/scales';
 import { CACHE_HIT_RATE_MATERIAL, deriveCacheEconomics } from '@/lib/derive';
-import { headlineEvidenceStatus } from '@/lib/valueEvidence';
+import { headlineEvidence, type ValueInput } from '@/lib/valueEvidence';
 import { deriveWorkloadValue } from '@/lib/valueMath';
 import { workloadValueRatio } from '@/lib/valueRatio';
 import { COPY, VOCAB, VALUE_COST_BREAK_EVEN, basisLine, costLabel, costSourceOf, type CostSource } from '@/lib/vocabulary';
@@ -88,10 +88,11 @@ export interface FindingView {
   costSource: CostSource;
   /**
    * Provenance mark on the value ratio — the weakest value input's status
-   * (audit C1/C2). `undefined` when the value carries no evidence block; the
-   * UI then renders the ratio unmarked rather than inventing a status.
+   * (audit C1/C2). An input with no valid mark counts as `assumed`.
    */
-  valueEvidenceStatus?: EvidenceStatus;
+  valueEvidenceStatus: EvidenceStatus;
+  /** Value inputs with no valid mark; the mark names them instead of claiming an assumption. */
+  valueEvidenceUnmarked: ValueInput[];
   /** One-line problem summary. */
   problem: string;
   /** Single recommended action, derived from real rules (recommendationMath). */
@@ -211,7 +212,8 @@ export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEM
         valueColor: ratio === null ? 'var(--dim)' : ratioColor(ratio),
         monthlySpend: w.costs.monthly_spend,
         costSource: source,
-        valueEvidenceStatus: headlineEvidenceStatus(w.value),
+        valueEvidenceStatus: headlineEvidence(w.value).status,
+        valueEvidenceUnmarked: headlineEvidence(w.value).unmarked,
         problem,
         recommendedAction: rec.action,
         recommendationKind: rec.kind,

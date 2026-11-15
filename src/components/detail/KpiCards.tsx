@@ -7,7 +7,7 @@ import { useState } from 'react';
 import type { EvidenceStatus, Workload } from '@/types';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import { TcaBreakdown } from '@/outcomes/TcaBreakdown';
-import { headlineEvidenceStatus } from '@/lib/valueEvidence';
+import { headlineEvidence } from '@/lib/valueEvidence';
 import { deriveUnitCosts } from '@/lib/derive';
 import { formatCents, formatReturn, formatSignedPct, formatUSD } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
@@ -16,7 +16,7 @@ export function KpiCards({ workload }: { workload: Workload }) {
   const unit = deriveUnitCosts(workload);
   const trendUp = workload.cost_trend_pct > 0;
   // The Value card anchors the band — its ratio carries the provenance mark.
-  const valueEvidence = headlineEvidenceStatus(workload.value);
+  const valueEvidence = headlineEvidence(workload.value);
   // Audit C9: the ratio card links to the read-only full-cost pairing.
   const [showTca, setShowTca] = useState(false);
 
@@ -29,7 +29,8 @@ export function KpiCards({ workload }: { workload: Workload }) {
         accent="var(--value)"
         note={formatReturn(workloadValueRatio(workload))}
         noteColor={ratioColor(workloadValueRatio(workload))}
-        evidenceStatus={valueEvidence}
+        evidenceStatus={valueEvidence.status}
+        evidenceUnmarked={valueEvidence.unmarked}
       />
       <Card
         label={costLabel(costSourceOf(workload))}
@@ -81,6 +82,7 @@ function Card({
   note,
   noteColor,
   evidenceStatus,
+  evidenceUnmarked,
 }: {
   label: string;
   value: string;
@@ -88,6 +90,7 @@ function Card({
   note: string;
   noteColor: string;
   evidenceStatus?: EvidenceStatus;
+  evidenceUnmarked?: readonly string[];
 }) {
   return (
     <div className="rounded-card border border-edge bg-slab p-3" style={{ borderTop: `2px solid ${accent}` }}>
@@ -95,7 +98,7 @@ function Card({
       <div className="mt-1 font-mono text-xl font-bold text-txt">{value}</div>
       <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px]">
         <span style={{ color: noteColor }}>{note}</span>
-        <EvidenceMark status={evidenceStatus} explain />
+        <EvidenceMark status={evidenceStatus} unmarked={evidenceUnmarked} explain />
       </div>
     </div>
   );
