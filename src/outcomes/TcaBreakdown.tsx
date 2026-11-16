@@ -117,7 +117,7 @@ export function TcaBreakdown({ workload }: { workload: Workload }) {
       </p>
       <p className="mt-2 text-[11px]">
         <Link href={methodologyHref(workload.id)} className="font-medium text-txt underline underline-offset-2">
-          How this is calculated, and where each input comes from
+          How the headline Value / cost is calculated, and where each input comes from
         </Link>
       </p>
     </div>

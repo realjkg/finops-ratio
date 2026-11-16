@@ -52,7 +52,8 @@ export default function Methodology() {
           {inWorkspace ? (
             <p className="mt-1 text-sub">
               You are in a simulation workspace. Value inputs were copied from the demo dataset when the workspace was created and are stated
-              assumptions, not measurements. Cost is the sum of the cost postings recorded in this workspace.
+              assumptions, not measurements. Cost is the sum of the cost postings recorded in this workspace so far this month. The periods
+              differ: Value / cost divides a whole month of value by cost recorded to date.
             </p>
           ) : (
             <p className="mt-1 text-sub">
@@ -90,7 +91,7 @@ export default function Methodology() {
                 <tr><th scope="row" className="py-1.5 pr-4 font-normal text-txt">Protected revenue, avoided cost</th><td className="py-1.5 pr-4">Stated in the workload&apos;s dataset record as a value multiple of its stated monthly cost, split between the two.</td><td className="py-1.5">Copied from the dataset record.</td></tr>
                 <tr><th scope="row" className="py-1.5 pr-4 font-normal text-txt">Quality-floor pass rate</th><td className="py-1.5 pr-4">Stated in the dataset record. Not measured from graded outputs.</td><td className="py-1.5">Copied from the dataset record.</td></tr>
                 <tr><th scope="row" className="py-1.5 pr-4 font-normal text-txt">Harm from misses</th><td className="py-1.5 pr-4">Stated in the dataset record. Not measured from refund or rework records.</td><td className="py-1.5">Copied from the dataset record.</td></tr>
-                <tr><th scope="row" className="py-1.5 pr-4 font-normal text-txt">Cost</th><td className="py-1.5 pr-4">Modeled monthly cost stated in the dataset record. The daily cost is modeled separately from token counts × model list price.</td><td className="py-1.5">Sum of the cost postings recorded in the workspace, month to date.</td></tr>
+                <tr><th scope="row" className="py-1.5 pr-4 font-normal text-txt">Cost</th><td className="py-1.5 pr-4">Modeled monthly cost stated in the dataset record. The daily cost is modeled separately from token counts × model list price.</td><td className="py-1.5">Sum of the cost postings recorded in the workspace, month to date. Value inputs cover the whole month, so the two periods differ.</td></tr>
               </tbody>
             </table>
           </div>

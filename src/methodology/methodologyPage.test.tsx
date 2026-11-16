@@ -38,6 +38,9 @@ describe('Methodology page (route /methodology)', () => {
 describe('workload detail links to the worked example', () => {
   it('TcaBreakdown links to its own anchor', () => {
     const w = WORKLOADS.find((x) => x.id === 'wl-fraud')!;
-    expect(renderToStaticMarkup(<TcaBreakdown workload={w} />)).toContain('href="/methodology#calc-wl-fraud"');
+    const html = renderToStaticMarkup(<TcaBreakdown workload={w} />);
+    expect(html).toContain('href="/methodology#calc-wl-fraud"');
+    // The page explains the headline ratio, not the full-cost estimate above the link.
+    expect(html).toContain('How the headline Value / cost is calculated');
   });
 });
