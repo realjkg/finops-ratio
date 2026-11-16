@@ -12,7 +12,7 @@ describe('Methodology page (route /methodology)', () => {
   it('states what the data is and the result of the source check', () => {
     expect(html).toContain('>How Value / cost is calculated</h1>');
     expect(html).toContain('Every value input is a stated assumption in a dataset record, not a measurement');
-    expect(html).toContain(`Dataset check: ${WORKLOADS.length} of ${WORKLOADS.length} workloads match, to the cent.`);
+    expect(html).toContain(`Dataset check: ${WORKLOADS.length} of ${WORKLOADS.length} workloads match (amounts to the cent, ratios to 0.01).`);
     expect(html).toContain('It does not show that the dataset itself is right');
     expect(html).toContain('The value inputs cannot be entered or edited in the app today.');
     expect(html).toContain('src/data/workloads.ts');
@@ -27,7 +27,7 @@ describe('Methodology page (route /methodology)', () => {
       expect(html).toContain(formatUSD(t.steps[2].value!));
       const ratio = t.steps[3].value!;
       expect(html).toContain(`${ratio.toFixed(3)}× (shown as ${ratio.toFixed(1)}×)`);
-      expect(html).toContain(`Check passed: stored estimated value and Value / cost against the inputs; value inputs against dataset record ${w.id}`);
+      expect(html).toContain(`Check passed: stored estimated value against the inputs, to the cent; stored Value / cost against the inputs, to 0.01; value inputs against dataset record ${w.id}, to the cent; cost against dataset record ${w.id}, to the cent.`);
     }
   });
 

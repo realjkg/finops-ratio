@@ -43,7 +43,8 @@ export interface InputTrace {
   key: ValueInput | 'monthly_cost';
   label: string;
   value: number;
-  format: 'usd' | 'pct';
+  /** usd: whole dollars as the rest of the app shows them; usd_cents: to the cent (recorded cost). */
+  format: 'usd' | 'usd_cents' | 'pct';
   /** The recorded evidence mark; null for cost, which is not a value input. */
   evidence: EvidenceStatus | null;
   /** True when the input has no recorded mark and so counts as assumed. */
@@ -94,7 +95,7 @@ const LABELS: Record<ValueInput, string> = {
   harm_from_misses: 'Harm from misses',
 };
 
-const usd = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+const usd = (n: number) => `${n < 0 ? '-' : ''}$${Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
 const cents = (n: number) => Math.round(n * 100);
 
@@ -146,7 +147,7 @@ export function traceWorkload(w: Workload, ledger?: readonly LedgerPosting[]): W
     ? { count: workloadPostings.length, totalCents: workloadPostings.reduce((s, p) => s + p.cents, 0), sources: [...new Set(workloadPostings.map((p) => p.source))].sort() }
     : null;
   inputs.push({
-    key: 'monthly_cost', label: costSource === 'recorded' ? 'Recorded cost, month to date' : 'Modeled monthly cost', value: w.costs.monthly_spend, format: 'usd', evidence: null, unmarked: false,
+    key: 'monthly_cost', label: costSource === 'recorded' ? 'Recorded cost, month to date' : 'Modeled monthly cost', value: w.costs.monthly_spend, format: postings ? 'usd_cents' : 'usd', evidence: null, unmarked: false,
     origin: postings
       ? postings.count > 0
         ? `Sum of ${postings.count} cost postings recorded in this workspace (${postings.sources.join(', ')}).`
@@ -190,13 +191,15 @@ export function checkAgainstSource(
   // The stored headline figures many screens read directly must equal the derivation from the inputs.
   const derived = deriveWorkloadValue(w);
   compare('Stored estimated value', w.value.total_value, Math.round(derived.total_value), usd);
+  checked.push('stored estimated value against the inputs, to the cent');
   if (w.costs.monthly_spend > 0) {
+    // The demo stores the ratio rounded to 2 decimals and the workspace stores it unrounded, so it is compared to 0.01.
     const expectedRatio = Math.round(derived.total_value) / w.costs.monthly_spend;
     if (!Number.isFinite(w.value.value_ratio) || Math.abs(w.value.value_ratio - expectedRatio) >= 0.005) {
       differences.push(`Stored Value / cost: ${w.value.value_ratio} in use, ${expectedRatio.toFixed(2)} from the inputs.`);
     }
+    checked.push('stored Value / cost against the inputs, to 0.01');
   }
-  checked.push('stored estimated value and Value / cost against the inputs');
   if (seed) {
     const split = seedValueSplit(seed);
     compare('Protected revenue', w.value.revenue_protected, split.revenueProtected, usd);
@@ -206,19 +209,19 @@ export function checkAgainstSource(
     if (rate === undefined || Math.abs(rate - seed.qualityFloorPassRate) > 1e-9) {
       differences.push(`Quality-floor pass rate: ${rate === undefined ? 'missing' : pct(rate)} in use, ${pct(seed.qualityFloorPassRate)} in the source record.`);
     }
-    checked.push(`value inputs against dataset record ${seed.id}`);
+    checked.push(`value inputs against dataset record ${seed.id}, to the cent`);
   } else {
     differences.push('No dataset record has this workload id, so its value inputs cannot be traced.');
   }
   if (postings) {
     compare('Recorded cost', w.costs.monthly_spend, postings.totalCents / 100, usd);
-    checked.push(`cost against the sum of ${postings.count} workspace postings`);
+    checked.push(`cost against the sum of ${postings.count} workspace postings, to the cent`);
   } else if (seed) {
     compare('Modeled monthly cost', w.costs.monthly_spend, seed.monthlySpend, usd);
     if (dailyCost) compare('Modeled daily cost', w.costs.daily_spend, dailyCost.dailySpend, usd);
-    checked.push(`cost against dataset record ${seed.id}`);
+    checked.push(`cost against dataset record ${seed.id}, to the cent`);
   }
-  return { matches: differences.length === 0, differences, checked: `${checked.join('; ')}, to the cent` };
+  return { matches: differences.length === 0, differences, checked: checked.join('; ') };
 }
 
 /** Trace every workload in display order. */

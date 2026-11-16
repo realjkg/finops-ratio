@@ -23,12 +23,13 @@ import { useStore } from '@/store/useStore';
 const EVIDENCE_TEXT: Record<EvidenceStatus, string> = {
   measured: 'Recorded from a source of record and checked independently.',
   projected: 'A forward-looking estimate that has not been checked against results yet.',
-  assumed: 'A stated assumption, shown in the app as Estimated value. An input with no label counts here too.',
+  assumed: 'A stated assumption. An input with no label counts here too.',
 };
-const money2 = (n: number) => `$${n.toFixed(2)}`;
+const money2 = (n: number) => `$${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const money4 = (n: number) => `$${n.toFixed(4)}`;
 const rate = (n: number) => `$${n} per million`;
 
-const fmtInput = (i: InputTrace) => (i.format === 'pct' ? formatPct(i.value, 1) : formatUSD(i.value));
+const fmtInput = (i: InputTrace) => (i.format === 'pct' ? formatPct(i.value, 1) : i.format === 'usd_cents' ? money2(i.value) : formatUSD(i.value));
 const fmtStep = (s: StepTrace) => (s.format === 'ratio' ? (s.value === null ? 'N/A' : `${s.value.toFixed(3)}× (shown as ${formatRatio(s.value)})`) : formatUSD(s.value ?? 0));
 
 export default function Methodology() {
@@ -72,14 +73,15 @@ export default function Methodology() {
             </p>
           )}
           <p className="mt-2 text-sub" data-testid="methodology-source-check">
-            {inWorkspace ? 'Source check' : 'Dataset check'}: {matching} of {traces.length} workloads match, to the cent.
+            {inWorkspace ? 'Source check' : 'Dataset check'}: {matching} of {traces.length} workloads match (amounts to the cent, ratios to 0.01).
             {matching < traces.length && ' The differences are listed in each worked example below.'}
           </p>
           <p className="mt-1 text-xs text-sub">
             {inWorkspace
               ? 'Cost is checked against the sum of the workspace\u2019s cost postings, and value inputs against the dataset record they were copied from.'
               : 'In the demo, this confirms that the figures in use match the dataset file and that each stored headline equals what its inputs give. It does not show that the dataset itself is right: the dataset is illustrative.'}
-            {' '}Every workload is also checked so that its stored estimated value and Value / cost equal the calculation from its inputs.
+            {' '}Every workload is also checked so that its stored estimated value (to the cent) and Value / cost (to 0.01) equal the calculation
+            from its inputs.
           </p>
         </section>
 
@@ -90,7 +92,8 @@ export default function Methodology() {
             <li><span className="text-txt">Counted value</span> = gross value × quality-floor pass rate. Outputs below the quality floor count for nothing. The rate is applied once.</li>
             <li><span className="text-txt">Adjusted value</span> = counted value − harm from misses (refunds, rework, manual cleanup). It can be negative.</li>
             <li>
-              <span className="text-txt">Value / cost</span> = adjusted value ÷ cost for the same period. Break-even is 1×. The configured policy target is{' '}
+              <span className="text-txt">Value / cost</span> = adjusted value ÷ cost{' '}
+              {inWorkspace ? '(here, a whole month of value over cost recorded to date)' : 'for the same month'}. Break-even is 1×. The configured policy target is{' '}
               {VALUE_MINIMUM}×. Displayed figures are rounded to one decimal; the unrounded figure is in each example below and in View calculation.
             </li>
           </ol>
@@ -101,7 +104,7 @@ export default function Methodology() {
           <p className="mt-2 text-sm text-sub" data-testid="methodology-portfolio">
             The portfolio figure adds up each workload&apos;s estimated value (rounded to the dollar) and divides by the total cost. It is not an
             average of the workload ratios. Now: {formatUSD(portfolio.value)} ÷ {formatUSD(portfolio.cost)} ={' '}
-            <span className="font-mono text-txt">{portfolio.ratio === null ? 'N/A' : `${portfolio.ratio.toFixed(3)}×`}</span>.
+            <span className="font-mono text-txt">{portfolio.ratio === null ? 'N/A' : `${portfolio.ratio.toFixed(3)}× (shown as ${formatRatio(portfolio.ratio)})`}</span>.
           </p>
         </section>
 
@@ -200,10 +203,10 @@ function WorkedExample({ t }: { t: WorkloadTrace }) {
       {t.dailyCost && (
         <p className="mt-3 text-xs text-sub" data-testid={`daily-${t.id}`}>
           Modeled daily cost today, from list prices in the model registry: input {t.dailyCost.inputTokens.toLocaleString('en-US')} tokens at{' '}
-          {rate(t.dailyCost.inputPer1m)} = {money2(t.dailyCost.inputCost)}; output {t.dailyCost.outputTokens.toLocaleString('en-US')} tokens at{' '}
-          {rate(t.dailyCost.outputPer1m)} = {money2(t.dailyCost.outputCost)}; cached {t.dailyCost.cachedTokens.toLocaleString('en-US')} tokens at{' '}
-          {rate(t.dailyCost.cachedPer1m)} = {money2(t.dailyCost.cachedCost)}; infrastructure overhead, 5% of the input and output cost ={' '}
-          {money2(t.dailyCost.compute)}. Total, rounded to the cent: <span className="font-mono text-txt">{money2(t.dailyCost.dailySpend)}</span>. Value / cost
+          {rate(t.dailyCost.inputPer1m)} = {money4(t.dailyCost.inputCost)}; output {t.dailyCost.outputTokens.toLocaleString('en-US')} tokens at{' '}
+          {rate(t.dailyCost.outputPer1m)} = {money4(t.dailyCost.outputCost)}; cached {t.dailyCost.cachedTokens.toLocaleString('en-US')} tokens at{' '}
+          {rate(t.dailyCost.cachedPer1m)} = {money4(t.dailyCost.cachedCost)}; infrastructure overhead, 5% of the input and output cost ={' '}
+          {money4(t.dailyCost.compute)}. Total, the sum rounded to the cent: <span className="font-mono text-txt">{money2(t.dailyCost.dailySpend)}</span>. Value / cost
           uses the stated monthly cost above, not this daily figure.
         </p>
       )}

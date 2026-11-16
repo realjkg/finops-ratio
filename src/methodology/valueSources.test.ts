@@ -67,7 +67,8 @@ describe('value sources: every figure ties back to its source record', () => {
     ['quality_floor_pass_rate', (w: Workload) => { w.value.quality_floor_pass_rate = 0.581; }, /^Quality-floor pass rate: 58\.1% in use, 58% in the source record\.$/],
     ['monthly_spend', (w: Workload) => { w.costs.monthly_spend = 4200.01; }, /^Modeled monthly cost: \$4,200\.01 in use, \$4,200 in the source record\.$/],
     ['daily_spend', (w: Workload) => { w.costs.daily_spend += 0.01; }, /^Modeled daily cost: .* in use, .* in the source record\.$/],
-    ['total_value', (w: Workload) => { w.value.total_value = 1; }, /^Stored estimated value: \$1 in use, -?\$-?702 in the source record\.$/],
+    ['total_value', (w: Workload) => { w.value.total_value = 1; }, /^Stored estimated value: \$1 in use, -\$702 in the source record\.$/],
+    ['value_ratio by 0.01', (w: Workload) => { w.value.value_ratio = -0.18; }, /^Stored Value \/ cost: -0\.18 in use, -0\.17 from the inputs\.$/],
     ['value_ratio', (w: Workload) => { w.value.value_ratio = 99; }, /^Stored Value \/ cost: 99 in use, -0\.17 from the inputs\.$/],
   ])('flags a change to %s, however small', (_field, change, message) => {
     const w = fraud();
@@ -82,7 +83,11 @@ describe('value sources: every figure ties back to its source record', () => {
     w.value.revenue_protected += 0.004;
     const t = traceWorkload(w);
     expect(t.check.matches).toBe(true);
-    expect(t.check.checked).toMatch(/to the cent$/);
+    expect(t.check.checked).toMatch(/to the cent/);
+    expect(t.check.checked).toContain('stored Value / cost against the inputs, to 0.01');
+    const free = fraud();
+    free.costs.monthly_spend = 0;
+    expect(traceWorkload(free).check.checked).not.toContain('Value / cost');
   });
 
   it('an input with no evidence mark counts as assumed and is flagged as unmarked; marks are read, not hard-coded', () => {

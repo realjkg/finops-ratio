@@ -101,6 +101,8 @@ const MAY_READ_STORED = new Set([
   'src/costsource/normalize.ts',
   'src/costsource/seed.ts',
   'src/simulation/server/workflow.ts',
+  // The source check compares the stored figure with the derivation and shows it only when they differ.
+  'src/methodology/valueSources.ts',
 ]);
 
 function walk(dir: string, out: string[] = []): string[] {

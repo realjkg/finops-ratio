@@ -40,13 +40,19 @@ const text = (el: Element | null) => el?.textContent ?? '';
 describe('methodology page in each mode', () => {
   it('demo: every workload matches, the evidence counts come from the data, and the portfolio figure is shown', () => {
     const page = mount(<Methodology />);
-    expect(text(page.querySelector('[data-testid="methodology-source-check"]'))).toContain(`Dataset check: ${WORKLOADS.length} of ${WORKLOADS.length} workloads match, to the cent.`);
+    expect(text(page.querySelector('[data-testid="methodology-source-check"]'))).toContain(`Dataset check: ${WORKLOADS.length} of ${WORKLOADS.length} workloads match (amounts to the cent, ratios to 0.01).`);
     const inputs = traceAll(WORKLOADS).flatMap((t) => t.inputs.filter((i) => i.evidence !== null)).length;
     expect(text(page.querySelector('[data-testid="methodology-evidence"]'))).toContain(`${inputs} of the ${inputs} value inputs on this page`);
     const value = WORKLOADS.reduce((s, w) => s + w.value.total_value, 0);
     const cost = WORKLOADS.reduce((s, w) => s + w.costs.monthly_spend, 0);
-    expect(text(page.querySelector('[data-testid="methodology-portfolio"]'))).toContain(`${(value / cost).toFixed(3)}×`);
-    expect(text(page.querySelector('[data-testid="daily-wl-support"]'))).toMatch(/infrastructure overhead, 5% of the input and output cost = \$[\d.]+\. Total, rounded to the cent: \$[\d.]+/);
+    expect(text(page.querySelector('[data-testid="methodology-portfolio"]'))).toContain(`${(value / cost).toFixed(3)}\u00d7 (shown as ${(value / cost).toFixed(1)}\u00d7)`);
+    expect(text(page)).toContain('adjusted value \u00f7 cost for the same month');
+    // The exact line, so each component is pinned and the four-decimal components reproduce the total by hand.
+    const d = traceAll(WORKLOADS).find((t) => t.id === 'wl-support')!.dailyCost!;
+    const daily = text(page.querySelector('[data-testid="daily-wl-support"]'));
+    for (const v of [d.inputCost, d.outputCost, d.cachedCost, d.compute]) expect(daily).toContain(`$${v.toFixed(4)}`);
+    expect(daily).toContain(`Total, the sum rounded to the cent: $${d.dailySpend.toFixed(2)}`);
+    expect(daily.indexOf(`$${d.cachedCost.toFixed(4)}`)).toBeLessThan(daily.indexOf(`= $${d.compute.toFixed(4)}`));
   });
 
   it('a store that no longer matches its source shows the count and the difference, in the example', () => {
@@ -82,8 +88,11 @@ describe('methodology page in each mode', () => {
     const status = text(page.querySelector('[data-testid="methodology-data-status"]'));
     expect(status).toContain('You are in a simulation workspace.');
     expect(status).toContain('The periods differ');
-    expect(status).toContain(`Source check: ${state.workloads.length} of ${state.workloads.length} workloads match, to the cent.`);
+    expect(status).toContain(`Source check: ${state.workloads.length} of ${state.workloads.length} workloads match (amounts to the cent, ratios to 0.01).`);
+    expect(text(page)).toContain('adjusted value \u00f7 cost (here, a whole month of value over cost recorded to date)');
+    const fraudCost = state.workloads.find((w) => w.id === 'wl-fraud')!.costs.monthly_spend;
     expect(text(page.querySelector('[data-testid="input-wl-fraud-monthly_cost"]'))).toMatch(/Recorded cost, month to date.*Sum of 25 cost postings recorded in this workspace/);
+    expect(text(page.querySelector('[data-testid="input-wl-fraud-monthly_cost"]'))).toContain(`$${fraudCost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
     expect(text(page.querySelector('[data-testid="calc-example-wl-fraud"]'))).toContain('Workspace record wl-fraud');
     expect(text(page.querySelector('[data-testid="input-wl-fraud-revenue_protected"]'))).toContain('Copied into the workspace when it was created.');
     expect(page.querySelector('[data-testid="daily-wl-fraud"]')).toBeNull();
