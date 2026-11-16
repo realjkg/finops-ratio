@@ -55,7 +55,7 @@ export default function Demo() {
                 This is a demo: the figures are illustrative, every visitor sees the same scenario, and no cloud credentials or API key are needed.
               </p>
               <p className="mt-2 leading-5">
-                Every figure traces to a dataset record.{' '}
+                Each workload&apos;s figures trace to a dataset record.{' '}
                 <Link href="/methodology" className="font-medium text-txt underline underline-offset-2">
                   See how Value / cost is calculated
                 </Link>

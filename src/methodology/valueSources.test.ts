@@ -5,6 +5,7 @@ import { workloadValueRatio } from '@/lib/valueRatio';
 import { buildFindings } from '@/findings/findingsModel';
 import { seedWorkspace } from '@/simulation/server/workflow';
 import { methodologyHref, traceAll, traceWorkload } from './valueSources';
+import type { Workload } from '@/types';
 
 const fraud = () => structuredClone(WORKLOADS.find((w) => w.id === 'wl-fraud')!);
 
@@ -58,16 +59,69 @@ describe('value sources: every figure ties back to its source record', () => {
     }
   });
 
-  it('flags a value that no longer matches its dataset record instead of hiding it', () => {
+  // One case per compared field, each a sub-dollar (or sub-percent) change, so every comparison is pinned.
+  it.each([
+    ['revenue_protected', (w: Workload) => { w.value.revenue_protected += 0.01; }, /^Protected revenue: \$4,704\.01 in use, \$4,704 in the source record\.$/],
+    ['cost_avoided', (w: Workload) => { w.value.cost_avoided -= 0.01; }, /^Avoided cost: \$2,015\.99 in use, \$2,016 in the source record\.$/],
+    ['harm_from_misses', (w: Workload) => { w.value.harm_from_misses = 4600.01; }, /^Harm from misses: \$4,600\.01 in use, \$4,600 in the source record\.$/],
+    ['quality_floor_pass_rate', (w: Workload) => { w.value.quality_floor_pass_rate = 0.581; }, /^Quality-floor pass rate: 58\.1% in use, 58% in the source record\.$/],
+    ['monthly_spend', (w: Workload) => { w.costs.monthly_spend = 4200.01; }, /^Modeled monthly cost: \$4,200\.01 in use, \$4,200 in the source record\.$/],
+    ['daily_spend', (w: Workload) => { w.costs.daily_spend += 0.01; }, /^Modeled daily cost: .* in use, .* in the source record\.$/],
+    ['total_value', (w: Workload) => { w.value.total_value = 1; }, /^Stored estimated value: \$1 in use, -?\$-?702 in the source record\.$/],
+    ['value_ratio', (w: Workload) => { w.value.value_ratio = 99; }, /^Stored Value \/ cost: 99 in use, -0\.17 from the inputs\.$/],
+  ])('flags a change to %s, however small', (_field, change, message) => {
     const w = fraud();
-    w.value.harm_from_misses = 100;
-    w.costs.monthly_spend = 5000;
+    change(w);
     const t = traceWorkload(w);
     expect(t.check.matches).toBe(false);
-    expect(t.check.differences).toEqual([
-      'Harm from misses: $100 in use, $4,600 in the source record.',
-      'Modeled monthly cost: $5,000 in use, $4,200 in the source record.',
-    ]);
+    expect(t.check.differences.some((d) => message.test(d)), t.check.differences.join(' | ')).toBe(true);
+  });
+
+  it('treats a sub-cent difference as a match, and says the check is to the cent', () => {
+    const w = fraud();
+    w.value.revenue_protected += 0.004;
+    const t = traceWorkload(w);
+    expect(t.check.matches).toBe(true);
+    expect(t.check.checked).toMatch(/to the cent$/);
+  });
+
+  it('an input with no evidence mark counts as assumed and is flagged as unmarked; marks are read, not hard-coded', () => {
+    const w = fraud();
+    delete (w.value as { evidence?: unknown }).evidence;
+    const unmarked = traceWorkload(w);
+    for (const i of unmarked.inputs.filter((x) => x.key !== 'monthly_cost')) expect([i.key, i.evidence, i.unmarked]).toEqual([i.key, 'assumed', true]);
+    const measured = fraud();
+    measured.value.evidence = { revenue_protected: 'measured', cost_avoided: 'measured', harm_from_misses: 'measured', quality_floor_pass_rate: 'measured' };
+    const t = traceWorkload(measured);
+    expect(t.inputs.filter((x) => x.key !== 'monthly_cost').map((i) => i.evidence)).toEqual(['measured', 'measured', 'measured', 'measured']);
+    expect(t.headlineEvidence).toBe('measured');
+  });
+
+  it('describes a missing pass rate and missing harm honestly', () => {
+    const w = fraud();
+    delete w.value.quality_floor_pass_rate;
+    delete (w.value as { harm_from_misses?: number }).harm_from_misses;
+    const t = traceWorkload(w);
+    expect(t.steps[1].formula).toBe('gross value (no pass rate recorded, so all outputs count)');
+    expect(t.inputs.find((i) => i.key === 'harm_from_misses')!.origin).toBe('Not recorded, so counted as $0.');
+    expect(traceWorkload(fraud()).steps[1].formula).toBe('gross value \u00d7 quality-floor pass rate');
+  });
+
+  it('labels modeled and recorded cost correctly', () => {
+    expect(traceWorkload(fraud()).inputs.find((i) => i.key === 'monthly_cost')!.label).toBe('Modeled monthly cost');
+    const s = seedWorkspace();
+    const w = s.workloads.find((x) => x.id === 'wl-fraud')!;
+    expect(traceWorkload(w, s.ledger).inputs.find((i) => i.key === 'monthly_cost')!.label).toBe('Recorded cost, month to date');
+    expect(traceWorkload(w, []).inputs.find((i) => i.key === 'monthly_cost')!.origin).toBe('No cost postings are recorded in this workspace for this workload.');
+  });
+
+  it('the modeled daily cost reproduces by hand from its components', () => {
+    for (const w of WORKLOADS) {
+      const d = traceWorkload(w).dailyCost!;
+      expect(d.compute).toBeCloseTo((d.inputCost + d.outputCost) * 0.05, 12);
+      expect(Math.round((d.inputCost + d.outputCost + d.cachedCost + d.compute) * 100) / 100).toBe(d.dailySpend);
+      expect(d.dailySpend).toBe(w.costs.daily_spend);
+    }
   });
 
   it('flags a missing pass rate and a workload with no dataset record', () => {

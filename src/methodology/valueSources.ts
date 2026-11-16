@@ -116,7 +116,7 @@ export function traceWorkload(w: Workload, ledger?: readonly LedgerPosting[]): W
   const mark = (k: ValueInput) => (isEvidenceStatus(ev?.[k]) ? { evidence: ev![k] as EvidenceStatus, unmarked: false } : { evidence: 'assumed' as const, unmarked: true });
 
   const record = seed ? `dataset record ${seed.id}` : 'this workload record';
-  const copied = origin === 'simulation_workspace' ? ' Copied into the workspace when it was created; not edited there.' : '';
+  const copied = origin === 'simulation_workspace' ? ' Copied into the workspace when it was created.' : '';
   const split = seed ? seedValueSplit(seed) : null;
   const inputs: InputTrace[] = [
     {
@@ -148,7 +148,9 @@ export function traceWorkload(w: Workload, ledger?: readonly LedgerPosting[]): W
   inputs.push({
     key: 'monthly_cost', label: costSource === 'recorded' ? 'Recorded cost, month to date' : 'Modeled monthly cost', value: w.costs.monthly_spend, format: 'usd', evidence: null, unmarked: false,
     origin: postings
-      ? `Sum of ${postings.count} cost postings recorded in this workspace (${postings.sources.join(', ')}).`
+      ? postings.count > 0
+        ? `Sum of ${postings.count} cost postings recorded in this workspace (${postings.sources.join(', ')}).`
+        : 'No cost postings are recorded in this workspace for this workload.'
       : seed
         ? `Stated in ${record} as a monthly run rate. It is not derived from the token counts below, and it is not a bill.`
         : 'Stated on this workload record. It is not a bill.',
@@ -185,6 +187,16 @@ export function checkAgainstSource(
     if (inUse === undefined || cents(inUse) !== cents(fromSource)) differences.push(`${what}: ${inUse === undefined ? 'missing' : fmt(inUse)} in use, ${fmt(fromSource)} in the source record.`);
   };
   const checked: string[] = [];
+  // The stored headline figures many screens read directly must equal the derivation from the inputs.
+  const derived = deriveWorkloadValue(w);
+  compare('Stored estimated value', w.value.total_value, Math.round(derived.total_value), usd);
+  if (w.costs.monthly_spend > 0) {
+    const expectedRatio = Math.round(derived.total_value) / w.costs.monthly_spend;
+    if (!Number.isFinite(w.value.value_ratio) || Math.abs(w.value.value_ratio - expectedRatio) >= 0.005) {
+      differences.push(`Stored Value / cost: ${w.value.value_ratio} in use, ${expectedRatio.toFixed(2)} from the inputs.`);
+    }
+  }
+  checked.push('stored estimated value and Value / cost against the inputs');
   if (seed) {
     const split = seedValueSplit(seed);
     compare('Protected revenue', w.value.revenue_protected, split.revenueProtected, usd);
@@ -206,7 +218,7 @@ export function checkAgainstSource(
     if (dailyCost) compare('Modeled daily cost', w.costs.daily_spend, dailyCost.dailySpend, usd);
     checked.push(`cost against dataset record ${seed.id}`);
   }
-  return { matches: differences.length === 0, differences, checked: checked.join('; ') };
+  return { matches: differences.length === 0, differences, checked: `${checked.join('; ')}, to the cent` };
 }
 
 /** Trace every workload in display order. */

@@ -19,12 +19,14 @@ import {
 } from '@/methodology/valueSources';
 import { useStore } from '@/store/useStore';
 
-// What each label means on this page (the demo has no measured inputs; every one is assumed).
-const EVIDENCE_LINES: ReadonlyArray<readonly [EvidenceStatus, string]> = [
-  ['measured', 'Recorded from a source of record and checked independently. No demo input is measured.'],
-  ['projected', 'A forward-looking estimate that has not been checked against results yet.'],
-  ['assumed', 'A stated assumption. Every value input in the demo is assumed.'],
-];
+// What each label means. The count of inputs carrying it is computed from the data shown, never typed.
+const EVIDENCE_TEXT: Record<EvidenceStatus, string> = {
+  measured: 'Recorded from a source of record and checked independently.',
+  projected: 'A forward-looking estimate that has not been checked against results yet.',
+  assumed: 'A stated assumption, shown in the app as Estimated value. An input with no label counts here too.',
+};
+const money2 = (n: number) => `$${n.toFixed(2)}`;
+const rate = (n: number) => `$${n} per million`;
 
 const fmtInput = (i: InputTrace) => (i.format === 'pct' ? formatPct(i.value, 1) : formatUSD(i.value));
 const fmtStep = (s: StepTrace) => (s.format === 'ratio' ? (s.value === null ? 'N/A' : `${s.value.toFixed(3)}× (shown as ${formatRatio(s.value)})`) : formatUSD(s.value ?? 0));
@@ -35,6 +37,13 @@ export default function Methodology() {
   const traces = useMemo(() => traceAll(workloads, ledger), [workloads, ledger]);
   const inWorkspace = ledger !== undefined;
   const matching = traces.filter((t) => t.check.matches).length;
+  const valueInputs = traces.flatMap((t) => t.inputs.filter((i) => i.evidence !== null));
+  const countOf = (s: EvidenceStatus) => valueInputs.filter((i) => i.evidence === s).length;
+  const portfolio = useMemo(() => {
+    const value = workloads.reduce((sum, w) => sum + w.value.total_value, 0);
+    const cost = workloads.reduce((sum, w) => sum + w.costs.monthly_spend, 0);
+    return { value, cost, ratio: cost > 0 ? value / cost : null };
+  }, [workloads]);
 
   return (
     <div className="h-full overflow-y-auto bg-void font-body text-txt">
@@ -42,8 +51,9 @@ export default function Methodology() {
         <header>
           <h1 className="text-lg font-bold text-txt">How Value / cost is calculated</h1>
           <p className="mt-1 max-w-3xl text-sm text-sub">
-            Every Value / cost figure in the app comes from the inputs on this page and one formula. The page reads the same records and runs the
-            same calculation as Value review, so the numbers here match the rest of the app.
+            Each workload&apos;s Value / cost comes from the inputs on this page and one formula, and the portfolio figure is built from those. The
+            page reads the same records and runs the same calculation as Value review, so its numbers match. The Total cost of AI view on a
+            workload adds estimated implementation, oversight and labor costs; that estimate is explained on the workload, not here.
           </p>
         </header>
 
@@ -62,8 +72,14 @@ export default function Methodology() {
             </p>
           )}
           <p className="mt-2 text-sub" data-testid="methodology-source-check">
-            Source check: {matching} of {traces.length} workloads match their source records.
+            {inWorkspace ? 'Source check' : 'Dataset check'}: {matching} of {traces.length} workloads match, to the cent.
             {matching < traces.length && ' The differences are listed in each worked example below.'}
+          </p>
+          <p className="mt-1 text-xs text-sub">
+            {inWorkspace
+              ? 'Cost is checked against the sum of the workspace\u2019s cost postings, and value inputs against the dataset record they were copied from.'
+              : 'In the demo, this confirms that the figures in use match the dataset file and that each stored headline equals what its inputs give. It does not show that the dataset itself is right: the dataset is illustrative.'}
+            {' '}Every workload is also checked so that its stored estimated value and Value / cost equal the calculation from its inputs.
           </p>
         </section>
 
@@ -78,6 +94,15 @@ export default function Methodology() {
               {VALUE_MINIMUM}×. Displayed figures are rounded to one decimal; the unrounded figure is in each example below and in View calculation.
             </li>
           </ol>
+        </section>
+
+        <section aria-labelledby="portfolio">
+          <h2 id="portfolio" className="text-base font-bold text-txt">Portfolio Value / cost</h2>
+          <p className="mt-2 text-sm text-sub" data-testid="methodology-portfolio">
+            The portfolio figure adds up each workload&apos;s estimated value (rounded to the dollar) and divides by the total cost. It is not an
+            average of the workload ratios. Now: {formatUSD(portfolio.value)} ÷ {formatUSD(portfolio.cost)} ={' '}
+            <span className="font-mono text-txt">{portfolio.ratio === null ? 'N/A' : `${portfolio.ratio.toFixed(3)}×`}</span>.
+          </p>
         </section>
 
         <section aria-labelledby="sources">
@@ -103,12 +128,15 @@ export default function Methodology() {
 
         <section aria-labelledby="evidence">
           <h2 id="evidence" className="text-base font-bold text-txt">Evidence labels</h2>
-          <ul className="mt-2 space-y-1 text-sm text-sub">
-            {EVIDENCE_LINES.map(([s, text]) => (
-              <li key={s}><span className="font-medium" style={{ color: EVIDENCE_META[s].color }}>{EVIDENCE_META[s].label}.</span> {text}</li>
+          <ul className="mt-2 space-y-1 text-sm text-sub" data-testid="methodology-evidence">
+            {(['measured', 'projected', 'assumed'] as const).map((s) => (
+              <li key={s}>
+                <span className="font-medium" style={{ color: EVIDENCE_META[s].color }}>{EVIDENCE_META[s].label}.</span> {EVIDENCE_TEXT[s]}{' '}
+                {countOf(s)} of the {valueInputs.length} value inputs on this page.
+              </li>
             ))}
           </ul>
-          <p className="mt-2 text-sm text-sub">A Value / cost figure carries the weakest label of its value inputs. An input with no label counts as assumed.</p>
+          <p className="mt-2 text-sm text-sub">A Value / cost figure carries the weakest label of its value inputs.</p>
         </section>
 
         <section aria-labelledby="examples">
@@ -157,6 +185,7 @@ function WorkedExample({ t }: { t: WorkloadTrace }) {
 
       <table className="mt-3 w-full text-left text-xs">
         <caption className="sr-only">Calculation for {t.name}</caption>
+        <thead className="text-dim"><tr><th scope="col" className="py-1 pr-3 font-medium">Step</th><th scope="col" className="py-1 pr-3 font-medium">Formula</th><th scope="col" className="py-1 text-right font-medium">Result</th></tr></thead>
         <tbody className="divide-y divide-edge">
           {t.steps.map((s) => (
             <tr key={s.label} data-testid={`step-${t.id}-${s.label}`}>
@@ -169,20 +198,21 @@ function WorkedExample({ t }: { t: WorkloadTrace }) {
       </table>
 
       {t.dailyCost && (
-        <p className="mt-3 text-xs text-sub">
-          Modeled daily cost today: {t.dailyCost.inputTokens.toLocaleString('en-US')} input tokens at ${t.dailyCost.inputPer1m} per million,{' '}
-          {t.dailyCost.outputTokens.toLocaleString('en-US')} output tokens at ${t.dailyCost.outputPer1m} per million, and{' '}
-          {t.dailyCost.cachedTokens.toLocaleString('en-US')} cached tokens at ${t.dailyCost.cachedPer1m} per million, plus 5% infrastructure overhead ={' '}
-          <span className="font-mono text-txt">{formatUSD(t.dailyCost.dailySpend)}</span>. Model prices are list prices from the model registry. Value / cost
+        <p className="mt-3 text-xs text-sub" data-testid={`daily-${t.id}`}>
+          Modeled daily cost today, from list prices in the model registry: input {t.dailyCost.inputTokens.toLocaleString('en-US')} tokens at{' '}
+          {rate(t.dailyCost.inputPer1m)} = {money2(t.dailyCost.inputCost)}; output {t.dailyCost.outputTokens.toLocaleString('en-US')} tokens at{' '}
+          {rate(t.dailyCost.outputPer1m)} = {money2(t.dailyCost.outputCost)}; cached {t.dailyCost.cachedTokens.toLocaleString('en-US')} tokens at{' '}
+          {rate(t.dailyCost.cachedPer1m)} = {money2(t.dailyCost.cachedCost)}; infrastructure overhead, 5% of the input and output cost ={' '}
+          {money2(t.dailyCost.compute)}. Total, rounded to the cent: <span className="font-mono text-txt">{money2(t.dailyCost.dailySpend)}</span>. Value / cost
           uses the stated monthly cost above, not this daily figure.
         </p>
       )}
 
       <p className="mt-2 text-xs" data-testid={`check-${t.id}`}>
         {t.check.matches ? (
-          <span className="text-sub">Source check passed: {t.check.checked}.</span>
+          <span className="text-sub">Check passed: {t.check.checked}.</span>
         ) : (
-          <span className="text-cost">Source check found differences: {t.check.differences.join(' ')}</span>
+          <span className="text-cost">Check found differences: {t.check.differences.join(' ')}</span>
         )}
       </p>
     </section>
