@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { URL, fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const lock = JSON.parse(readFileSync(fileURLToPath(new URL('../../package-lock.json', import.meta.url)), 'utf8'));
