@@ -236,15 +236,38 @@ describe('the response says where the context came from', () => {
     res.setHeader = ((k: string, v: string) => { res.headers[k.toLowerCase()] = String(v); }) as never;
     return res;
   }
-  it('always server; a legacy context is flagged as deprecated', async () => {
-    for (const [body, deprecated] of [[{ messages: ask('hi') }, false], [{ messages: ask('hi'), context: forged() }, true]] as const) {
+  it('always server; a legacy context is named as ignored, and the endpoint is not marked deprecated', async () => {
+    for (const [body, ignored] of [[{ messages: ask('hi') }, false], [{ messages: ask('hi'), context: forged() }, true]] as const) {
       const res = withHeaders();
       await handler({ method: 'POST', url: '/api/v1/ai/chat', headers: {}, body } as unknown as NextApiRequest, res as unknown as NextApiResponse);
       expect(res.statusCode).toBe(200);
       expect(res.headers['x-ratio-context-source']).toBe('server');
-      // RFC 9745: a structured date (the day this route stopped reading the client context).
-      expect(res.headers.deprecation).toBe(deprecated ? '@1794614400' : undefined);
+      expect(res.headers['x-ratio-ignored-fields']).toBe(ignored ? 'context' : undefined);
+      // The endpoint is current: no RFC 9745 Deprecation, no deprecation Link.
+      expect(res.headers.deprecation).toBeUndefined();
+      expect(res.headers.link).toBeUndefined();
     }
+  });
+
+  it.each([
+    ['a JSON null body', null, 400, undefined],
+    ['an array body', [], 400, undefined],
+    ['a string body', 'x', 400, undefined],
+    ['context: null (rejected, not ignored)', { messages: ask('hi'), context: null }, 400, undefined],
+    ['context: an array (rejected, not ignored)', { messages: ask('hi'), context: [] }, 400, undefined],
+    ['a forged context with no focus', { messages: ask('hi'), context: { initiatives: [], summary: {} } }, 200, 'context'],
+    ['a forged context whose focus is overridden by the top-level field', { messages: ask('hi'), focusInitiativeId: null, context: { focusInitiativeId: 'wl-support', initiatives: [] } }, 200, 'context'],
+    ['a legacy focus that is honored, plus other fields', { messages: ask('hi'), context: { focusInitiativeId: 'wl-support', initiatives: [], summary: {} } }, 200, 'context.initiatives, context.summary'],
+    ['a legacy focus alone (nothing ignored)', { messages: ask('hi'), context: { focusInitiativeId: 'wl-support' } }, 200, undefined],
+    ['an unknown legacy focus (ignored with the rest)', { messages: ask('hi'), context: { focusInitiativeId: 'wl-nope', initiatives: [] } }, 200, 'context'],
+    ['a key that is not an identifier is never echoed', { messages: ask('hi'), context: { focusInitiativeId: 'wl-support', 'x\r\nSet-Cookie: a=b': 1 } }, 200, 'context.*'],
+  ])('%s', async (_n, body, status, ignored) => {
+    const res = withHeaders();
+    await handler({ method: 'POST', url: '/api/v1/ai/chat', headers: {}, body } as unknown as NextApiRequest, res as unknown as NextApiResponse);
+    expect(res.statusCode).toBe(status);
+    expect(res.headers['x-ratio-context-source']).toBe('server');
+    expect(res.headers['x-ratio-ignored-fields']).toBe(ignored);
+    expect(res.headers.deprecation).toBeUndefined();
   });
 
   it('a rejected request carries the same headers (400 legacy body, 405 method)', async () => {
@@ -252,12 +275,13 @@ describe('the response says where the context came from', () => {
     await handler({ method: 'POST', url: '/api/v1/ai/chat', headers: {}, body: { messages: [], context: forged() } } as unknown as NextApiRequest, bad as unknown as NextApiResponse);
     expect(bad.statusCode).toBe(400);
     expect(bad.headers['x-ratio-context-source']).toBe('server');
-    expect(bad.headers.deprecation).toBe('@1794614400');
+    expect(bad.headers['x-ratio-ignored-fields']).toBe('context');
+    expect(bad.headers.deprecation).toBeUndefined();
     const wrongMethod = withHeaders();
     await handler({ method: 'GET', url: '/api/v1/ai/chat', headers: {}, body: undefined } as unknown as NextApiRequest, wrongMethod as unknown as NextApiResponse);
     expect(wrongMethod.statusCode).toBe(405);
     expect(wrongMethod.headers['x-ratio-context-source']).toBe('server');
-    expect(wrongMethod.headers.deprecation).toBeUndefined();
+    expect(wrongMethod.headers['x-ratio-ignored-fields']).toBeUndefined();
   });
 });
 

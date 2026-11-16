@@ -15,7 +15,7 @@ import { FRANK } from '@/agent-workflows/frank';
 // and derives value, Value / cost and evidence status itself; the same server-built
 // context feeds the mock and every live provider. A legacy `context` in the body is
 // accepted for compatibility, but only its focus id is read, and the response then
-// carries a `Deprecation` header (RFC 9745). An unknown legacy focus id is ignored. Known limits, by design: (1) the records are the
+// names the parts of it that were ignored in `X-Ratio-Ignored-Fields`. An unknown legacy focus id is ignored. Known limits, by design: (1) the records are the
 // bundled demo dataset, and this route has a single tenant (one gateway token), so
 // there is no per-caller record scope yet; (2) unsaved edits made in the browser
 // (governance gates, demand shape) are not visible to a live answer, because the
@@ -77,8 +77,30 @@ const KNOWN_FOCUS_IDS: ReadonlySet<string> = (() => {
   return new Set([...c.initiatives.map((i) => i.id), ...(c.omitted ?? []).map((o) => o.id), ...WORKLOADS.map((w) => w.id)]);
 })();
 
-/** RFC 9745 `Deprecation` value: the date (2026-11-14) this route stopped reading the client context. */
-export const CONTEXT_DEPRECATED_AT = '@1794614400';
+/**
+ * Lists, comma-separated, the request fields this route accepted but did not use: `context` when none
+ * of it was used, or `context.<key>` for each other key when its legacy focus id was used (the focus id
+ * itself is then not listed, because it was honored). Absent when nothing was ignored. Keys a client
+ * sends are listed only if they are plain identifiers (up to 64 characters; at most 20 listed); any
+ * other key is reported once as `context.*`, so no client text is echoed into a header. Field-scoped on
+ * purpose: RFC 9745 `Deprecation` would mark the whole endpoint as deprecated, and it is not.
+ */
+export const IGNORED_FIELDS_HEADER = 'X-Ratio-Ignored-Fields';
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
+
+/** The header value for a body, or undefined when nothing it sent was ignored (see IGNORED_FIELDS_HEADER). */
+export function ignoredFields(body: unknown): string | undefined {
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return undefined;
+  const ctx = (body as Record<string, unknown>).context;
+  // Only a plain-object context is accepted (and so ignored); any other shape is rejected with a 400.
+  if (typeof ctx !== 'object' || ctx === null || Array.isArray(ctx)) return undefined;
+  const legacyFocusUsed = !('focusInitiativeId' in body) && isKnownFocus((ctx as Record<string, unknown>).focusInitiativeId);
+  if (!legacyFocusUsed) return 'context';
+  const others = Object.keys(ctx).filter((k) => k !== 'focusInitiativeId');
+  const named = others.filter((k) => IDENTIFIER.test(k)).slice(0, 20).map((k) => `context.${k}`);
+  if (named.length < others.length) named.push('context.*');
+  return named.length ? named.join(', ') : undefined;
+}
 
 const isKnownFocus = (raw: unknown): raw is string =>
   typeof raw === 'string' && raw.length <= MAX_FOCUS_ID && KNOWN_FOCUS_IDS.has(raw);
@@ -495,16 +517,12 @@ const guarded = withGateway(chatHandler, {
  * carries them, its rejections (400, 401, 405, 413, 429) included: the context is always the
  * server's, and a legacy client sending its own context is told it was not used. Next's own
  * body-parser errors (invalid JSON, over 1 MB) are sent before this runs and carry neither.
- * `Deprecation` (RFC 9745) is scoped to the resource; the `Link` says only the request's
- * `context` field is deprecated, not the endpoint.
+ * The ignored-fields header names the request field, not the endpoint: `/api/v1/ai/chat` is current.
  */
 export default async function chatRoute(req: NextApiRequest, res: NextApiResponse): Promise<void> {
   res.setHeader('X-Ratio-Context-Source', 'server');
-  const body: unknown = req.body;
-  if (typeof body === 'object' && body !== null && !Array.isArray(body) && (body as Record<string, unknown>).context !== undefined) {
-    res.setHeader('Deprecation', CONTEXT_DEPRECATED_AT);
-    res.setHeader('Link', '<https://github.com/realjkg/finops-ratio/blob/main/docs/design/value-derivation/VALUE-DERIVATION.md>; rel="deprecation"; title="request field context is ignored"');
-  }
+  const ignored = ignoredFields(req.body);
+  if (ignored) res.setHeader(IGNORED_FIELDS_HEADER, ignored);
   await guarded(req, res);
 }
 
