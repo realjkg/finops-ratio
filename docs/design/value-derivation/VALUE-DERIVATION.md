@@ -147,3 +147,7 @@ These make today's figures accurate about what they are, without waiting for the
 6. Whether to do the §7 honesty fixes now as small, separate PRs.
 7. Whether this note becomes an ADR (it would add contracts: the unit-value register and value derivation records).
 8. Whether the two benefit terms of `V` (more output, cheaper output) replace today's per-event `validated_benefit` and the durable benefit claims, and how the two are reconciled during the change.
+
+## Related
+
+- [Project Value Model: KPI and outcome definitions](../value-model/KPI-DEFINITIONS.md) (Proposed) implements the configurable part of §3–§5.
