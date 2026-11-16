@@ -87,7 +87,7 @@ describe('the original business case cannot be bypassed', () => {
 describe('the result ledger and evaluation check what they are given', () => {
   it('a second first result for the same KPI, period and scope is refused; a stated recalculation is the only way', () => {
     const reg = published();
-    const ledger = new KpiResultLedger();
+    const ledger = new KpiResultLedger(TENANT);
     ledger.append(run(reg, verified(), 'r1'));
     expect(() => ledger.append(run(reg, [obs('acceptedInvoices', '48', 'invoice'), obs('reviewTime', '2', 'hour')], 'r2'))).toThrow(/already in force/);
     try { ledger.append(run(reg, verified(), 'r3')); } catch (e) { expect((e as ResultLedgerError).code).toBe('ALREADY_RECORDED'); }
@@ -96,7 +96,7 @@ describe('the result ledger and evaluation check what they are given', () => {
   it('a result changed after it was calculated is refused', () => {
     const reg = published();
     const tampered = { ...run(reg, verified()), quantity: '1.00' };
-    expect(() => new KpiResultLedger().append(tampered)).toThrow(/does not match its digest/);
+    expect(() => new KpiResultLedger(TENANT).append(tampered)).toThrow(/does not match its digest/);
   });
 
   it('a record whose definition no longer matches its digest is refused', () => {
@@ -117,7 +117,7 @@ describe('Copilot review on #202', () => {
   });
 
   it('an issued result cannot be changed through nested data, by the caller or by a reader', () => {
-    const ledger = new KpiResultLedger();
+    const ledger = new KpiResultLedger(TENANT);
     const mine = run(published(), verified());
     const issued = ledger.append(mine);
     const before = JSON.stringify(issued);
@@ -157,5 +157,34 @@ describe('Copilot review on #202', () => {
     const cmp = reg.expectedVsObserved(observed.caseId, '2026-11-01', '2026-11-30');
     expect([cmp.original?.valueToCost, cmp.observed?.valueToCost]).toEqual(['2.00', '2.00']);
     expect(cmp.varianceVsOriginal).toBe('-0.01');
+  });
+});
+
+describe('Copilot second review on #202', () => {
+  it('a ledger belongs to one tenant: another tenant cannot record into it or supersede its results', () => {
+    const ledger = new KpiResultLedger(TENANT);
+    const mine = ledger.append(run(published(), verified(), 'r1'));
+    const other = { ...invoiceKpi(), tenantId: 'tenant-other' };
+    const regOther = new KpiDefinitionRegistry('tenant-other');
+    regOther.createDraft(other, { ...sponsor }, AT);
+    regOther.validate('invoice-review-time', 1, sponsor, AT);
+    regOther.approve('invoice-review-time', 1, approver, 'kpi_approver', regOther.get('invoice-review-time', 1).digest, AT);
+    regOther.publish('invoice-review-time', 1, approver, AT);
+    const theirs = evaluateKpi({ record: regOther.published('invoice-review-time')!, observations: verified(), periodStart: '2026-10-01', periodEnd: '2026-10-31', scopeRef: 'bu-a', resultId: 'x1', calculatedAt: AT, calculatedBy: 'svc', supersedes: mine.resultId, supersedeReason: 'takeover' });
+    expect(() => ledger.append(theirs)).toThrow(/another tenant/);
+    expect(ledger.current('invoice-review-time', '2026-10-01', '2026-10-31', 'bu-a')?.resultId).toBe('r1');
+    // Their own ledger accepts their first result: tenants never collide.
+    expect(new KpiResultLedger('tenant-other').append(evaluateKpi({ record: regOther.published('invoice-review-time')!, observations: verified(), periodStart: '2026-10-01', periodEnd: '2026-10-31', scopeRef: 'bu-a', resultId: 'x2', calculatedAt: AT, calculatedBy: 'svc' })).resultId).toBe('x2');
+  });
+
+  it('a revision saved before the earlier version was approved still needs its rationale and lineage at approval', () => {
+    const reg = new ValueCaseRegistry(TENANT);
+    const d1 = reg.saveDraft(expectedCase(), sponsor).digest;
+    const d2 = reg.saveDraft({ ...expectedCase(), version: 2 }, sponsor).digest;
+    reg.approve('case-service-automation', 1, finance, d1, AT);
+    expect(() => reg.approve('case-service-automation', 2, finance, d2, AT)).toThrow(/rationale and basedOnVersion/);
+    expect(() => reg.saveDraft({ ...expectedCase(), version: 2, rationale: 'Revised.', basedOnVersion: 7 }, sponsor)).toThrow(/names an approved version/);
+    const d2c = reg.saveDraft({ ...expectedCase(), version: 2, rationale: 'Revised.', basedOnVersion: 1 }, sponsor).digest;
+    expect(reg.approve('case-service-automation', 2, finance, d2c, AT).status).toBe('approved');
   });
 });

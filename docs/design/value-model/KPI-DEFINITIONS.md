@@ -69,7 +69,7 @@ Before and after results can be compared when they use the same version, or a ne
   - `assumed`: a typed assumption (even when labeled a forecast) or an unverified value.
   - Another KPI's result (`kpi_result`) counts as `assumed` until results are resolved against the result ledger; the status a caller supplies with it is never used.
 - Evaluation refuses a definition record whose definition no longer matches its recorded digest.
-- The result ledger accepts one first result per KPI, period and scope; any later result must be a recalculation that supersedes it. It re-checks each result's digest, so a result changed after it was calculated is refused.
+- Each result ledger belongs to one tenant and refuses results from any other. It accepts one first result per KPI, period and scope; any later result must be a recalculation that supersedes it. It re-checks each result's digest, so a result changed after it was calculated is refused.
 - Every result records the definition version and digest, the formula-engine version, the inputs' sources and verification, and its own digest.
 - A recalculation is a **new** result that supersedes the old one and states why. The issued result stays readable exactly as issued, so a report always shows the number it was issued with. A result can be superseded only once.
 
@@ -87,7 +87,7 @@ The case refuses any field for a ratio, net benefit or evidence status: they are
 
 | Phase | Purpose | History rule |
 |---|---|---|
-| `expected` (before) | The investment case and later revised forecasts | The **first approved expected version is the original business case**. It is never edited or superseded. A revised forecast is a new version with a rationale, published beside it. |
+| `expected` (before) | The investment case and later revised forecasts | The **first approved expected version is the original business case**. It is never edited or superseded. A revised forecast is a new version with a rationale and a `basedOnVersion` naming an approved version, checked again at approval, published beside it. |
 | `observed` (after) | What happened in a period | A correction is a new approved version that supersedes the snapshot in force, with a reason. The issued snapshot is unchanged. |
 
 Published ratios are append-only **snapshots** (`value-ratio-snapshot/0-draft`) bound to the case version's digest. A snapshot's evidence status is the weakest term, and no snapshot is `measured` yet: an expected case is a forecast, and an observed case needs a counterfactual method and independent verification (VALUE-DERIVATION §4) that are not modeled. Both are capped at `projected`. The original business case must be published before any revised forecast of the same case. `expectedVsObserved` returns the original business case, the latest approved forecast and the observed result in force, and measures variance against the **original**, so a revised forecast cannot hide a shortfall. Today the original is the first approved expected version of the **case**, not of each period; whether it should be per period is an open decision (§7).

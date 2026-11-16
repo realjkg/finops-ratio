@@ -129,12 +129,12 @@ describe('KPI results', () => {
     expect(() => evaluateKpi({ ...base, record: draft })).toThrow(/published definition/);
     const s = evaluateKpi({ ...base, record: draft, mode: 'scenario' });
     expect(s.evidenceStatus).toBe('projected');
-    expect(() => new KpiResultLedger().append(s)).toThrow(/never recorded as official/);
+    expect(() => new KpiResultLedger(TENANT).append(s)).toThrow(/never recorded as official/);
   });
 
   it('a recalculation supersedes; the issued result stays exactly as issued', () => {
     const reg = publishedInvoiceKpi();
-    const ledger = new KpiResultLedger();
+    const ledger = new KpiResultLedger(TENANT);
     const first = ledger.append(evaluateKpi(args(reg, [obs('acceptedInvoices', '40', 'invoice'), obs('reviewTime', '2', 'hour')])));
     const snapshot = JSON.stringify(first);
     const corrected = recalculate(first, args(reg, [obs('acceptedInvoices', '48', 'invoice'), obs('reviewTime', '2', 'hour')], 'r2'), 'late-arriving invoices from the October batch');

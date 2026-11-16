@@ -208,9 +208,13 @@ export class ResultLedgerError extends Error {
 export class KpiResultLedger {
   private readonly results: KpiResult[] = [];
 
+  /** One ledger per tenant: results from any other tenant are refused, so tenants never collide or supersede each other. */
+  constructor(readonly tenantId: string) {}
+
   /** Records a first result, or a recalculation that names the result it supersedes and why. */
   append(r: KpiResult): KpiResult {
     if (r.mode !== 'official') throw new ResultLedgerError('SCENARIO', 'scenario results are previews and are never recorded as official');
+    if (r.tenantId !== this.tenantId) throw new ResultLedgerError('MISMATCH', 'result belongs to another tenant');
     if (this.results.some((x) => x.resultId === r.resultId)) throw new ResultLedgerError('DUPLICATE', 'result id already recorded');
     const { resultDigest, ...body } = r;
     if (digestOf(body) !== resultDigest) throw new ResultLedgerError('MISMATCH', 'the result does not match its digest; it was changed after it was calculated');
@@ -219,8 +223,8 @@ export class KpiResultLedger {
     }
     if (r.supersedes !== undefined) {
       const old = this.issued(r.supersedes);
-      if (old.definitionId !== r.definitionId || old.periodStart !== r.periodStart || old.periodEnd !== r.periodEnd || old.scopeRef !== r.scopeRef) {
-        throw new ResultLedgerError('MISMATCH', 'a recalculation must cover the same KPI, period and scope');
+      if (old.projectId !== r.projectId || old.definitionId !== r.definitionId || old.periodStart !== r.periodStart || old.periodEnd !== r.periodEnd || old.scopeRef !== r.scopeRef) {
+        throw new ResultLedgerError('MISMATCH', 'a recalculation must cover the same project, KPI, period and scope');
       }
       if (this.results.some((x) => x.supersedes === r.supersedes)) throw new ResultLedgerError('ALREADY_SUPERSEDED', 'that result was already superseded');
       if (!r.supersedeReason) throw new ResultLedgerError('MISMATCH', 'a recalculation states its reason');

@@ -224,6 +224,18 @@ export class ValueCaseRegistry {
     return this.versions(caseId).find((c) => c.isOriginalBusinessCase);
   }
 
+  /**
+   * A version that follows an approved version of the same phase and period is a revision: it states a
+   * rationale and a basedOnVersion that names one of those approved versions. Null when the rule holds.
+   */
+  private revisionProblem(cv: ValueCaseVersion): string | null {
+    const approvedSame = this.versions(cv.caseId).filter((c) => c.caseVersion.version < cv.version && c.status === 'approved' && c.caseVersion.phase === cv.phase && c.caseVersion.periodStart === cv.periodStart && c.caseVersion.periodEnd === cv.periodEnd);
+    if (!approvedSame.length) return null;
+    if (!cv.rationale || cv.basedOnVersion === undefined) return 'a revision of an approved version states a rationale and basedOnVersion';
+    if (!approvedSame.some((c) => c.caseVersion.version === cv.basedOnVersion)) return 'basedOnVersion names an approved version of the same phase and period';
+    return null;
+  }
+
   /** The sponsor saves (or re-saves) a draft version with their own inputs. */
   saveDraft(cv: ValueCaseVersion, sponsor: Actor): CaseRecord {
     if (!sponsor.roles.includes('project_sponsor')) throw new LifecycleError('FORBIDDEN', 'editing cost-to-value inputs needs project_sponsor');
@@ -234,8 +246,8 @@ export class ValueCaseRegistry {
     const prior = this.versions(cv.caseId).filter((c) => c.caseVersion.version < cv.version);
     if (!existing && prior.length && cv.version !== prior[prior.length - 1].caseVersion.version + 1) throw new LifecycleError('INVALID_STATE', 'versions are consecutive');
     if (!existing && !prior.length && cv.version !== 1) throw new LifecycleError('INVALID_STATE', 'a case starts at version 1');
-    const samePhase = prior.some((c) => c.status === 'approved' && c.caseVersion.phase === cv.phase && c.caseVersion.periodStart === cv.periodStart && c.caseVersion.periodEnd === cv.periodEnd);
-    if (samePhase && (!cv.rationale || cv.basedOnVersion === undefined)) throw new ValueCaseError('INVALID_CASE', ['a revision of an approved version states a rationale and basedOnVersion']);
+    const revision = this.revisionProblem(cv);
+    if (revision) throw new ValueCaseError('INVALID_CASE', [revision]);
     const c = checkValueCase(cv);
     if (!c.ok) throw new ValueCaseError('INVALID_CASE', c.problems);
     const frozen = deepFreeze(clone(cv));
@@ -249,6 +261,9 @@ export class ValueCaseRegistry {
     if (!approver.roles.includes('finance_approver')) throw new LifecycleError('FORBIDDEN', 'approving a value case needs finance_approver');
     if (approver.id === cur.sponsorId) throw new LifecycleError('SEPARATION_OF_DUTIES', 'the sponsor cannot approve their own value case');
     if (digest !== cur.digest) throw new LifecycleError('CONFLICT', 'the case changed since it was reviewed');
+    // Rechecked at approval: a draft saved before an earlier version was approved must still state its lineage.
+    const revision = this.revisionProblem(cur.caseVersion);
+    if (revision) throw new ValueCaseError('INVALID_CASE', [revision]);
     const isOriginal = cur.caseVersion.phase === 'expected' && !this.originalBusinessCase(caseId);
     return this.replace(deepFreeze({ ...cur, status: 'approved', approvedBy: approver.id, approvedAt: at, isOriginalBusinessCase: isOriginal }));
   }
