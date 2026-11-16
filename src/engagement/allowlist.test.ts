@@ -10,7 +10,7 @@ const ROOT = path.resolve(__dirname, '../..');
 const routes = (): string[] => (fs.readdirSync(path.join(ROOT, 'pages'), { recursive: true, encoding: 'utf8' }) as string[])
   .filter((f) => /\.tsx?$/.test(f) && !/(^|\/)_/.test(f)).map((f) => '/' + f.replace(/\.tsx?$/, '').replace(/\/?index$/, ''));
 // 404 in engagement mode: demo pages, seed and simulation APIs, shared-token gateway routes, the anonymous ingest door.
-const BLOCKED = ['/', '/agent-workflows', '/attribution', '/connectors', '/costsource', '/demo', '/finio', '/finio/demo', '/frameworks', '/hello', '/mission',
+const BLOCKED = ['/', '/agent-workflows', '/attribution', '/connectors', '/costsource', '/demo', '/finio', '/finio/demo', '/frameworks', '/hello', '/methodology', '/mission',
   '/outcomes', '/overview', '/prediction', '/reports', '/simulation', '/tokenomics', '/workloads', '/workspace',
   '/api/a2a/handshake', '/api/attribution', '/api/costsource/findings', '/api/costsource/health', '/api/costsource/ingest', '/api/costsource/rows',
   '/api/costsource/sources', '/api/finio/export', '/api/hello', '/api/prediction/accuracy', '/api/prediction/predict', '/api/report/snapshot', '/api/tokenomics',

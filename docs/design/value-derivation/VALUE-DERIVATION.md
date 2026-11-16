@@ -5,7 +5,7 @@
 | Status | **Proposed** (design only, no code). Owner decisions in §8. |
 | Date | 2026-11-13 |
 | Owner request | "We need to clearly map how the value metric is independently derived in the most objective way possible." |
-| Related | ADR-0002 (D4 measured only from reconciled data; the `value-evidence` sub-agent), `docs/evidence/outcome-accountability.md`, `src/outcomes/durable.ts`, migration 0004 |
+| Related | ADR-0002 (D4 measured only from reconciled data; the `value-evidence` sub-agent), `docs/evidence/outcome-accountability.md`, `src/outcomes/durable.ts`, migration 0004. In the app, `/methodology` shows the formula, each input's source and a worked example per workload, checked against its source record (`src/methodology/valueSources.ts`). |
 | Status wording | Nothing here is "measured" or "verified" until the evidence in §5 exists. |
 
 ## 1. The rule we are aiming for

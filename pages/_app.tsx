@@ -19,7 +19,7 @@ import { modeOfPage, showsDemoBadge } from '@/lib/demoMode';
 // navigation; /mission and /hello remain legacy standalone routes.
 const SHELL_ROUTES = new Set<string>([
   ...NAV_ITEMS.map((item) => item.href),
-  '/demo', '/agent-workflows', '/workspace', '/outcomes', '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics', '/attribution',
+  '/demo', '/methodology', '/agent-workflows', '/workspace', '/outcomes', '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics', '/attribution',
 ]);
 
 export default function RatioApp({ Component, pageProps }: AppProps) {

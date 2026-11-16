@@ -81,7 +81,7 @@ describe('finding card model', () => {
     expect(c.costSource).toBe('modeled');
     expect(c.costLabel).toBe('Modeled workload cost');
     expect(c.basis).toBe('Basis: modeled');
-    expect(c.source).toBe('Demo dataset.');
+    expect(c.source).toBe('Demo dataset, record wl-fraud.');
     expect(JSON.stringify(c)).not.toMatch(/synthetic|sample|seeded|no live connection/i);
     expect(c.monthConvention).toBe('30-day month convention');
     expect(JSON.stringify(c)).not.toMatch(/billed|effective/i);

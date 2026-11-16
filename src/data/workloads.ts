@@ -25,7 +25,7 @@ const CURRENT_DAY = DEMO_NOW.getUTCDate(); // 25
 // (weekday peaks, weekend dips) without any randomness — reloads are identical.
 const HISTORY_PATTERN = [0.92, 1.05, 0.98, 1.1, 0.88, 0.62, 0.65, 1.02, 1.07, 0.95, 1.12, 0.9];
 
-interface WorkloadSeedSpec {
+export interface WorkloadSeedSpec {
   id: string;
   name: string;
   model: string;
@@ -66,7 +66,22 @@ interface WorkloadSeedSpec {
   volatility: number; // 0–1 amplitude of history jitter
 }
 
-function buildWorkload(spec: WorkloadSeedSpec): Workload {
+/** Components of the modeled daily cost: today's tokens × the model registry's list price. */
+export interface ModeledDailyCost {
+  inputCost: number;
+  outputCost: number;
+  cachedCost: number;
+  /** 5% infrastructure overhead on input + output cost. */
+  compute: number;
+  /** Rounded to cents: the stored `costs.daily_spend`. */
+  dailySpend: number;
+  inputPer1m: number;
+  outputPer1m: number;
+  cachedPer1m: number;
+}
+
+/** One formula for the modeled daily cost, shared by the seed and the methodology page. */
+export function modeledDailyCost(spec: WorkloadSeedSpec): ModeledDailyCost {
   const model = findModel(spec.model);
   if (!model) throw new Error(`Unknown model in seed: ${spec.model}`);
 
@@ -76,14 +91,32 @@ function buildWorkload(spec: WorkloadSeedSpec): Workload {
   const cachedRate = cachedInputRate(model);
   const cachedCost = (spec.cachedTokensToday / 1_000_000) * cachedRate;
   const compute = (inputCost + outputCost) * 0.05; // small infra overhead
-  const dailySpend = round2(inputCost + outputCost + cachedCost + compute);
+  return {
+    inputCost,
+    outputCost,
+    cachedCost,
+    compute,
+    dailySpend: round2(inputCost + outputCost + cachedCost + compute),
+    inputPer1m: model.pricing.input_per_1m,
+    outputPer1m: model.pricing.output_per_1m,
+    cachedPer1m: cachedRate,
+  };
+}
+
+/** Seed value split: gross value is stated as a multiple of the stated monthly cost. */
+export function seedValueSplit(spec: Pick<WorkloadSeedSpec, 'valueRatio' | 'monthlySpend' | 'revenueSplit'>) {
+  const totalValue = Math.round(spec.valueRatio * spec.monthlySpend);
+  const revenueProtected = Math.round(totalValue * spec.revenueSplit);
+  return { totalValue, revenueProtected, costAvoided: totalValue - revenueProtected };
+}
+
+function buildWorkload(spec: WorkloadSeedSpec): Workload {
+  const { compute, dailySpend } = modeledDailyCost(spec);
 
   const tokensInToday = spec.callsToday * spec.avgInputTokens;
   const tokensOutToday = spec.callsToday * spec.avgOutputTokens;
 
-  const totalValue = Math.round(spec.valueRatio * spec.monthlySpend);
-  const revenueProtected = Math.round(totalValue * spec.revenueSplit);
-  const costAvoided = totalValue - revenueProtected;
+  const { revenueProtected, costAvoided } = seedValueSplit(spec);
 
   // Defensible headline (audit C3/C4): outputs missing the quality floor
   // contribute no value, and harm from misses is subtracted. Computed by the
