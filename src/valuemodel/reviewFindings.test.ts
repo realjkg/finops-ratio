@@ -107,3 +107,55 @@ describe('the result ledger and evaluation check what they are given', () => {
       .toThrow(EvaluationError);
   });
 });
+
+describe('Copilot review on #202', () => {
+  it('a target is checked against the exact result, not the rounded one (3.004 misses a lower-is-better 3)', () => {
+    const r = run(published(), [obs('acceptedInvoices', '40', 'invoice'), obs('reviewTime', '120.16', 'minute')]);
+    expect(r.quantity).toBe('3.00');
+    expect(r.target?.met).toBe(false);
+    expect(run(published(), verified()).target?.met).toBe(true);
+  });
+
+  it('an issued result cannot be changed through nested data, by the caller or by a reader', () => {
+    const ledger = new KpiResultLedger();
+    const mine = run(published(), verified());
+    const issued = ledger.append(mine);
+    const before = JSON.stringify(issued);
+    expect(() => (issued.inputs[0].sourceRefs as string[]).push('x')).toThrow(TypeError);
+    expect(() => { (issued.target as { met: boolean }).met = false; }).toThrow(TypeError);
+    expect(() => (ledger.issued(mine.resultId).reasons as string[]).push('x')).toThrow(TypeError);
+    expect(JSON.stringify(ledger.issued(mine.resultId))).toBe(before);
+  });
+
+  it('a ratio that overflows the supported precision is unavailable with a reason, never a thrown error', () => {
+    const reg = new ValueCaseRegistry(TENANT);
+    // Benefit and cost each fit the 120-digit limit; their ratio does not.
+    const big: Record<string, string> = { baselineResolutions: '999999999999999999', costBefore: '999999999999999999', costAfter: '0', attribution: '100000000000000000', aiCost: '0.0000000001' };
+    const terms = expectedCase().terms.map((t) => ({ ...t, quantity: big[t.key] }));
+    const cv: ValueCaseVersion = { ...expectedCase(), terms, benefit: { ...expectedCase().benefit, expression: 'baselineResolutions * (costBefore - costAfter) * attribution * attribution * attribution * attribution * attribution' } };
+    const d = reg.saveDraft(cv, sponsor).digest;
+    reg.approve(cv.caseId, 1, finance, d, AT);
+    const s = reg.publish(cv.caseId, 1, finance, 's1', AT);
+    expect(s.value).not.toBeNull();
+    expect(s.cost).toBe('0.00'); // 10^-10 USD, shown at 2 decimals
+    expect(s.valueToCost).toBeNull();
+    expect(s.roiPercent).toBeNull();
+    expect(s.reasons.join(' ')).toMatch(/precision/);
+  });
+
+  it('variance against the original is computed from exact ratios, so rounding cannot hide a shortfall', () => {
+    const reg = new ValueCaseRegistry(TENANT);
+    const withCost = (c: ValueCaseVersion, cost: string): ValueCaseVersion => ({ ...c, terms: c.terms.map((t) => (t.key === 'aiCost' ? { ...t, quantity: cost } : t)) });
+    // Original: 24000 / 11976 = 2.004…; observed: 24000 / 12024 = 1.996…; both display 2.00.
+    const original = withCost(expectedCase(), '11976');
+    reg.approve(original.caseId, 1, finance, reg.saveDraft(original, sponsor).digest, AT);
+    reg.publish(original.caseId, 1, finance, 'e1', AT);
+    const observedTerms = expectedCase().terms.map((t) => ({ ...t, basis: t.sourceKind === 'assumption' ? 'assumption' as const : 'observed' as const, verificationRef: t.sourceKind === 'assumption' ? undefined : 'verify-9' }));
+    const observed = withCost({ ...expectedCase(), version: 2, phase: 'observed', terms: observedTerms }, '12024');
+    reg.approve(observed.caseId, 2, finance, reg.saveDraft(observed, sponsor).digest, AT);
+    reg.publish(observed.caseId, 2, finance, 'o2', AT);
+    const cmp = reg.expectedVsObserved(observed.caseId, '2026-11-01', '2026-11-30');
+    expect([cmp.original?.valueToCost, cmp.observed?.valueToCost]).toEqual(['2.00', '2.00']);
+    expect(cmp.varianceVsOriginal).toBe('-0.01');
+  });
+});

@@ -15,7 +15,7 @@ import { digestOf } from './digest';
 import { FORMULA_ENGINE_VERSION, evaluate, parseFormula } from './formula';
 import { type KpiDefinition, type SourceKind, checkKpiDefinition } from './kpiDefinition';
 import type { DefinitionRecord } from './lifecycle';
-import { type Rational, cmp, isDecimalString, parseDecimal, toDecimal } from './rational';
+import { type Rational, RationalOverflowError, cmp, isDecimalString, parseDecimal, toDecimal } from './rational';
 import { UnitError, baseUnit, convert, parseUnit, sameDimension } from './units';
 
 export interface Observation {
@@ -69,6 +69,14 @@ export class EvaluationError extends Error {
     super(problems.join('; '));
     this.name = 'EvaluationError';
   }
+}
+
+function deepFreeze<T>(v: T): T {
+  if (v && typeof v === 'object' && !Object.isFrozen(v)) {
+    Object.freeze(v);
+    for (const x of Object.values(v as Record<string, unknown>)) deepFreeze(x);
+  }
+  return v;
 }
 
 const SOURCE_OF_RECORD: readonly SourceKind[] = ['connector', 'upload', 'manual_observation', 'finance_register'];
@@ -147,11 +155,19 @@ export function evaluateKpi(args: EvaluateArgs): KpiResult {
   }
 
   let quantity: string | null = null;
+  // The exact result: targets are compared against it, never against the rounded quantity.
+  let exact: Rational | null = null;
   if (reasons.length === 0) {
     const r = evaluate(parseFormula(def.calculation.expression), (k) => (Object.hasOwn(base, k) ? base[k] : null));
     if (r.ok) {
-      const out = convert(r.value, baseUnit(check.resultUnit), check.resultUnit) as Rational;
-      quantity = toDecimal(out, def.calculation.scale);
+      try {
+        exact = convert(r.value, baseUnit(check.resultUnit), check.resultUnit) as Rational;
+        quantity = toDecimal(exact, def.calculation.scale);
+      } catch (err) {
+        if (!(err instanceof RationalOverflowError)) throw err;
+        exact = quantity = null;
+        reasons.push('unavailable: value exceeds supported precision');
+      }
     } else reasons.push(r.reason === 'zero_denominator' ? 'unavailable: a denominator is zero' : r.reason === 'overflow' ? 'unavailable: value exceeds supported precision' : `unavailable: ${r.detail}`);
   }
 
@@ -164,9 +180,9 @@ export function evaluateKpi(args: EvaluateArgs): KpiResult {
   if (mode === 'scenario' && evidenceStatus === 'measured') evidenceStatus = 'projected';
 
   let target: KpiResult['target'];
-  if (def.target && quantity !== null) {
+  if (def.target && exact !== null) {
     const t = convert(parseDecimal(def.target.value) as Rational, parseUnit(def.target.unit), check.resultUnit) as Rational;
-    const c = cmp(parseDecimal(quantity) as Rational, t);
+    const c = cmp(exact, t);
     target = { value: def.target.value, unit: def.target.unit, met: def.direction === 'higher_is_better' ? c >= 0 : c <= 0 };
   }
 
@@ -178,7 +194,7 @@ export function evaluateKpi(args: EvaluateArgs): KpiResult {
     ...(target ? { target } : {}), calculatedAt: args.calculatedAt, calculatedBy: args.calculatedBy,
     ...(args.supersedes ? { supersedes: args.supersedes, supersedeReason: args.supersedeReason } : {}),
   };
-  return Object.freeze({ ...body, resultDigest: digestOf(body) }) as KpiResult;
+  return deepFreeze({ ...body, resultDigest: digestOf(body) }) as KpiResult;
 }
 
 export class ResultLedgerError extends Error {
@@ -209,8 +225,10 @@ export class KpiResultLedger {
       if (this.results.some((x) => x.supersedes === r.supersedes)) throw new ResultLedgerError('ALREADY_SUPERSEDED', 'that result was already superseded');
       if (!r.supersedeReason) throw new ResultLedgerError('MISMATCH', 'a recalculation states its reason');
     }
-    this.results.push(r);
-    return r;
+    // Keep an owned, deeply frozen copy, so nothing the caller still holds can change the issued record.
+    const owned = deepFreeze(structuredClone(r));
+    this.results.push(owned);
+    return owned;
   }
 
   /** The exact result as issued, even when a later recalculation superseded it. */

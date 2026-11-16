@@ -16,7 +16,7 @@ import { digestOf } from './digest';
 import { FORMULA_ENGINE_VERSION, FormulaError, evaluate, inferUnit, parseFormula, references } from './formula';
 import { type SourceKind, SOURCE_KINDS } from './kpiDefinition';
 import { type Actor, LifecycleError } from './lifecycle';
-import { type Rational, cmp, div, isDecimalString, parseDecimal, R_ZERO, sub, toDecimal, mul, fromInt } from './rational';
+import { type Rational, RationalOverflowError, cmp, div, isDecimalString, parseDecimal, R_ZERO, sub, toDecimal, mul, fromInt } from './rational';
 import { type Unit, UnitError, baseUnit, convert, describeDims, parseUnit, sameDimension } from './units';
 
 export const BENEFIT_CLASSES = ['cash_savings', 'cost_avoidance', 'incremental_contribution', 'capacity_equivalent', 'risk_adjusted'] as const;
@@ -196,6 +196,8 @@ export class ValueCaseError extends Error {
 
 /** One project's value cases and their published ratio snapshots. Approved versions and snapshots never change. */
 export class ValueCaseRegistry {
+  /** Exact Value / cost per snapshot, kept beside the rounded snapshot so variance is never computed from rounded figures. */
+  private readonly exactRatios = new Map<string, Rational | null>();
   private readonly cases: CaseRecord[] = [];
   private readonly snapshots: RatioSnapshot[] = [];
 
@@ -288,11 +290,22 @@ export class ValueCaseRegistry {
     const C = run(cv.cost.expression);
     let ratio: string | null = null;
     let roi: string | null = null;
+    let net: string | null = null;
+    let exactRatio: Rational | null = null;
     if (V && C) {
-      if (cmp(C, R_ZERO) <= 0) reasons.push('full AI project cost is zero or negative; the ratio is unavailable');
-      else {
-        ratio = toDecimal(div(V, C) as Rational, 2);
-        roi = toDecimal(mul(div(sub(V, C), C) as Rational, fromInt(100)), 1);
+      try {
+        net = toDecimal(sub(V, C), 2);
+        if (cmp(C, R_ZERO) <= 0) reasons.push('full AI project cost is zero or negative; the ratio is unavailable');
+        else {
+          exactRatio = div(V, C) as Rational;
+          ratio = toDecimal(exactRatio, 2);
+          roi = toDecimal(mul(div(sub(V, C), C) as Rational, fromInt(100)), 1);
+        }
+      } catch (e) {
+        if (!(e instanceof RationalOverflowError)) throw e;
+        net = ratio = roi = null;
+        exactRatio = null;
+        reasons.push('value exceeds supported precision');
       }
     }
     const statuses = cv.terms.map(termStatus);
@@ -300,12 +313,13 @@ export class ValueCaseRegistry {
       schemaVersion: 'value-ratio-snapshot/0-draft', snapshotId, caseId, caseVersion: version, caseDigest: rec.digest, phase: cv.phase,
       isOriginalBusinessCase: rec.isOriginalBusinessCase, periodStart: cv.periodStart, periodEnd: cv.periodEnd, currency: cv.currency,
       benefitClass: cv.benefit.benefitClass, value: V ? toDecimal(V, 2) : null, cost: C ? toDecimal(C, 2) : null,
-      netBenefit: V && C ? toDecimal(sub(V, C), 2) : null, valueToCost: ratio, roiPercent: roi, reasons,
+      netBenefit: net, valueToCost: ratio, roiPercent: roi, reasons,
       evidenceStatus: snapshotStatus(statuses), engineVersion: FORMULA_ENGINE_VERSION, publishedAt: at, publishedBy: by.id,
       ...(restatement ? { supersedes: restatement.supersedes, supersedeReason: restatement.reason } : {}),
     };
     const snap = deepFreeze({ ...body, snapshotDigest: digestOf(body) }) as RatioSnapshot;
     this.snapshots.push(snap);
+    this.exactRatios.set(snapshotId, exactRatio);
     return snap;
   }
 
@@ -326,9 +340,13 @@ export class ValueCaseRegistry {
     const original = expected.find((s) => s.isOriginalBusinessCase) ?? this.snapshots.find((s) => s.caseId === caseId && s.isOriginalBusinessCase && s.periodStart === periodStart && s.periodEnd === periodEnd);
     const latestForecast = expected.filter((s) => !s.isOriginalBusinessCase).sort((a, b) => b.caseVersion - a.caseVersion)[0];
     const observed = inForce('observed')[0];
-    const varianceVsOriginal = original?.valueToCost && observed?.valueToCost && original.currency === observed.currency
-      ? toDecimal(sub(parseDecimal(observed.valueToCost) as Rational, parseDecimal(original.valueToCost) as Rational), 2)
-      : null;
+    // Variance comes from the exact ratios, rounded once, so two rounded ratios can never hide a shortfall.
+    const o = original && this.exactRatios.get(original.snapshotId);
+    const b = observed && this.exactRatios.get(observed.snapshotId);
+    let varianceVsOriginal: string | null = null;
+    if (o && b && original.currency === observed.currency) {
+      try { varianceVsOriginal = toDecimal(sub(b, o), 2); } catch (e) { if (!(e instanceof RationalOverflowError)) throw e; }
+    }
     return { original, latestForecast, observed, varianceVsOriginal };
   }
 }
