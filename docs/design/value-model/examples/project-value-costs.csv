@@ -1,0 +1,4 @@
+source_system,source_record_id,period_start,period_end,currency,amount,cost_basis,cost_scope,cost_type,project_key,description
+SYNTHETIC_ERP,DEMO-REC-001,2026-04-01,2026-04-30,USD,18450.25,actual,operating_budget,direct,DEMO-PROJECT,Implementation contractor
+SYNTHETIC_ERP,DEMO-REC-002,2026-04-01,2026-04-30,USD,1200.00,estimate,operating_budget,direct,DEMO-PROJECT,Training estimate
+SYNTHETIC_ERP,DEMO-REC-003,2026-04-01,2026-04-30,USD,600.00,actual,operating_budget,shared,,Shared platform allocation pool
