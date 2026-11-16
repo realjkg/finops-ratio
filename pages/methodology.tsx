@@ -7,6 +7,7 @@ import { useMemo } from 'react';
 import { EvidenceMark } from '@/components/EvidenceMark';
 import { formatPct, formatRatio, formatUSD } from '@/lib/format';
 import { EVIDENCE_META } from '@/lib/valueEvidence';
+import type { EvidenceStatus } from '@/types';
 import { VALUE_MINIMUM } from '@/findings/recommendationMath';
 import {
   DEMO_DATASET_FILE,
@@ -17,6 +18,13 @@ import {
   type WorkloadTrace,
 } from '@/methodology/valueSources';
 import { useStore } from '@/store/useStore';
+
+// What each label means on this page (the demo has no measured inputs; every one is assumed).
+const EVIDENCE_LINES: ReadonlyArray<readonly [EvidenceStatus, string]> = [
+  ['measured', 'Recorded from a source of record and checked independently. No demo input is measured.'],
+  ['projected', 'A forward-looking estimate that has not been checked against results yet.'],
+  ['assumed', 'A stated assumption. Every value input in the demo is assumed.'],
+];
 
 const fmtInput = (i: InputTrace) => (i.format === 'pct' ? formatPct(i.value, 1) : formatUSD(i.value));
 const fmtStep = (s: StepTrace) => (s.format === 'ratio' ? (s.value === null ? 'N/A' : `${s.value.toFixed(3)}× (shown as ${formatRatio(s.value)})`) : formatUSD(s.value ?? 0));
@@ -95,8 +103,8 @@ export default function Methodology() {
         <section aria-labelledby="evidence">
           <h2 id="evidence" className="text-base font-bold text-txt">Evidence labels</h2>
           <ul className="mt-2 space-y-1 text-sm text-sub">
-            {(['measured', 'projected', 'assumed'] as const).map((s) => (
-              <li key={s} className="flex items-baseline gap-2"><EvidenceMark status={s} /><span>{EVIDENCE_META[s].title}</span></li>
+            {EVIDENCE_LINES.map(([s, text]) => (
+              <li key={s}><span className="font-medium" style={{ color: EVIDENCE_META[s].color }}>{EVIDENCE_META[s].label}.</span> {text}</li>
             ))}
           </ul>
           <p className="mt-2 text-sm text-sub">A Value / cost figure carries the weakest label of its value inputs. An input with no label counts as assumed.</p>
