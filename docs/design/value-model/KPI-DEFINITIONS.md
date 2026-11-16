@@ -67,6 +67,9 @@ Before and after results can be compared when they use the same version, or a ne
   - `measured`: from a source of record with an independent verification reference;
   - `projected`: a sourced forecast;
   - `assumed`: a typed assumption (even when labeled a forecast) or an unverified value.
+  - Another KPI's result (`kpi_result`) counts as `assumed` until results are resolved against the result ledger; the status a caller supplies with it is never used.
+- Evaluation refuses a definition record whose definition no longer matches its recorded digest.
+- The result ledger accepts one first result per KPI, period and scope; any later result must be a recalculation that supersedes it. It re-checks each result's digest, so a result changed after it was calculated is refused.
 - Every result records the definition version and digest, the formula-engine version, the inputs' sources and verification, and its own digest.
 - A recalculation is a **new** result that supersedes the old one and states why. The issued result stays readable exactly as issued, so a report always shows the number it was issued with. A result can be superseded only once.
 
@@ -87,7 +90,7 @@ The case refuses any field for a ratio, net benefit or evidence status: they are
 | `expected` (before) | The investment case and later revised forecasts | The **first approved expected version is the original business case**. It is never edited or superseded. A revised forecast is a new version with a rationale, published beside it. |
 | `observed` (after) | What happened in a period | A correction is a new approved version that supersedes the snapshot in force, with a reason. The issued snapshot is unchanged. |
 
-Published ratios are append-only **snapshots** (`value-ratio-snapshot/0-draft`) bound to the case version's digest. `expectedVsObserved` returns the original business case, the latest approved forecast and the observed result in force, and measures variance against the **original**, so a revised forecast cannot hide a shortfall.
+Published ratios are append-only **snapshots** (`value-ratio-snapshot/0-draft`) bound to the case version's digest. A snapshot's evidence status is the weakest term, and no snapshot is `measured` yet: an expected case is a forecast, and an observed case needs a counterfactual method and independent verification (VALUE-DERIVATION §4) that are not modeled. Both are capped at `projected`. The original business case must be published before any revised forecast of the same case. `expectedVsObserved` returns the original business case, the latest approved forecast and the observed result in force, and measures variance against the **original**, so a revised forecast cannot hide a shortfall. Today the original is the first approved expected version of the **case**, not of each period; whether it should be per period is an open decision (§7).
 
 Zero or negative cost makes the ratio unavailable; a missing term makes the value unavailable with a reason.
 
@@ -113,6 +116,14 @@ Its status is `assumed`, because cost and attribution are typed assumptions. If 
 | Connector mappings for outcome observations | Not started |
 | Finance unit-value register | Not started; `finance_register` is a source kind only |
 | Promotion of the draft schemas to stable contracts | Owner decision |
+| Resolving `kpi_result` terms against the result ledger | Not started; such terms count as `assumed` |
+| Counterfactual method (holdout or pre-registered baseline) and its disclosure | Not started (owner decision 3) |
+| Separate, pre-approved attribution shares | Not started; attribution is a sponsor term today (owner decision 4) |
+| Range, central estimate and a separately labeled lower-bound policy score | Not started |
+| Measurement confidence separate from causal confidence | Not started |
+| Overlap or double-counting check across benefit terms | Not started; one `benefitClass` per case |
+| Completeness and verification blocker diagnostic | Not started |
+| Shadow calculation beside the current headline (never added to it) | Not started (owner decision 8) |
 
 ## 7. Decisions for the owner
 
@@ -121,3 +132,7 @@ Its status is `assumed`, because cost and attribution are typed assumptions. If 
 3. Whether an unverified observation should count as `assumed` (current) or get a fourth status.
 4. Default rounding: 2 decimals for Value / cost and money, 1 for ROI percent.
 5. Whether to promote the four draft schemas to stable platform contracts after the storage and route changes.
+6. Whether the original business case is kept per case (current) or per case and period, and whether it is published automatically on approval.
+7. Whether an observed case may ever be `measured`, and what evidence that needs (current: capped at `projected`).
+8. Whether a `rate` may convert between currencies (a finance-register exchange rate), or multi-currency rate units are refused.
+9. Who may publish value snapshots and validate drafts (any actor today), and how a negative value or a zero or negative cost is presented.

@@ -106,8 +106,10 @@ export class KpiDefinitionRegistry {
     const definition = deepFreeze(clone(patch.definition ?? prev.definition));
     const digest = digestOf(definition);
     const rec: DefinitionRecord = {
-      status: 'draft', approvals: [], problems: [], history: [], requiresFinanceApproval: moneyInvolved(definition),
+      status: 'draft', approvals: [], problems: [], history: [],
       ...prev, ...patch, definition, digest,
+      // Recomputed on every change: an edit that adds money must gain the finance approval.
+      requiresFinanceApproval: moneyInvolved(definition),
     } as DefinitionRecord;
     return deepFreeze({ ...rec, history: [...(prev.history ?? []), { ...event, digest }] });
   }

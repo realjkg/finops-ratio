@@ -109,11 +109,22 @@ function deepFreeze<T>(v: T): T {
 }
 
 function termStatus(t: ValueCaseTerm): EvidenceStatus {
-  if (t.sourceKind === 'kpi_result') return t.kpiResult?.evidenceStatus ?? 'assumed';
   // A typed assumption is the weakest evidence, even when it is labeled a forecast.
   if (t.basis === 'assumption' || t.sourceKind === 'assumption') return 'assumed';
+  // Not resolved against the KPI result ledger yet, so the status would be typed: assumed until resolved.
+  if (t.sourceKind === 'kpi_result') return 'assumed';
   if (t.basis === 'forecast') return 'projected';
   return t.verificationRef ? 'measured' : 'assumed';
+}
+
+/**
+ * A snapshot's status: the weakest term. An expected-phase case is a forecast, so it is never
+ * above projected; no case is measured until a counterfactual method and independent
+ * verification are modeled (VALUE-DERIVATION §4), so an observed case is capped at projected too.
+ */
+function snapshotStatus(statuses: readonly EvidenceStatus[]): EvidenceStatus {
+  const weakest = weakestStatus(statuses) ?? 'assumed';
+  return weakest === 'measured' ? 'projected' : weakest;
 }
 
 export type CaseCheck = { ok: true; units: Record<string, Unit> } | { ok: false; problems: string[] };
@@ -246,6 +257,10 @@ export class ValueCaseRegistry {
     if (rec.status !== 'approved') throw new ValueCaseError('NOT_APPROVED', ['only an approved case version is published']);
     if (this.snapshots.some((s) => s.snapshotId === snapshotId)) throw new ValueCaseError('DUPLICATE', ['snapshot id already used']);
     const cv = rec.caseVersion;
+    // The original business case is published first, so a revised forecast can never stand in for it.
+    if (cv.phase === 'expected' && !rec.isOriginalBusinessCase && !this.snapshots.some((s) => s.caseId === caseId && s.isOriginalBusinessCase)) {
+      throw new ValueCaseError('RESTATEMENT', ['publish the original business case before a revised forecast']);
+    }
     const live = this.snapshots.filter((s) => s.caseId === caseId && s.phase === cv.phase && s.periodStart === cv.periodStart && s.periodEnd === cv.periodEnd && !this.snapshots.some((x) => x.supersedes === s.snapshotId));
     if (restatement) {
       const old = this.snapshots.find((s) => s.snapshotId === restatement.supersedes);
@@ -286,7 +301,7 @@ export class ValueCaseRegistry {
       isOriginalBusinessCase: rec.isOriginalBusinessCase, periodStart: cv.periodStart, periodEnd: cv.periodEnd, currency: cv.currency,
       benefitClass: cv.benefit.benefitClass, value: V ? toDecimal(V, 2) : null, cost: C ? toDecimal(C, 2) : null,
       netBenefit: V && C ? toDecimal(sub(V, C), 2) : null, valueToCost: ratio, roiPercent: roi, reasons,
-      evidenceStatus: weakestStatus(statuses) ?? 'assumed', engineVersion: FORMULA_ENGINE_VERSION, publishedAt: at, publishedBy: by.id,
+      evidenceStatus: snapshotStatus(statuses), engineVersion: FORMULA_ENGINE_VERSION, publishedAt: at, publishedBy: by.id,
       ...(restatement ? { supersedes: restatement.supersedes, supersedeReason: restatement.reason } : {}),
     };
     const snap = deepFreeze({ ...body, snapshotDigest: digestOf(body) }) as RatioSnapshot;

@@ -150,4 +150,4 @@ These make today's figures accurate about what they are, without waiting for the
 
 ## Related
 
-- [Project Value Model: KPI and outcome definitions](../value-model/KPI-DEFINITIONS.md) (Proposed) implements the configurable part of §3–§5.
+- [Project Value Model: KPI and outcome definitions](../value-model/KPI-DEFINITIONS.md) (Proposed) is a design prototype toward the configurable part of §3–§5 (owner decision 1: design only).

@@ -74,9 +74,11 @@ export class EvaluationError extends Error {
 const SOURCE_OF_RECORD: readonly SourceKind[] = ['connector', 'upload', 'manual_observation', 'finance_register'];
 
 function inputStatus(o: Observation): EvidenceStatus {
-  if (o.sourceKind === 'kpi_result') return o.kpiResult?.evidenceStatus ?? 'assumed';
   // A typed assumption is the weakest evidence, even when it is labeled a forecast.
   if (o.basis === 'assumption' || o.sourceKind === 'assumption') return 'assumed';
+  // Another KPI's result is not resolved against the result ledger yet, so its status would be
+  // typed by the caller. Until it is resolved, it counts as assumed (never stronger).
+  if (o.sourceKind === 'kpi_result') return 'assumed';
   if (o.basis === 'forecast') return 'projected';
   return SOURCE_OF_RECORD.includes(o.sourceKind) && o.verificationRef ? 'measured' : 'assumed';
 }
@@ -100,6 +102,8 @@ export function evaluateKpi(args: EvaluateArgs): KpiResult {
   const mode = args.mode ?? 'official';
   const def: KpiDefinition = args.record.definition;
   if (mode === 'official' && args.record.status !== 'published') throw new EvaluationError('NOT_PUBLISHED', ['an official result needs a published definition version (preview a draft as a scenario)']);
+  // The record must be the version that was approved: its definition still hashes to its digest.
+  if (digestOf(def) !== args.record.digest) throw new EvaluationError('INVALID_DEFINITION', ['the definition does not match its recorded digest']);
   const check = checkKpiDefinition(def);
   if (!check.ok) throw new EvaluationError('INVALID_DEFINITION', check.problems);
 
@@ -178,7 +182,7 @@ export function evaluateKpi(args: EvaluateArgs): KpiResult {
 }
 
 export class ResultLedgerError extends Error {
-  constructor(readonly code: 'DUPLICATE' | 'NOT_FOUND' | 'SCENARIO' | 'MISMATCH' | 'ALREADY_SUPERSEDED', what: string) {
+  constructor(readonly code: 'DUPLICATE' | 'NOT_FOUND' | 'SCENARIO' | 'MISMATCH' | 'ALREADY_SUPERSEDED' | 'ALREADY_RECORDED', what: string) {
     super(what);
     this.name = 'ResultLedgerError';
   }
@@ -192,6 +196,11 @@ export class KpiResultLedger {
   append(r: KpiResult): KpiResult {
     if (r.mode !== 'official') throw new ResultLedgerError('SCENARIO', 'scenario results are previews and are never recorded as official');
     if (this.results.some((x) => x.resultId === r.resultId)) throw new ResultLedgerError('DUPLICATE', 'result id already recorded');
+    const { resultDigest, ...body } = r;
+    if (digestOf(body) !== resultDigest) throw new ResultLedgerError('MISMATCH', 'the result does not match its digest; it was changed after it was calculated');
+    if (r.supersedes === undefined && this.current(r.definitionId, r.periodStart, r.periodEnd, r.scopeRef)) {
+      throw new ResultLedgerError('ALREADY_RECORDED', 'a result for this KPI, period and scope is already in force; record a recalculation that supersedes it');
+    }
     if (r.supersedes !== undefined) {
       const old = this.issued(r.supersedes);
       if (old.definitionId !== r.definitionId || old.periodStart !== r.periodStart || old.periodEnd !== r.periodEnd || old.scopeRef !== r.scopeRef) {
