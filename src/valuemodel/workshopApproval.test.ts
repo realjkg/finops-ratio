@@ -4,7 +4,7 @@ import { type WorkshopReview, type WorkshopSignoff, workshopReviewBlockers } fro
 const scope = { workshopId: 'workshop-1', revision: 1, digest: 'digest-1' };
 const signoff = (by: string, role: WorkshopSignoff['role']): WorkshopSignoff => ({ ...scope, by, role });
 const review = (signoffs: WorkshopSignoff[], financial = true): WorkshopReview => ({
-  scope, authors: ['author'], financial, hasUnresolvedBlockers: false, signoffs,
+  scope, authors: ['author'], sponsorId: 'author', financial, hasUnresolvedBlockers: false, signoffs,
 });
 
 describe('workshop review readiness', () => {
@@ -35,9 +35,16 @@ describe('workshop review readiness', () => {
 
   it('accepts a distinct pair even when one approver has both responsibilities', () => {
     expect(workshopReviewBlockers(review([
-      signoff('sponsor', 'sponsor'), signoff('reviewer', 'kpi_approver'),
+      signoff('author', 'sponsor'), signoff('reviewer', 'kpi_approver'),
       signoff('reviewer', 'finance_approver'), signoff('finance', 'finance_approver'),
     ]))).toEqual([]);
+  });
+
+  it('requires acceptance from the case sponsor and excludes that sponsor from Finance approval', () => {
+    const r = { ...review([
+      signoff('other', 'sponsor'), signoff('reviewer', 'kpi_approver'), signoff('sponsor', 'finance_approver'),
+    ]), sponsorId: 'sponsor' };
+    expect(workshopReviewBlockers(r)).toEqual(['sponsor_signoff_required', 'distinct_finance_approval_required']);
   });
 
   it('requires only an independent KPI approval for nonfinancial cases', () => {
@@ -62,6 +69,7 @@ describe('workshop review readiness', () => {
     expect(workshopReviewBlockers({ ...review([]), scope: { ...scope, revision: 0 } })).toEqual(['invalid_scope']);
     expect(workshopReviewBlockers({ ...review([]), authors: [' '] })).toEqual(['invalid_scope']);
     expect(workshopReviewBlockers({ ...review([]), authors: [] })).toEqual(['invalid_scope']);
+    expect(workshopReviewBlockers({ ...review([]), sponsorId: '' })).toEqual(['invalid_scope']);
     expect(workshopReviewBlockers(review([
       signoff(' ', 'sponsor'), signoff('', 'kpi_approver'), signoff('', 'finance_approver'),
     ]))).toHaveLength(3);
