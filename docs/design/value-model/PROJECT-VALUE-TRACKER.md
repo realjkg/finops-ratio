@@ -2,7 +2,7 @@
 
 Status: **Proposed**. This is a focused first-delivery design and operating guide, not an implemented product or release-readiness claim.
 
-Starting task-head SHA: `9d9d2fb5a5d5af5279eef79155bc2dea4dc03c7f`. Verified PR #205 targets PR #203's head `00ddd800538acf443244c350103fc0c8cb68613a`. No product code, migration, permission, or existing PR is changed by this proposal.
+Starting task-head SHA: `9d9d2fb5a5d5af5279eef79155bc2dea4dc03c7f`. Verified PR #205 targets PR #203's head `00ddd800538acf443244c350103fc0c8cb68613a`. No product code, migration, permission, or PR #200–#203 is changed by this proposal.
 
 The [Value Planning Workshop](VALUE-PLANNING-WORKSHOP.md) remains the broader roadmap. Its richer workshop collaboration is not a prerequisite for the simpler tracker described here.
 
