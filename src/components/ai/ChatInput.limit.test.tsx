@@ -11,7 +11,10 @@ import { useStore } from '@/store/useStore';
 beforeAll(() => {
   Element.prototype.scrollTo = () => {};
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useStore.setState({ simulation: null, aiPanelOpen: false });
+});
 const box = () => screen.getByLabelText('Ask about your initiative portfolio') as HTMLTextAreaElement;
 const send = () => screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement;
 const count = () => screen.getByTestId('chat-char-count');
@@ -28,10 +31,14 @@ describe('ChatInput length limit', () => {
     fireEvent.submit(box().closest('form')!);
     expect(onSend).not.toHaveBeenCalled();
     expect(box().value).toHaveLength(2500);
-    expect(screen.getByText('Over the 2,000-character limit. Shorten the question to send it.')).toBeTruthy();
+    expect(screen.getByText('Over the 2,000-character limit. Shorten the question to send it.').getAttribute('aria-live')).toBe('polite');
   });
   it('near the limit: the counter shows; trailing whitespace is not counted', () => {
     render(<ChatInput disabled={false} onSend={() => {}} maxChars={2000} />);
+    fireEvent.change(box(), { target: { value: 'x'.repeat(1800) } }); // exactly 90%: still hidden
+    expect(count().textContent).toBe('');
+    fireEvent.change(box(), { target: { value: 'x'.repeat(1801) } }); // just over 90%: shown
+    expect(count().textContent).toBe('1,801 / 2,000 characters');
     fireEvent.change(box(), { target: { value: 'x'.repeat(1900) } });
     expect(count().textContent).toBe('1,900 / 2,000 characters');
     fireEvent.change(box(), { target: { value: `${'x'.repeat(2000)}\n` } });
@@ -53,6 +60,5 @@ describe('ChatInput length limit', () => {
     fireEvent.change(box(), { target: { value: 'x'.repeat(2500) } });
     expect(send().disabled).toBe(true);
     expect(count().textContent).toBe('2,500 / 2,000 characters (over the limit)');
-    useStore.setState({ simulation: null, aiPanelOpen: false });
   });
 });
