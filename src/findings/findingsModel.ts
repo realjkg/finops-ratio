@@ -202,7 +202,7 @@ export function buildFindings(workloads: Workload[] = WORKLOADS, now: Date = DEM
         gapToTarget: ratio !== null && ratio < VALUE_MINIMUM ? VALUE_MINIMUM - ratio : null,
         valueAssumptions:
           'Protected revenue, avoided cost, the quality-floor pass rate and harm from misses are stated assumptions, not measured results.',
-        source: source === 'modeled' ? 'Demo dataset.' : 'Postings recorded in this workspace.',
+        source: source === 'modeled' ? `Demo dataset, record ${w.id}.` : `Cost postings recorded in this workspace for ${w.id}; value inputs copied from demo dataset record ${w.id}.`,
       };
 
       return {

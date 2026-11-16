@@ -18,7 +18,7 @@ describe('ratio mode', () => {
 });
 
 describe('showsDemoBadge', () => {
-  const DEMO = ['/', '/overview', '/workloads', '/connectors', '/frameworks', '/reports', '/demo', '/costsource', '/mission', '/hello'];
+  const DEMO = ['/', '/overview', '/workloads', '/connectors', '/frameworks', '/methodology', '/reports', '/demo', '/costsource', '/mission', '/hello'];
   it('shows on demo pages in demo mode', () => {
     for (const p of DEMO) expect(showsDemoBadge(p, 'demo'), p).toBe(true);
   });

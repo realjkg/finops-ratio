@@ -3,7 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 // One quiet demo indicator: every demo page carries the top-bar "Demo" badge (named "Demo environment —
 // figures are illustrative") and no view spells out synthetic/sample/seeded data labels. /simulation is
 // the exception the owner chose: its route name and heading say "Simulation", so it has no badge.
-const DEMO_ROUTES = ['/', '/overview', '/workloads', '/connectors', '/frameworks', '/reports', '/demo', '/agent-workflows', '/workspace', '/outcomes',
+const DEMO_ROUTES = ['/', '/overview', '/workloads', '/connectors', '/frameworks', '/methodology', '/reports', '/demo', '/agent-workflows', '/workspace', '/outcomes',
   '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics', '/attribution', '/mission', '/hello'];
 const BADGE = 'Demo environment — figures are illustrative';
 const LABELS = /synthetic|sample workspace|sample data|import sample|seeded|demo assumption|no live connections|\bexample (cloud|private cloud|datacenter)\b/i;
@@ -54,11 +54,12 @@ test('the Connectors page after importing all three connections still shows no d
   expect((await viewText(page)).match(LABELS)).toBeNull();
 });
 
-test('the finding calculation states Basis: modeled and Source: Demo dataset, and the card does not', async ({ page }) => {
+test('the finding calculation states Basis: modeled and Source: Demo dataset with its record id, and the card does not', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('region', { name: 'Cost and value' })).not.toContainText('Basis');
   await page.getByRole('button', { name: 'View calculation' }).click();
   await expect(page.getByText('Basis: modeled.', { exact: false })).toBeVisible();
-  await expect(page.getByText('Demo dataset.', { exact: true })).toBeVisible();
+  await expect(page.getByText(/^Demo dataset, record wl-[a-z]+\.$/)).toBeVisible();
+  await expect(page.getByRole('link', { name: 'How this is calculated, and where each input comes from' })).toHaveAttribute('href', /^\/methodology#calc-wl-[a-z]+$/);
   await expect(page.getByText(/Billed cost \(|Effective cost \(/)).toHaveCount(0);
 });

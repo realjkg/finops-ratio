@@ -41,7 +41,7 @@ describe('DemoBadge', () => {
 
 describe('showsDemoBadge', () => {
   it('shows on every demo page', () => {
-    for (const p of ['/', '/overview', '/workloads', '/connectors', '/frameworks', '/reports', '/demo', '/agent-workflows', '/workspace', '/outcomes',
+    for (const p of ['/', '/overview', '/workloads', '/connectors', '/frameworks', '/methodology', '/reports', '/demo', '/agent-workflows', '/workspace', '/outcomes',
       '/costsource', '/finio', '/finio/demo', '/prediction', '/tokenomics', '/attribution', '/mission', '/hello']) {
       expect(showsDemoBadge(p, 'demo'), p).toBe(true);
       expect(showsDemoBadge(p, 'engagement'), p).toBe(false);

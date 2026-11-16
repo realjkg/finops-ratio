@@ -88,7 +88,7 @@ describe('permission matrix', () => {
       costsource: ['- D D T - D', ['/costsource', ...['sources', 'rows', 'findings', 'health', 'ingest'].map((n) => `/api/costsource/${n}`)]],
       attribution: ['O D D T - D', ['/attribution', '/api/attribution']], attribution_user: ['- D - - - D', ['attribution.user_dimension']],
       prediction: ['O D - T - D', ['/prediction', '/api/prediction/predict', '/api/prediction/accuracy']],
-      tokenomics: ['O D D T O D', ['/tokenomics', '/api/tokenomics']], frameworks: ['R R R R R R', ['/frameworks']],
+      tokenomics: ['O D D T O D', ['/tokenomics', '/api/tokenomics']], frameworks: ['R R R R R R', ['/frameworks', '/methodology']],
       reports: ['O D D T O D', ['/reports', '/api/report/snapshot', '/engagement']],
       finio_export: ['- D D - - D', ['/finio', '/api/v1/finio/export', '/api/finio/export']],
       outcomes: ['O D O T O D', ['/outcomes', '/mission']], frank: ['O D O T O D', ['/agent-workflows', '/api/v1/ai/chat']],

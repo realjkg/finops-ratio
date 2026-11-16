@@ -12,6 +12,8 @@ import { formatPct, formatRatio, formatUSD } from '@/lib/format';
 import { ratioColor } from '@/lib/scales';
 import { deriveDefensibleValue } from '@/lib/valueMath';
 import { headlineEvidence, isEvidenceStatus, weakestStatus, type ValueInput } from '@/lib/valueEvidence';
+import Link from 'next/link';
+import { methodologyHref } from '@/methodology/valueSources';
 import { estimateTca } from './model';
 import type { Workload } from '@/types';
 
@@ -112,6 +114,11 @@ export function TcaBreakdown({ workload }: { workload: Workload }) {
         )}
         . Estimates are marked, never measured — record actuals in your
         customer workspace.
+      </p>
+      <p className="mt-2 text-[11px]">
+        <Link href={methodologyHref(workload.id)} className="font-medium text-txt underline underline-offset-2">
+          How this is calculated, and where each input comes from
+        </Link>
       </p>
     </div>
   );

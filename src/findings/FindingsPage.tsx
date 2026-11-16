@@ -18,6 +18,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useStore } from '@/store/useStore';
 import { landedFindings } from '@/connectors/ingestLanding';
 import { buildFindings, type FindingView } from './findingsModel';
+import { methodologyHref } from '@/methodology/valueSources';
 import { ValueRatioMeter } from './ValueRatioMeter';
 import { ratioDomain, type RatioDomain } from './ratioAxis';
 import { VALUE_MINIMUM } from './findingsModel';
@@ -856,6 +857,11 @@ function CalculationPanel({ finding, hidden }: { finding: FindingView; hidden: b
         <div><dt className="inline font-medium text-txt">Target source. </dt><dd className="inline">{COPY.targetSetBy}.</dd></div>
         <div><dt className="inline font-medium text-txt">Source. </dt><dd className="inline">{c.source}</dd></div>
       </dl>
+      <p>
+        <Link href={methodologyHref(finding.workloadId)} className="font-medium text-txt underline underline-offset-2">
+          How this is calculated, and where each input comes from
+        </Link>
+      </p>
     </section>
   );
 }
