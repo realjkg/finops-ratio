@@ -31,6 +31,7 @@ export interface ValueCaseTerm {
   basis: 'observed' | 'forecast' | 'assumption';
   sourceRefs: string[];
   verificationRef?: string;
+  /** The KPI result it reads. The evidence status given here is not used: a kpi_result term counts as assumed until resolved. */
   kpiResult?: { resultId: string; evidenceStatus: EvidenceStatus };
 }
 
@@ -261,6 +262,9 @@ export class ValueCaseRegistry {
     if (!approver.roles.includes('finance_approver')) throw new LifecycleError('FORBIDDEN', 'approving a value case needs finance_approver');
     if (approver.id === cur.sponsorId) throw new LifecycleError('SEPARATION_OF_DUTIES', 'the sponsor cannot approve their own value case');
     if (digest !== cur.digest) throw new LifecycleError('CONFLICT', 'the case changed since it was reviewed');
+    // Versions of one phase and period are approved in order, so a later version can never become the original.
+    const later = this.versions(caseId).some((c) => c.caseVersion.version > version && c.status === 'approved' && c.caseVersion.phase === cur.caseVersion.phase && c.caseVersion.periodStart === cur.caseVersion.periodStart && c.caseVersion.periodEnd === cur.caseVersion.periodEnd);
+    if (later) throw new ValueCaseError('INVALID_CASE', ['a later version of this phase and period is already approved; approve versions in order']);
     // Rechecked at approval: a draft saved before an earlier version was approved must still state its lineage.
     const revision = this.revisionProblem(cur.caseVersion);
     if (revision) throw new ValueCaseError('INVALID_CASE', [revision]);

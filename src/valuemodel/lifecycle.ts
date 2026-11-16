@@ -129,6 +129,7 @@ export class KpiDefinitionRegistry {
     if (cur.status === 'approved') throw new LifecycleError('IMMUTABLE', 'an approved definition is frozen for publishing; create a new version to change it');
     if (actor.id !== cur.authoredBy) throw new LifecycleError('FORBIDDEN', 'only the author edits a draft');
     if (def.tenantId !== this.tenantId) throw new LifecycleError('FORBIDDEN', 'definition belongs to another tenant');
+    if (def.projectId !== cur.definition.projectId) throw new LifecycleError('FORBIDDEN', 'a definition stays in its project; create a new definition for another project');
     return this.put(this.build(cur, { definition: def, status: 'draft', approvals: [], problems: [] }, { at, by: actor.id, action: 'edited' }));
   }
 

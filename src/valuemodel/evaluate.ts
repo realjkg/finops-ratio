@@ -31,7 +31,10 @@ export interface Observation {
   sourceRefs: string[];
   /** Reference to an independent verification (not the recorder or the workload owner). */
   verificationRef?: string;
-  /** For a `kpi_result` source: the result it reads, and that result's evidence status. */
+  /**
+   * For a `kpi_result` source: the result it reads. The evidence status given here is not used: until results are
+   * resolved against the ledger, a `kpi_result` input counts as assumed.
+   */
   kpiResult?: { resultId: string; evidenceStatus: EvidenceStatus };
 }
 
@@ -78,6 +81,11 @@ function deepFreeze<T>(v: T): T {
   }
   return v;
 }
+
+/** Every field a calculation can produce. The ledger refuses any other. */
+const RESULT_FIELDS: readonly string[] = ['schemaVersion', 'resultId', 'mode', 'tenantId', 'projectId', 'definitionId', 'definitionVersion', 'definitionDigest',
+  'engineVersion', 'periodStart', 'periodEnd', 'scopeRef', 'availability', 'quantity', 'unit', 'reasons', 'evidenceStatus', 'inputs', 'target',
+  'calculatedAt', 'calculatedBy', 'supersedes', 'supersedeReason', 'resultDigest'];
 
 const SOURCE_OF_RECORD: readonly SourceKind[] = ['connector', 'upload', 'manual_observation', 'finance_register'];
 
@@ -212,7 +220,14 @@ export class KpiResultLedger {
   constructor(readonly tenantId: string) {}
 
   /** Records a first result, or a recalculation that names the result it supersedes and why. */
-  append(r: KpiResult): KpiResult {
+  append(input: KpiResult): KpiResult {
+    // Take an owned copy first and run every check on it, so a getter or a later change to the caller's object can
+    // never make the stored record differ from the one checked. Only the known result fields are accepted.
+    if (typeof input !== 'object' || input === null) throw new ResultLedgerError('MISMATCH', 'a result is an object');
+    const extra = Object.keys(input).filter((k) => !RESULT_FIELDS.includes(k));
+    if (extra.length) throw new ResultLedgerError('MISMATCH', 'the result has fields a calculation never produces');
+    let r: KpiResult;
+    try { r = structuredClone(input); } catch { throw new ResultLedgerError('MISMATCH', 'the result is not plain data'); }
     if (r.mode !== 'official') throw new ResultLedgerError('SCENARIO', 'scenario results are previews and are never recorded as official');
     if (r.tenantId !== this.tenantId) throw new ResultLedgerError('MISMATCH', 'result belongs to another tenant');
     if (this.results.some((x) => x.resultId === r.resultId)) throw new ResultLedgerError('DUPLICATE', 'result id already recorded');
@@ -229,8 +244,8 @@ export class KpiResultLedger {
       if (this.results.some((x) => x.supersedes === r.supersedes)) throw new ResultLedgerError('ALREADY_SUPERSEDED', 'that result was already superseded');
       if (!r.supersedeReason) throw new ResultLedgerError('MISMATCH', 'a recalculation states its reason');
     }
-    // Keep an owned, deeply frozen copy, so nothing the caller still holds can change the issued record.
-    const owned = deepFreeze(structuredClone(r));
+    // The checked copy is the one stored, deeply frozen, so nothing the caller still holds can change the issued record.
+    const owned = deepFreeze(r);
     this.results.push(owned);
     return owned;
   }

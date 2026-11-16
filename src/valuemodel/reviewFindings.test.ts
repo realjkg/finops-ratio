@@ -188,3 +188,41 @@ describe('Copilot second review on #202', () => {
     expect(reg.approve('case-service-automation', 2, finance, d2c, AT).status).toBe('approved');
   });
 });
+
+describe('confirmation review on #202', () => {
+  it('versions of one phase and period are approved in order, so a later forecast never becomes the original', () => {
+    const reg = new ValueCaseRegistry(TENANT);
+    const d1 = reg.saveDraft(expectedCase(), sponsor).digest;
+    const d2 = reg.saveDraft({ ...expectedCase(), version: 2, terms: expectedCase().terms.map((x) => (x.key === 'attribution' ? { ...x, quantity: '50' } : x)) }, sponsor).digest;
+    reg.approve('case-service-automation', 2, finance, d2, AT);
+    expect(() => reg.approve('case-service-automation', 1, finance, d1, AT)).toThrow(/approve versions in order/);
+  });
+
+  it('the ledger checks and stores one owned copy: getters, extra fields and non-data are refused', () => {
+    const honest = run(published(), verified());
+    let reads = 0;
+    const sneaky = { ...honest } as Record<string, unknown>;
+    Object.defineProperty(sneaky, 'quantity', { enumerable: true, get: () => (reads++ === 0 ? honest.quantity : '0.01') });
+    const ledger = new KpiResultLedger(TENANT);
+    const stored = ledger.append(sneaky as unknown as typeof honest);
+    expect(stored.quantity).toBe(honest.quantity);
+    expect(Object.getOwnPropertyDescriptor(stored, 'quantity')?.get).toBeUndefined();
+    expect(() => new KpiResultLedger(TENANT).append({ ...honest, injected: 1 } as unknown as typeof honest)).toThrow(/never produces/);
+    expect(() => new KpiResultLedger(TENANT).append({ ...honest, resultDigest: honest.resultDigest, quantity: honest.quantity, reasons: [() => 1] } as unknown as typeof honest)).toThrow(/plain data|digest/);
+  });
+
+  it('an unfrozen result is stored as a frozen copy the caller cannot change', () => {
+    const honest = run(published(), verified());
+    const unfrozen = JSON.parse(JSON.stringify(honest)) as typeof honest;
+    const stored = new KpiResultLedger(TENANT).append(unfrozen);
+    (unfrozen.inputs[0].sourceRefs as string[]).push('later');
+    expect(stored.inputs[0].sourceRefs).toEqual(honest.inputs[0].sourceRefs);
+    expect(Object.isFrozen(stored.inputs[0].sourceRefs)).toBe(true);
+  });
+
+  it('a definition cannot move to another project between edits', () => {
+    const reg = new KpiDefinitionRegistry(TENANT);
+    reg.createDraft(invoiceKpi(), sponsor, AT);
+    expect(() => reg.editDraft({ ...invoiceKpi(), projectId: 'project-other' }, sponsor, AT)).toThrow(/stays in its project/);
+  });
+});
