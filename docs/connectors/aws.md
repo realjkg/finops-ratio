@@ -175,10 +175,11 @@ scheduled for MVP rollout".
 2. The secret file on the worker's read-only secrets mount (`RATIO_SECRETS_DIR/aws/focus`, 0600).
 3. The engagement config entry above, with the customer's bucket, prefix, export name, region and
    table.
-4. **Pending owner decision:** R1's `SUPPORTED_IN_THIS_BUILD` does not yet allow managed retrieval
-   for this connector (see the M1a pull request); the worker's `fetch` reads its own check of the
-   engagement config, but startup validation of the instance refuses a managed source until that
-   is enabled.
+4. `SUPPORTED_IN_THIS_BUILD` in `src/engagement/config.ts` includes `aws-data-exports` on current
+   main (`5a1311e`). No additional allow-list decision is pending for this connector. This only
+   means the current build accepts the managed source configuration; it is not evidence that a
+   customer's identity, credentials, permissions, export layout, or live read has been verified.
+   Complete the live verification below before making any live-provider claim.
 
 **Commands the operator runs (one closed month, for example 2026-10)**
 

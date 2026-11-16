@@ -6,7 +6,7 @@ const lock = JSON.parse(readFileSync(fileURLToPath(new URL('../../package-lock.j
 
 function isPatched(version) {
   const [major, minor, patch] = version.split('.').map(Number);
-  return major > 4 || (major === 4 && (minor > 6 || (minor === 6 && patch >= 6)));
+  return major === 4 && (minor > 6 || (minor === 6 && patch >= 6));
 }
 
 describe('Zod advisory remediation', () => {
