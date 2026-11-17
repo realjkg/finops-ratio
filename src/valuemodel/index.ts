@@ -8,3 +8,4 @@ export * from './kpiDefinition';
 export * from './lifecycle';
 export * from './evaluate';
 export * from './valueCase';
+export * from './workshopApproval';
