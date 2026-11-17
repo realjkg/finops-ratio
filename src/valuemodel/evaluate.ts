@@ -96,7 +96,8 @@ function inputStatus(o: Observation): EvidenceStatus {
   // typed by the caller. Until it is resolved, it counts as assumed (never stronger).
   if (o.sourceKind === 'kpi_result') return 'assumed';
   if (o.basis === 'forecast') return 'projected';
-  return SOURCE_OF_RECORD.includes(o.sourceKind) && o.verificationRef ? 'measured' : 'assumed';
+  // Measured needs a source of record, at least one source reference and an independent verification.
+  return SOURCE_OF_RECORD.includes(o.sourceKind) && o.sourceRefs.length > 0 && o.verificationRef ? 'measured' : 'assumed';
 }
 
 export interface EvaluateArgs {

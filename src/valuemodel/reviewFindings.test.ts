@@ -240,3 +240,26 @@ describe('Copilot third review on #202', () => {
     expect(s.roiPercent).toBeNull();
   });
 });
+
+describe('Copilot fourth review on #202', () => {
+  it('a KPI input with no source reference is never measured, even with a verification reference', () => {
+    const r = run(published(), [obs('acceptedInvoices', '40', 'invoice', { sourceRefs: [] }), obs('reviewTime', '2', 'hour')]);
+    expect(r.inputs.find((i) => i.key === 'acceptedInvoices')!.evidenceStatus).toBe('assumed');
+    expect(r.evidenceStatus).toBe('assumed');
+    expect(run(published(), verified()).evidenceStatus).toBe('measured');
+  });
+
+  it('a value-case term with no source reference is assumed, not projected', () => {
+    const reg = new ValueCaseRegistry(TENANT);
+    const terms = expectedCase().terms.map((x) => ({ ...x, sourceKind: 'manual_observation' as const, basis: 'observed' as const, sourceRefs: x.key === 'aiCost' ? [] : ['ref'], verificationRef: 'verify-1' }));
+    const cv: ValueCaseVersion = { ...expectedCase(), phase: 'observed', terms };
+    reg.approve(cv.caseId, 1, finance, reg.saveDraft(cv, sponsor).digest, AT);
+    expect(reg.publish(cv.caseId, 1, finance, 's1', AT).evidenceStatus).toBe('assumed');
+  });
+
+  it('every version of a value case stays in its project', () => {
+    const reg = new ValueCaseRegistry(TENANT);
+    reg.approve('case-service-automation', 1, finance, reg.saveDraft(expectedCase(), sponsor).digest, AT);
+    expect(() => reg.saveDraft({ ...expectedCase(), version: 2, basedOnVersion: 1, rationale: 'Moved.', projectId: 'project-other' }, sponsor)).toThrow(/stays in its project/);
+  });
+});

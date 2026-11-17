@@ -115,7 +115,8 @@ function termStatus(t: ValueCaseTerm): EvidenceStatus {
   // Not resolved against the KPI result ledger yet, so the status would be typed: assumed until resolved.
   if (t.sourceKind === 'kpi_result') return 'assumed';
   if (t.basis === 'forecast') return 'projected';
-  return t.verificationRef ? 'measured' : 'assumed';
+  // Measured needs at least one source reference and an independent verification (snapshots are capped at projected).
+  return t.sourceRefs.length > 0 && t.verificationRef ? 'measured' : 'assumed';
 }
 
 /**
@@ -247,6 +248,9 @@ export class ValueCaseRegistry {
     const prior = this.versions(cv.caseId).filter((c) => c.caseVersion.version < cv.version);
     if (!existing && prior.length && cv.version !== prior[prior.length - 1].caseVersion.version + 1) throw new LifecycleError('INVALID_STATE', 'versions are consecutive');
     if (!existing && !prior.length && cv.version !== 1) throw new LifecycleError('INVALID_STATE', 'a case starts at version 1');
+    // Every version of a case belongs to one project, so versions and their variance never mix projects.
+    const first = this.versions(cv.caseId).find((c) => c.caseVersion.version !== cv.version);
+    if (first && first.caseVersion.projectId !== cv.projectId) throw new LifecycleError('FORBIDDEN', 'a case stays in its project; start a new case for another project');
     const revision = this.revisionProblem(cv);
     if (revision) throw new ValueCaseError('INVALID_CASE', [revision]);
     const c = checkValueCase(cv);

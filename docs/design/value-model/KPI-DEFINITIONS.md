@@ -64,7 +64,7 @@ Before and after results can be compared when they use the same version, or a ne
 - Every input needs one observation for the same period and scope, in a convertible unit, from an allowed source kind, inside its bounds.
 - A missing observation, a null value or a zero denominator gives **unavailable** with a reason, never 0.
 - Evidence status is computed, never chosen, and the weakest input wins (`src/lib/valueEvidence.ts`):
-  - `measured`: from a source of record with an independent verification reference;
+  - `measured`: from a source of record, with at least one source reference and an independent verification reference;
   - `projected`: a sourced forecast;
   - `assumed`: a typed assumption (even when labeled a forecast) or an unverified value.
   - Another KPI's result (`kpi_result`) counts as `assumed` until results are resolved against the result ledger; the status a caller supplies with it is never used.
@@ -83,7 +83,7 @@ Net benefit  = V − C
 ROI          = (V − C) ÷ C
 ```
 
-The case refuses any field for a ratio, net benefit or evidence status: they are computed.
+The case refuses any field for a ratio, net benefit or evidence status: they are computed. Every version of a case belongs to the same project.
 
 | Phase | Purpose | History rule |
 |---|---|---|
