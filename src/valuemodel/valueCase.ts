@@ -114,7 +114,8 @@ function termStatus(t: ValueCaseTerm): EvidenceStatus {
   if (t.basis === 'assumption' || t.sourceKind === 'assumption') return 'assumed';
   // Not resolved against the KPI result ledger yet, so the status would be typed: assumed until resolved.
   if (t.sourceKind === 'kpi_result') return 'assumed';
-  if (t.basis === 'forecast') return 'projected';
+  // Projected means a sourced forecast; a forecast with no source reference is an assumption.
+  if (t.basis === 'forecast') return t.sourceRefs.length > 0 ? 'projected' : 'assumed';
   // Measured needs at least one source reference and an independent verification (snapshots are capped at projected).
   return t.sourceRefs.length > 0 && t.verificationRef ? 'measured' : 'assumed';
 }

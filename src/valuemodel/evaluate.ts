@@ -95,7 +95,8 @@ function inputStatus(o: Observation): EvidenceStatus {
   // Another KPI's result is not resolved against the result ledger yet, so its status would be
   // typed by the caller. Until it is resolved, it counts as assumed (never stronger).
   if (o.sourceKind === 'kpi_result') return 'assumed';
-  if (o.basis === 'forecast') return 'projected';
+  // Projected means a sourced forecast; a forecast with no source reference is an assumption.
+  if (o.basis === 'forecast') return o.sourceRefs.length > 0 ? 'projected' : 'assumed';
   // Measured needs a source of record, at least one source reference and an independent verification.
   return SOURCE_OF_RECORD.includes(o.sourceKind) && o.sourceRefs.length > 0 && o.verificationRef ? 'measured' : 'assumed';
 }

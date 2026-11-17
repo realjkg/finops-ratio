@@ -263,3 +263,17 @@ describe('Copilot fourth review on #202', () => {
     expect(() => reg.saveDraft({ ...expectedCase(), version: 2, basedOnVersion: 1, rationale: 'Moved.', projectId: 'project-other' }, sponsor)).toThrow(/stays in its project/);
   });
 });
+
+describe('Copilot fifth review on #202', () => {
+  it('a forecast with no source reference is assumed, not projected', () => {
+    const def = invoiceKpi();
+    const reg = published(def);
+    const r = evaluateKpi({ record: reg.published('invoice-review-time')!, observations: [obs('acceptedInvoices', '40', 'invoice', { basis: 'forecast', sourceRefs: [] }), obs('reviewTime', '2', 'hour', { basis: 'forecast' })], periodStart: '2026-10-01', periodEnd: '2026-10-31', scopeRef: 'bu-a', resultId: 'f1', calculatedAt: AT, calculatedBy: 'svc' });
+    expect(r.inputs.map((i) => i.evidenceStatus)).toEqual(['assumed', 'projected']);
+    const vc = new ValueCaseRegistry(TENANT);
+    const terms = expectedCase().terms.map((x) => ({ ...x, sourceKind: 'connector' as const, basis: 'forecast' as const, sourceRefs: x.key === 'aiCost' ? [] : ['m'] }));
+    const cv: ValueCaseVersion = { ...expectedCase(), terms };
+    vc.approve(cv.caseId, 1, finance, vc.saveDraft(cv, sponsor).digest, AT);
+    expect(vc.publish(cv.caseId, 1, finance, 's1', AT).evidenceStatus).toBe('assumed');
+  });
+});
