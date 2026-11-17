@@ -226,3 +226,17 @@ describe('confirmation review on #202', () => {
     expect(() => reg.editDraft({ ...invoiceKpi(), projectId: 'project-other' }, sponsor, AT)).toThrow(/stays in its project/);
   });
 });
+
+describe('Copilot third review on #202', () => {
+  it('a missing term makes the calculation unavailable even when it sits in an if branch that is not taken', () => {
+    const reg = new ValueCaseRegistry(TENANT);
+    const terms = expectedCase().terms.map((x) => (x.key === 'costAfter' ? { ...x, quantity: null } : x.key === 'attribution' ? { ...x, quantity: '0' } : x));
+    const cv: ValueCaseVersion = { ...expectedCase(), terms, benefit: { ...expectedCase().benefit, expression: 'if(attribution > 0, baselineResolutions * (costBefore - costAfter) * attribution, baselineResolutions * costBefore)' } };
+    reg.approve(cv.caseId, 1, finance, reg.saveDraft(cv, sponsor).digest, AT);
+    const s = reg.publish(cv.caseId, 1, finance, 's1', AT);
+    expect(s.reasons).toContain('no value for costAfter');
+    expect(s.value).toBeNull();
+    expect(s.valueToCost).toBeNull();
+    expect(s.roiPercent).toBeNull();
+  });
+});

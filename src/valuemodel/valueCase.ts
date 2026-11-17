@@ -301,7 +301,10 @@ export class ValueCaseRegistry {
       base[t.key] = convert(parseDecimal(t.quantity) as Rational, units[t.key], baseUnit(units[t.key]));
     }
     const run = (expr: string) => {
-      const r = evaluate(parseFormula(expr), (k) => (Object.hasOwn(base, k) ? base[k] : null));
+      const tree = parseFormula(expr);
+      // Any missing term the formula names makes it unavailable, even in an if branch that is not taken.
+      if (references(tree).some((k) => !Object.hasOwn(base, k) || base[k] === null)) return null;
+      const r = evaluate(tree, (k) => (Object.hasOwn(base, k) ? base[k] : null));
       if (!r.ok) { if (r.reason !== 'missing_input') reasons.push(r.reason === 'zero_denominator' ? 'a denominator is zero' : 'value exceeds supported precision'); return null; }
       return r.value;
     };
