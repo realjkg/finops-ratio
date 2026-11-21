@@ -240,6 +240,7 @@ const DATE_COLUMNS = new Set([
 
 // Nullable string columns in the canonical model: an empty CSV cell is null.
 const NULLABLE_COLUMNS = new Set([
+  'SkuPriceDetails',
   'CommitmentDiscountStatus',
   'SkuMeter',
   'CapacityReservationId',
@@ -249,7 +250,10 @@ const NULLABLE_COLUMNS = new Set([
 /** Currency columns: ISO-4217-shaped three-letter codes. */
 const CURRENCY_COLUMNS = new Set(['BillingCurrency', 'PricingCurrency']);
 
-const KNOWN_COLUMNS = new Set([...Object.values(COLUMNS_BY_VERSION).flat(), ...LEGACY_COLUMNS]);
+// SkuPriceDetails (a FOCUS 1.1 column) is kept as text: FOCUS 1.5 carries model
+// identity and token labels inside it, and normalization parses them out. It is
+// not in COLUMNS_BY_VERSION because Ratio does not backfill or audit it.
+const KNOWN_COLUMNS = new Set([...Object.values(COLUMNS_BY_VERSION).flat(), ...LEGACY_COLUMNS, 'SkuPriceDetails']);
 
 // 1.0 columns upgradeToCanonicalCost derives from other columns when a source
 // omits them; filling them with 0 / '' here would defeat that.
@@ -392,10 +396,45 @@ const KNOWN_CURRENCIES: ReadonlySet<string> | null = (() => {
 
 function toCurrency(v: unknown, column: string): string {
   const s = toStringValue(v).trim();
+  // FOCUS 1.5 consumption currency: PricingCurrency may hold a provider-issued
+  // unit (platform credits, billing units), which must not use an ISO 4217 code.
+  // Any three-letter value is read as a currency code and must be a real one in
+  // capitals, so a miscased or mistyped code fails loudly instead of passing as
+  // credits (a three-letter provider unit is refused too: the conservative
+  // reading). Any other value is a provider-issued unit only if it is a plain
+  // name (a letter, then 3-63 letters, digits, spaces, '_' or '-') whose letters
+  // do not spell a currency code: symbols and disguised codes such as 'US$',
+  // '€', 'U.S.D' or 'usd1' are refused, never stored as credits.
+  // BillingCurrency stays a national currency.
+  if (column === 'PricingCurrency' && s !== '' && !/^[A-Za-z]{3}$/.test(s)) {
+    // Only a string can name a unit: true or ['Credits'] is never a unit.
+    if (typeof v === 'string' && isProviderUnit(s)) return s;
+    throw new Error(PRICING_UNIT_MESSAGE);
+  }
   if (!/^[A-Z]{3}$/.test(s) || (KNOWN_CURRENCIES && !KNOWN_CURRENCIES.has(s))) {
     throw new Error(`${column} is not an ISO-4217 currency code`);
   }
   return s;
+}
+
+/** The fixed (value-free) row error for a SkuPriceDetails object that cannot be serialized (too deep, circular). */
+const SKU_PRICE_DETAILS_MESSAGE = 'SkuPriceDetails is not serializable JSON';
+
+function skuPriceDetailsText(value: object): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    throw new Error(SKU_PRICE_DETAILS_MESSAGE);
+  }
+}
+
+/** The fixed (value-free) row error for a PricingCurrency that is neither a code nor a unit name. */
+const PRICING_UNIT_MESSAGE = 'PricingCurrency is neither an ISO-4217 currency code nor a provider-issued unit name';
+
+function isProviderUnit(s: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9 _-]{3,63}$/.test(s)) return false;
+  const letters = s.replace(/[^A-Za-z]/g, '').toUpperCase();
+  return !(letters.length === 3 && (KNOWN_CURRENCIES ? KNOWN_CURRENCIES.has(letters) : true));
 }
 
 function isExtensionColumn(key: string): boolean {
@@ -433,6 +472,11 @@ export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecor
     if (NUMERIC_COLUMNS.has(key)) out[key] = toNumber(value, key);
     else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value, key, opts);
     else if (CURRENCY_COLUMNS.has(key)) out[key] = isBlank(value) ? null : toCurrency(value, key);
+    // A JSON source can send SkuPriceDetails as an object: keep it as its JSON
+    // text, never String(object) ("[object Object]"), so normalization can read
+    // it. Arrays are serialized as JSON too, never String(array), which would
+    // turn ['{"ModelId":"m"}'] into object-shaped text; the parser rejects them.
+    else if (key === 'SkuPriceDetails' && value !== null && typeof value === 'object') out[key] = skuPriceDetailsText(value);
     else if (NULLABLE_COLUMNS.has(key)) out[key] = value === '' || value == null ? null : toStringValue(value);
     else out[key] = toStringValue(value);
   }
@@ -523,7 +567,7 @@ export function isFocusRowValidationMessage(message: string, artifact: string): 
   const m = /^[1-9][0-9]*: ([\s\S]*)$/.exec(message.slice(prefix.length));
   if (!m) return false;
   const reason = m[1];
-  if (reason === 'row is not an object') return true;
+  if (reason === 'row is not an object' || reason === PRICING_UNIT_MESSAGE || reason === SKU_PRICE_DETAILS_MESSAGE) return true;
   const REQUIRED = 'missing required column ';
   if (reason.startsWith(REQUIRED)) {
     return (REQUIRED_COLUMNS as readonly string[]).includes(reason.slice(REQUIRED.length));

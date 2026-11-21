@@ -99,6 +99,9 @@ export const COLUMNS_BY_VERSION: Record<FocusVersion, readonly string[]> = {
   // credits), and ISO 4217 codes stay reserved for national currencies — see
   // classifyCurrencyFormat in focusRows.ts.
   '1.5': [
+    // Families 1 and 2 are SKU Price Details PROPERTIES in FOCUS 1.5 data, not
+    // columns: sources deliver them inside SkuPriceDetails, and Ratio flattens
+    // them onto canonical rows and the FinIO wire (see skuPriceDetailsAi).
     // Family 1 — model identity (FR 2018): recommended SKU Price Details
     // properties; conformant datasets may omit them.
     'ModelDeveloper',

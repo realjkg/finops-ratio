@@ -18,6 +18,7 @@ import { governanceGatesPassed } from '@/lib/derive';
 import { computeBudgetStatus, type BudgetStatus } from '@/lib/budgetStatus';
 import type { FocusVersion } from './focusVersions';
 import { CANONICAL_FOCUS_VERSION, COLUMNS_BY_VERSION, FOCUS_VERSIONS, draftColumnsAfter, isAtLeast } from './focusVersions';
+import { SKU_PRICE_DETAILS_AI_PROPERTIES, skuPriceDetailsAi } from './focusRows';
 import type {
   CanonicalCostRow,
   CanonicalFocusRow,
@@ -121,6 +122,14 @@ export interface NormalizedRows {
   backfilledColumns: string[];
   /** FOCUS 1.5 working-draft columns backfilled onto every row (unratified — reported separately). */
   draftColumnsBackfilled: string[];
+  /**
+   * FOCUS 1.5 AI properties (model identity, token labels) that at least one row
+   * supplied as a top-level column rather than inside SkuPriceDetails, where
+   * FOCUS 1.5 defines them. Expected for Ratio's own flattened format (the seed
+   * and the FinIO wire carry them as columns); for a provider's FOCUS export it
+   * means the export is non-standard.
+   */
+  aiPropertiesFromTopLevelColumns: string[];
 }
 
 /**
@@ -155,6 +164,16 @@ function missingColumns(raws: RawSourceRow[]): string[] {
   return RATIFIED_COLUMNS.filter((c) => raws.some((r) => (r as unknown as Record<string, unknown>)[c] === undefined));
 }
 
+/** AI properties any row took from a top-level column, in property order (one parse per row). */
+function aiPropertiesFromTopLevelColumns(raws: readonly RawSourceRow[]): string[] {
+  const seen = new Set<string>();
+  for (const r of raws) {
+    for (const p of skuPriceDetailsAi(r as unknown as Record<string, unknown>).fromTopLevelColumns) seen.add(p);
+    if (seen.size === SKU_PRICE_DETAILS_AI_PROPERTIES.length) break;
+  }
+  return SKU_PRICE_DETAILS_AI_PROPERTIES.filter((p) => seen.has(p));
+}
+
 /** Full normalization: raw source rows -> canonical FOCUS rows + upgrade audit. */
 export function normalizeRows(
   raws: RawSourceRow[],
@@ -167,6 +186,7 @@ export function normalizeRows(
     ),
     backfilledColumns: missingColumns(raws),
     draftColumnsBackfilled: draftColumnsAfter(sourceVersion),
+    aiPropertiesFromTopLevelColumns: aiPropertiesFromTopLevelColumns(raws),
   };
 }
 
