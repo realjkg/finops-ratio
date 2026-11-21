@@ -4,6 +4,10 @@ Status: **Proposed** (product scope accepted; implementation and security subjec
 
 Starting checkout: `76bbede63a4a13fc8d5bc31c344caffd072b3e9e`, whose parent is PR #202's delegated and verified head `96a6068597fb4d6d35a83267f9c12b320a3c5d4a`. This note builds on [KPI definitions](KPI-DEFINITIONS.md), [Value Derivation](../value-derivation/VALUE-DERIVATION.md), [ADR-0001](../../adr/ADR-0001-ai-usage-and-gateway-platform.md), and [ADR-0002](../../adr/ADR-0002-ai-agent-orchestrator.md). It does not promote draft contracts.
 
+## Relationship to the Project Value Tracker
+
+The proposed [Project Value Tracker](PROJECT-VALUE-TRACKER.md) is the focused first-delivery scope and practical how-to. It does not implement a product workflow. This workshop remains the broader roadmap for richer collaboration, comments, scenarios, mapping review, and workshop facilitation; those capabilities are not prerequisites for a first tracker release. The tracker’s narrower scope does not supersede this roadmap or #203.
+
 ## Purpose and journey
 
 Named enterprise participants complete a prepared KPI and value-planning exercise in one to two working days; this is the workshop duration, not an implementation deadline. The outcome is an approved **planning business case**, not proof of realized benefit.
