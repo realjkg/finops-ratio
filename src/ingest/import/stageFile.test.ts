@@ -311,6 +311,7 @@ describe('R3 stageFile review: bounded memory', () => {
     const worker = compose.slice(compose.indexOf('\n  worker:'));
     const m = /\n {4}mem_limit: ([0-9]+)m\n/.exec(worker)!;
     expect(IMPORT_RSS_BUDGET_BYTES).toBeLessThanOrEqual(Number(m[1]) * 1024 * 1024 * 0.75);
+    expect(worker).toMatch(/\n {6}NODE_OPTIONS: '--max-old-space-size=192 --max-semi-space-size=4'\n/);
     expect(STAGE_RSS_BUDGET_BYTES).toBeLessThan(IMPORT_RSS_BUDGET_BYTES);
     expect(MAX_IMPORT_BYTES).toBeLessThan(STAGE_RSS_BUDGET_BYTES);
   });

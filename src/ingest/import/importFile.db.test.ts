@@ -398,7 +398,7 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
   });
 
   it(
-    'B2: the real import-file path just under the cap fits the worker container: a child with --max-old-space-size=192 stays within the RSS budget',
+    'B2: the real import-file path just under the cap fits the worker container: a child with the worker V8 limits stays within the RSS budget',
     async () => {
       const tenant = newTenant();
       expect((await addSource(tenant, 'focus-aws', 'AWS')).code).toBe(0);
@@ -417,7 +417,7 @@ describe('R3 import-file (public FOCUS 1.0 sample)', () => {
         // The .csv publishes; the .csv.gz is the same delivery content, so it is unchanged (still the whole path).
         for (const [f, outcome] of [[file, 'published'], [`${file}.gz`, 'unchanged']]) {
           const argv = ['import-file', '--tenant', tenant, '--source', 'focus-aws', '--file', f, '--period', '2024-09'];
-          const r = spawnSync(process.execPath, ['--max-old-space-size=192', '--import', 'tsx', child, ...argv], { env: { ...process.env, ...env() }, encoding: 'utf8', timeout: 280_000, maxBuffer: 64 * 1024 * 1024 });
+          const r = spawnSync(process.execPath, ['--max-old-space-size=192', '--max-semi-space-size=4', '--import', 'tsx', child, ...argv], { env: { ...process.env, ...env() }, encoding: 'utf8', timeout: 280_000, maxBuffer: 64 * 1024 * 1024 });
           const rss = JSON.parse(/RSS (\{.*\})/.exec(r.stderr)?.[1] ?? 'null');
           expect(rss, r.stderr.slice(-2000)).toMatchObject({ code: 0 });
           const record = JSON.parse(r.stdout.trim().split('\n').pop()!);

@@ -130,6 +130,8 @@ services:
       # hooks and down migrations and enables no simulation (those need development or test).
       RATIO_ENV: staging
       RATIO_MODE: engagement
+      # Keep near-cap imports within the worker's 384 MiB RSS budget without changing the container memory limit.
+      NODE_OPTIONS: '--max-old-space-size=192 --max-semi-space-size=4'
       RATIO_ENGAGEMENT_CONFIG: /config/engagement.json
       RATIO_DATABASE_URL: postgres://ratio_engagement_worker:${RATIO_ENGAGEMENT_WORKER_PASSWORD:?set in .env.engagement}@postgres:5432/ratio
       RATIO_SOURCE_S3_ENDPOINT: http://s3:8333
