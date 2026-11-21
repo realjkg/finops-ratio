@@ -69,6 +69,81 @@ export interface FocusAddedV14 {
 export type TokenCacheAction = 'Uncached' | 'Read' | 'Write' | 'Other';
 export type TokenDirection = 'Input' | 'Output';
 
+/**
+ * In FOCUS 1.5 data, model identity and token labels are FOCUS-defined
+ * PROPERTIES inside the existing SkuPriceDetails column, not columns: "The model
+ * and token properties in 1.5 live here, which is why none of them needed new
+ * columns" (Tokenomics Foundation, What FOCUS 1.5 does for AI cost, Nov 2026).
+ * Ratio flattens them onto its canonical rows and the FinIO wire.
+ */
+export const SKU_PRICE_DETAILS_AI_PROPERTIES = [
+  'ModelDeveloper',
+  'ModelFamily',
+  'ModelId',
+  'ModelVersion',
+  'TokenCacheAction',
+  'TokenDirection',
+] as const;
+export type SkuPriceDetailsAiProperty = (typeof SKU_PRICE_DETAILS_AI_PROPERTIES)[number];
+
+const TOKEN_CACHE_ACTIONS: readonly string[] = ['Uncached', 'Read', 'Write', 'Other'];
+const TOKEN_DIRECTIONS: readonly string[] = ['Input', 'Output'];
+
+/** The SkuPriceDetails column as a source supplies it: a JSON object, or its text (CSV exports). */
+export interface FocusSkuPriceDetailsColumn {
+  SkuPriceDetails: string | Record<string, unknown> | null;
+}
+
+/** SkuPriceDetails as an object, or null when absent, empty, malformed or not a JSON object (never throws). */
+export function parseSkuPriceDetails(value: unknown): Record<string, unknown> | null {
+  let v = value;
+  if (typeof v === 'string') {
+    const text = v.trim();
+    if (text === '') return null;
+    try {
+      v = JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  return v !== null && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+/** A property value Ratio accepts: a non-empty string, and for the token labels one of FOCUS's allowed values. */
+function aiPropertyValue(key: SkuPriceDetailsAiProperty, v: unknown): string | null {
+  if (typeof v !== 'string' || v.trim() === '') return null;
+  if (key === 'TokenCacheAction' && !TOKEN_CACHE_ACTIONS.includes(v)) return null;
+  if (key === 'TokenDirection' && !TOKEN_DIRECTIONS.includes(v)) return null;
+  return v;
+}
+
+export interface SkuPriceDetailsAi {
+  values: Record<SkuPriceDetailsAiProperty, string | null>;
+  /** Properties taken from a same-named top-level column (not where FOCUS 1.5 puts them). */
+  fromTopLevelColumns: SkuPriceDetailsAiProperty[];
+}
+
+/**
+ * Resolve the six AI properties for one raw row. SkuPriceDetails, where FOCUS
+ * 1.5 defines them, always wins. A same-named top-level column is accepted only
+ * as a fallback for non-standard exports, and is recorded (normalizeRows
+ * reports it as aiPropertiesFromTopLevelColumns). A value outside FOCUS's allowed set is omitted, never guessed ("omit
+ * rather than misdescribe"); rows such as a context-cache standing charge carry
+ * no token labels and stay null.
+ */
+export function skuPriceDetailsAi(raw: Record<string, unknown>): SkuPriceDetailsAi {
+  const details = parseSkuPriceDetails(raw.SkuPriceDetails);
+  const values = {} as Record<SkuPriceDetailsAiProperty, string | null>;
+  const fromTopLevelColumns: SkuPriceDetailsAiProperty[] = [];
+  for (const key of SKU_PRICE_DETAILS_AI_PROPERTIES) {
+    const inDetails = aiPropertyValue(key, details?.[key]);
+    const topLevel = inDetails === null ? aiPropertyValue(key, raw[key]) : null;
+    if (topLevel !== null) fromTopLevelColumns.push(key);
+    values[key] = inDetails ?? topLevel;
+  }
+  return { values, fromTopLevelColumns };
+}
+
 export interface FocusAddedV15 {
   // Family 1 — model identity (FR 2018). ModelId is the identifier as it
   // appears in billing (can differ per provider); family/version/developer are
@@ -158,7 +233,7 @@ export type CanonicalAttributionRow = CanonicalFocusRow & RatioAttributionExtens
 
 /** What a source at a given version actually emits: core + any newer columns. */
 export type RawSourceRow = FocusCoreV10 &
-  Partial<FocusAddedV11 & FocusAddedV12 & FocusAddedV13 & FocusAddedV14 & FocusAddedV15>;
+  Partial<FocusAddedV11 & FocusAddedV12 & FocusAddedV13 & FocusAddedV14 & FocusAddedV15 & FocusSkuPriceDetailsColumn>;
 
 /**
  * Version-negotiation shim. Upgrades a source's FOCUS export UP to the v1.4
@@ -178,6 +253,7 @@ export type RawSourceRow = FocusCoreV10 &
  * registry-derived model identity is applied in normalize.ts, not here).
  */
 export function upgradeToCanonicalCost(raw: RawSourceRow): CanonicalCostRow {
+  const ai = skuPriceDetailsAi(raw as unknown as Record<string, unknown>).values;
   return {
     ...raw,
     // Key order is the wire order; the introducing FOCUS version of each
@@ -199,12 +275,13 @@ export function upgradeToCanonicalCost(raw: RawSourceRow): CanonicalCostRow {
     // v1.5 additive (working draft — ratification 3 Dec 2026): omitted draft
     // properties stay null. Requester identity in particular is never invented
     // from team attribution — the x_RatioTeam bridge note governs that mapping.
-    ModelDeveloper: raw.ModelDeveloper ?? null,
-    ModelFamily: raw.ModelFamily ?? null,
-    ModelId: raw.ModelId ?? null,
-    ModelVersion: raw.ModelVersion ?? null,
-    TokenCacheAction: raw.TokenCacheAction ?? null,
-    TokenDirection: raw.TokenDirection ?? null,
+    // Model identity and token labels come from SkuPriceDetails (skuPriceDetailsAi).
+    ModelDeveloper: ai.ModelDeveloper,
+    ModelFamily: ai.ModelFamily,
+    ModelId: ai.ModelId,
+    ModelVersion: ai.ModelVersion,
+    TokenCacheAction: ai.TokenCacheAction as TokenCacheAction | null,
+    TokenDirection: ai.TokenDirection as TokenDirection | null,
     PrincipalId: raw.PrincipalId ?? null,
     CredentialId: raw.CredentialId ?? null,
     RequesterDetails: raw.RequesterDetails ?? null,

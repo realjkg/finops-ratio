@@ -17,6 +17,10 @@ import { MODEL_QUALITY_NOTE } from '@/data/models';
 import { formatRatio, formatSignedPct, formatUSD } from '@/lib/format';
 import { budgetConsumed, SCENARIO_REDUCTION_LABEL } from '@/lib/metricContracts';
 
+/** Token counts do not compare across models (FOCUS 1.5 AI cost guidance), so every figure below is an estimate. */
+export const TOKENIZER_CAVEAT =
+  "Estimates: each model counts tokens its own way, so the same work can take a different number of tokens on another model. These costs apply today's token counts to every model.";
+
 export function MultiModelTab({
   workload,
   models,
@@ -71,6 +75,9 @@ export function MultiModelTab({
         <span className="font-mono text-txt">{volume.avgInputTokens.toLocaleString()}</span> · avg output{' '}
         <span className="font-mono text-txt">{volume.avgOutputTokens.toLocaleString()}</span> tokens
       </div>
+      <p className="text-xs text-sub" data-testid="tokenizer-caveat">
+        {TOKENIZER_CAVEAT}
+      </p>
 
       <div className="overflow-hidden rounded-card border border-edge">
         <div className="grid grid-cols-[1.6fr_0.8fr_0.8fr_0.9fr_0.8fr] bg-raised px-3 py-2 font-mono text-[10px] uppercase tracking-wider text-dim">

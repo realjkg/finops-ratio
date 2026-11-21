@@ -240,6 +240,7 @@ const DATE_COLUMNS = new Set([
 
 // Nullable string columns in the canonical model: an empty CSV cell is null.
 const NULLABLE_COLUMNS = new Set([
+  'SkuPriceDetails',
   'CommitmentDiscountStatus',
   'SkuMeter',
   'CapacityReservationId',
@@ -249,7 +250,10 @@ const NULLABLE_COLUMNS = new Set([
 /** Currency columns: ISO-4217-shaped three-letter codes. */
 const CURRENCY_COLUMNS = new Set(['BillingCurrency', 'PricingCurrency']);
 
-const KNOWN_COLUMNS = new Set([...Object.values(COLUMNS_BY_VERSION).flat(), ...LEGACY_COLUMNS]);
+// SkuPriceDetails (a FOCUS 1.1 column) is kept as text: FOCUS 1.5 carries model
+// identity and token labels inside it, and normalization parses them out. It is
+// not in COLUMNS_BY_VERSION because Ratio does not backfill or audit it.
+const KNOWN_COLUMNS = new Set([...Object.values(COLUMNS_BY_VERSION).flat(), ...LEGACY_COLUMNS, 'SkuPriceDetails']);
 
 // 1.0 columns upgradeToCanonicalCost derives from other columns when a source
 // omits them; filling them with 0 / '' here would defeat that.
@@ -392,6 +396,14 @@ const KNOWN_CURRENCIES: ReadonlySet<string> | null = (() => {
 
 function toCurrency(v: unknown, column: string): string {
   const s = toStringValue(v).trim();
+  // FOCUS 1.5 consumption currency: PricingCurrency may hold a provider-issued
+  // unit (platform credits, billing units), which must not use an ISO 4217 code.
+  // Any three-letter value is read as a currency code and must be a real one in
+  // capitals, so a miscased or mistyped code fails loudly instead of passing as
+  // credits (a three-letter provider unit is refused too: the conservative
+  // reading). Any other non-empty value is a provider-issued unit.
+  // BillingCurrency stays a national currency.
+  if (column === 'PricingCurrency' && s !== '' && !/^[A-Za-z]{3}$/.test(s)) return s;
   if (!/^[A-Z]{3}$/.test(s) || (KNOWN_CURRENCIES && !KNOWN_CURRENCIES.has(s))) {
     throw new Error(`${column} is not an ISO-4217 currency code`);
   }
