@@ -143,6 +143,14 @@ describe('the CSV transport keeps SkuPriceDetails', () => {
     expect([row.ModelId, row.TokenCacheAction, row.TokenDirection]).toEqual(['claude-sonnet-4-20250514', 'Read', 'Input']);
   });
 
+  it('an array-valued SkuPriceDetails is rejected, never unwrapped into object-shaped text', () => {
+    for (const arr of [['{"ModelId":"m-1","TokenDirection":"Output"}'], [DETAILS], []]) {
+      const [kept] = validateFocusRecords([rec({ SkuPriceDetails: arr })], 'feed');
+      const row = upgradeToCanonicalCost(kept);
+      expect([row.ModelId, row.TokenDirection]).toEqual([null, null]);
+    }
+  });
+
   it('accepts a provider-issued unit in PricingCurrency, but never in BillingCurrency', () => {
     expect(validateFocusRecords([rec({ PricingCurrency: 'Credits' })], 'feed')[0].PricingCurrency).toBe('Credits');
     expect(validateFocusRecords([rec({ PricingCurrency: 'PLATFORM_UNITS' })], 'feed')[0].PricingCurrency).toBe('PLATFORM_UNITS');

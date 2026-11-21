@@ -458,8 +458,10 @@ export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecor
     else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value, key, opts);
     else if (CURRENCY_COLUMNS.has(key)) out[key] = isBlank(value) ? null : toCurrency(value, key);
     // A JSON source can send SkuPriceDetails as an object: keep it as its JSON
-    // text, never String(object) ("[object Object]"), so normalization can read it.
-    else if (key === 'SkuPriceDetails' && value !== null && typeof value === 'object' && !Array.isArray(value)) out[key] = JSON.stringify(value);
+    // text, never String(object) ("[object Object]"), so normalization can read
+    // it. Arrays are serialized as JSON too, never String(array), which would
+    // turn ['{"ModelId":"m"}'] into object-shaped text; the parser rejects them.
+    else if (key === 'SkuPriceDetails' && value !== null && typeof value === 'object') out[key] = JSON.stringify(value);
     else if (NULLABLE_COLUMNS.has(key)) out[key] = value === '' || value == null ? null : toStringValue(value);
     else out[key] = toStringValue(value);
   }
