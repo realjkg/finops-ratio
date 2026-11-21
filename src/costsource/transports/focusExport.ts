@@ -407,13 +407,25 @@ function toCurrency(v: unknown, column: string): string {
   // '€', 'U.S.D' or 'usd1' are refused, never stored as credits.
   // BillingCurrency stays a national currency.
   if (column === 'PricingCurrency' && s !== '' && !/^[A-Za-z]{3}$/.test(s)) {
-    if (isProviderUnit(s)) return s;
+    // Only a string can name a unit: true or ['Credits'] is never a unit.
+    if (typeof v === 'string' && isProviderUnit(s)) return s;
     throw new Error(PRICING_UNIT_MESSAGE);
   }
   if (!/^[A-Z]{3}$/.test(s) || (KNOWN_CURRENCIES && !KNOWN_CURRENCIES.has(s))) {
     throw new Error(`${column} is not an ISO-4217 currency code`);
   }
   return s;
+}
+
+/** The fixed (value-free) row error for a SkuPriceDetails object that cannot be serialized (too deep, circular). */
+const SKU_PRICE_DETAILS_MESSAGE = 'SkuPriceDetails is not serializable JSON';
+
+function skuPriceDetailsText(value: object): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    throw new Error(SKU_PRICE_DETAILS_MESSAGE);
+  }
 }
 
 /** The fixed (value-free) row error for a PricingCurrency that is neither a code nor a unit name. */
@@ -464,7 +476,7 @@ export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecor
     // text, never String(object) ("[object Object]"), so normalization can read
     // it. Arrays are serialized as JSON too, never String(array), which would
     // turn ['{"ModelId":"m"}'] into object-shaped text; the parser rejects them.
-    else if (key === 'SkuPriceDetails' && value !== null && typeof value === 'object') out[key] = JSON.stringify(value);
+    else if (key === 'SkuPriceDetails' && value !== null && typeof value === 'object') out[key] = skuPriceDetailsText(value);
     else if (NULLABLE_COLUMNS.has(key)) out[key] = value === '' || value == null ? null : toStringValue(value);
     else out[key] = toStringValue(value);
   }
@@ -555,7 +567,7 @@ export function isFocusRowValidationMessage(message: string, artifact: string): 
   const m = /^[1-9][0-9]*: ([\s\S]*)$/.exec(message.slice(prefix.length));
   if (!m) return false;
   const reason = m[1];
-  if (reason === 'row is not an object' || reason === PRICING_UNIT_MESSAGE) return true;
+  if (reason === 'row is not an object' || reason === PRICING_UNIT_MESSAGE || reason === SKU_PRICE_DETAILS_MESSAGE) return true;
   const REQUIRED = 'missing required column ';
   if (reason.startsWith(REQUIRED)) {
     return (REQUIRED_COLUMNS as readonly string[]).includes(reason.slice(REQUIRED.length));

@@ -143,6 +143,19 @@ describe('the CSV transport keeps SkuPriceDetails', () => {
     expect([row.ModelId, row.TokenCacheAction, row.TokenDirection]).toEqual(['claude-sonnet-4-20250514', 'Read', 'Input']);
   });
 
+  it('a SkuPriceDetails object too deep to serialize is a recognized, value-free row error', () => {
+    let deep: Record<string, unknown> = { ModelId: 'deep' };
+    for (let i = 0; i < 20000; i++) deep = { n: deep };
+    let message = '';
+    try {
+      validateFocusRecords([rec({ SkuPriceDetails: deep })], 'feed');
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toBe('feed: invalid FOCUS row 1: SkuPriceDetails is not serializable JSON');
+    expect(isFocusRowValidationMessage(message, 'feed')).toBe(true);
+  });
+
   it('an array-valued SkuPriceDetails is rejected, never unwrapped into object-shaped text', () => {
     for (const arr of [['{"ModelId":"m-1","TokenDirection":"Output"}'], [DETAILS], []]) {
       const [kept] = validateFocusRecords([rec({ SkuPriceDetails: arr })], 'feed');
@@ -164,8 +177,8 @@ describe('the CSV transport keeps SkuPriceDetails', () => {
   });
 
   it('refuses currency symbols and disguised codes as provider units', () => {
-    for (const bad of ['US$', '€', 'U.S.D', 'usd1', 'X', 'EUR-1', '$$$$']) {
-      expect(() => validateFocusRecords([rec({ PricingCurrency: bad })], 'feed'), bad).toThrow(/PricingCurrency/);
+    for (const bad of ['US$', '€', 'U.S.D', 'usd1', 'X', 'EUR-1', '$$$$', true, ['Credits'], 12345]) {
+      expect(() => validateFocusRecords([rec({ PricingCurrency: bad })], 'feed'), String(bad)).toThrow(/PricingCurrency/);
     }
     // The refusal is a recognized, value-free row error (the ingest route answers 400, not 500).
     let message = '';

@@ -274,13 +274,19 @@ describe('#9 ingest preserves Tags / x_* and normalizes dates + numbers', () => 
     expect(out.UsageQuantity).toBe(1000);
   });
 
-  it('a PricingCurrency that is neither a code nor a unit name is a row-level 400; a provider unit is accepted', async () => {
+  it('bad PricingCurrency and unserializable SkuPriceDetails are row-level 400s; a provider unit is accepted', async () => {
     const rows = rawRowsForVersion('1.2') as unknown as Record<string, unknown>[];
     const bad = [{ ...rows[0], PricingCurrency: 'US$' }, ...rows.slice(1)];
     const refused = await run(INGEST, req({}, {}, { method: 'POST', body: { sourceId: 'focus-file-sandbox', version: '1.2', rows: bad, window: WINDOW } }));
     expect(refused.statusCode).toBe(400);
     expect((refused.body as { error: string }).error).toMatch(/^focus-file-sandbox: invalid FOCUS row 1: PricingCurrency is neither/);
     expect((refused.body as { error: string }).error).not.toContain('US$');
+    let deep: Record<string, unknown> = { ModelId: 'deep' };
+    for (let i = 0; i < 20000; i++) deep = { n: deep };
+    const tooDeep = [{ ...rows[0], SkuPriceDetails: deep }, ...rows.slice(1)];
+    const deepRes = await run(INGEST, req({}, {}, { method: 'POST', body: { sourceId: 'focus-file-sandbox', version: '1.2', rows: tooDeep, window: WINDOW } }));
+    expect(deepRes.statusCode).toBe(400);
+    expect((deepRes.body as { error: string }).error).toBe('focus-file-sandbox: invalid FOCUS row 1: SkuPriceDetails is not serializable JSON');
     const credits = [{ ...rows[0], PricingCurrency: 'Credits' }, ...rows.slice(1)];
     const accepted = await run(INGEST, req({}, {}, { method: 'POST', body: { sourceId: 'focus-file-sandbox', version: '1.2', rows: credits, window: WINDOW } }));
     expect(accepted.statusCode).toBe(200);
