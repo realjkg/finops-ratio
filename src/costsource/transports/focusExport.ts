@@ -408,13 +408,16 @@ function toCurrency(v: unknown, column: string): string {
   // BillingCurrency stays a national currency.
   if (column === 'PricingCurrency' && s !== '' && !/^[A-Za-z]{3}$/.test(s)) {
     if (isProviderUnit(s)) return s;
-    throw new Error(`${column} is neither an ISO-4217 currency code nor a provider-issued unit name`);
+    throw new Error(PRICING_UNIT_MESSAGE);
   }
   if (!/^[A-Z]{3}$/.test(s) || (KNOWN_CURRENCIES && !KNOWN_CURRENCIES.has(s))) {
     throw new Error(`${column} is not an ISO-4217 currency code`);
   }
   return s;
 }
+
+/** The fixed (value-free) row error for a PricingCurrency that is neither a code nor a unit name. */
+const PRICING_UNIT_MESSAGE = 'PricingCurrency is neither an ISO-4217 currency code nor a provider-issued unit name';
 
 function isProviderUnit(s: string): boolean {
   if (!/^[A-Za-z][A-Za-z0-9 _-]{3,63}$/.test(s)) return false;
@@ -552,7 +555,7 @@ export function isFocusRowValidationMessage(message: string, artifact: string): 
   const m = /^[1-9][0-9]*: ([\s\S]*)$/.exec(message.slice(prefix.length));
   if (!m) return false;
   const reason = m[1];
-  if (reason === 'row is not an object') return true;
+  if (reason === 'row is not an object' || reason === PRICING_UNIT_MESSAGE) return true;
   const REQUIRED = 'missing required column ';
   if (reason.startsWith(REQUIRED)) {
     return (REQUIRED_COLUMNS as readonly string[]).includes(reason.slice(REQUIRED.length));

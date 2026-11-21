@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { CanonicalFocusRow, FocusCoreV10, RawSourceRow } from './focusRows';
 import { parseSkuPriceDetails, skuPriceDetailsAi, upgradeToCanonicalCost } from './focusRows';
 import { normalizeRows } from './normalize';
-import { validateFocusRecords } from './transports/focusExport';
+import { isFocusRowValidationMessage, validateFocusRecords } from './transports/focusExport';
 import { computeAiSpendRatio } from './aiSpendRatio';
 import { resourceIdFor } from './seed';
 import { MultiModelTab, TOKENIZER_CAVEAT } from '@/components/detail/MultiModelTab';
@@ -167,6 +167,15 @@ describe('the CSV transport keeps SkuPriceDetails', () => {
     for (const bad of ['US$', '€', 'U.S.D', 'usd1', 'X', 'EUR-1', '$$$$']) {
       expect(() => validateFocusRecords([rec({ PricingCurrency: bad })], 'feed'), bad).toThrow(/PricingCurrency/);
     }
+    // The refusal is a recognized, value-free row error (the ingest route answers 400, not 500).
+    let message = '';
+    try {
+      validateFocusRecords([rec({ PricingCurrency: 'US$' })], 'feed');
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).not.toContain('US$');
+    expect(isFocusRowValidationMessage(message, 'feed')).toBe(true);
     for (const ok of ['Credits', 'PLATFORM_UNITS', 'Compute Units', 'tokens-v2']) {
       expect(validateFocusRecords([rec({ PricingCurrency: ok })], 'feed')[0].PricingCurrency).toBe(ok);
     }
