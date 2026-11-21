@@ -125,6 +125,11 @@ export function IngestVerification({
             ? 'no backfill (canonical already)'
             : `backfilled ${s.backfilledColumns.length} column(s)`}
         </span>
+        {s.aiPropertiesFromTopLevelColumns.length > 0 && (
+          <span className="text-dim" data-testid="ai-property-fallback-count" title={s.aiPropertiesFromTopLevelColumns.join(', ')}>
+            {`${s.aiPropertiesFromTopLevelColumns.length} model/token label(s) from top-level columns, not SkuPriceDetails`}
+          </span>
+        )}
       </div>
 
       {variance.length > 0 && <SourceVariance rows={variance} />}

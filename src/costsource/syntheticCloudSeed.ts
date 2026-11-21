@@ -136,7 +136,7 @@ export function syntheticCloudRawRows(sourceId: string): SyntheticRawRow[] {
 export function syntheticCloudRows(sourceId: string, window: CostWindow): CostRowsResult {
   const descriptor = SYNTHETIC_CLOUD_DESCRIPTORS.find((d) => d.id === sourceId);
   if (!descriptor) throw new Error(`Unknown synthetic cloud source '${sourceId}'`);
-  const { rows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(
+  const { rows, backfilledColumns, draftColumnsBackfilled, aiPropertiesFromTopLevelColumns } = normalizeRows(
     syntheticCloudRawRows(sourceId).filter((r) => inWindow(r, window)),
     sourceId,
     descriptor.focusVersion,
@@ -147,6 +147,7 @@ export function syntheticCloudRows(sourceId: string, window: CostWindow): CostRo
     canonicalVersion: CANONICAL_FOCUS_VERSION,
     backfilledColumns,
     draftColumnsBackfilled,
+    aiPropertiesFromTopLevelColumns,
     window,
     generatedAt: new Date().toISOString(),
     rows,

@@ -72,7 +72,7 @@ export class MockCostSourceClient implements CostSourceClient {
     if (sourceId === SERVICENOW_SANDBOX_SOURCE_ID) {
       return ServiceNowAdapter.ingest(ServiceNowAdapter.seedRows(), src.focusVersion, sourceId, window);
     }
-    const { rows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(
+    const { rows, backfilledColumns, draftColumnsBackfilled, aiPropertiesFromTopLevelColumns } = normalizeRows(
       rawRowsForVersion(src.focusVersion),
       src.id,
       src.focusVersion,
@@ -83,6 +83,7 @@ export class MockCostSourceClient implements CostSourceClient {
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
       draftColumnsBackfilled,
+      aiPropertiesFromTopLevelColumns,
       window,
       generatedAt: new Date().toISOString(),
       rows,
