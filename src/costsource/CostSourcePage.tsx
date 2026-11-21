@@ -471,7 +471,7 @@ export function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
 export const AI_PROPERTY_FALLBACK_LABEL =
   'Model and token labels read from top-level columns, not from SkuPriceDetails, where FOCUS 1.5 defines them:';
 export const AI_PROPERTY_FALLBACK_NOTE =
-  "In a provider's FOCUS 1.5 export, this means the export does not follow the standard. Ratio's own flattened format (FinIO) carries these labels as columns by design.";
+  "In a provider's FOCUS 1.5 export, this means the export does not follow the standard. Ratio's own flattened formats (FinIO and its FOCUS 1.5 sample data) carry these labels as columns by design.";
 
 /**
  * Says which FOCUS 1.5 model and token labels came from top-level columns. An

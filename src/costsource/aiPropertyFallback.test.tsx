@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup as html } from 'react-dom/server';
 import { FocusFileAdapter } from './FocusFileAdapter';
 import { ServiceNowAdapter } from './ServiceNowAdapter';
+import { CloudConnectorAdapter } from './CloudConnectorAdapter';
+import { KUBERNETES_CONNECTOR_SPEC } from './kubernetesConfig';
 import { rawRowsForVersion } from './seed';
 import type { RawSourceRow } from './focusRows';
 import { AI_PROPERTY_FALLBACK_LABEL, AI_PROPERTY_FALLBACK_NOTE, AiPropertyFallback, UpgradeAuditCard } from './CostSourcePage';
@@ -33,8 +35,17 @@ describe('the ingest result says which AI labels came from top-level columns', (
     expect(r.rows[0].ModelId).toBe('m-1');
   });
 
-  it('every adapter passes it through (ServiceNow shown; the type requires it of all)', () => {
+  it('the ServiceNow adapter passes it through', () => {
     const r = ServiceNowAdapter.ingest(withTopLevel(), '1.4', 'servicenow-sandbox', WINDOW);
+    expect(r.aiPropertiesFromTopLevelColumns).toEqual(['ModelId', 'TokenDirection']);
+  });
+
+  it('a live config-driven connector passes it through from its export rows', async () => {
+    const adapter = new CloudConnectorAdapter(KUBERNETES_CONNECTOR_SPEC, {
+      env: { KUBERNETES_FOCUS_ENDPOINT: 'http://opencost.kube-system.svc/focus' },
+      transportFactory: () => ({ ping: async () => true, fetchExportRows: async () => withTopLevel() }),
+    });
+    const r = await adapter.fetchCostRows(WINDOW);
     expect(r.aiPropertiesFromTopLevelColumns).toEqual(['ModelId', 'TokenDirection']);
   });
 });
@@ -47,6 +58,7 @@ describe('the cost source page shows it in the version normalization card', () =
     expect(out).toContain('>ModelId<');
     expect(out).toContain('>TokenDirection<');
     expect(out).toContain(AI_PROPERTY_FALLBACK_NOTE.replace(/'/g, '&#x27;'));
+    expect(AI_PROPERTY_FALLBACK_NOTE).toContain('FOCUS 1.5 sample data');
   });
 
   it('shows nothing when no label came from a top-level column', () => {
@@ -61,11 +73,11 @@ describe('the cost source page shows it in the version normalization card', () =
 });
 
 describe('the connector ingest verification shows the count', () => {
-  it('counts the labels and names them on hover', () => {
+  it('names the labels inline, readable without hover', () => {
     const out = html(<IngestVerification run={run(FocusFileAdapter.ingest(withTopLevel(), '1.4', 'focus-file-sandbox', WINDOW))} sandbox={false} />);
     expect(out).toContain('data-testid="ai-property-fallback-count"');
-    expect(out).toContain('title="ModelId, TokenDirection"');
-    expect(out).toContain('2 model/token label(s) from top-level columns, not SkuPriceDetails');
+    expect(out).toContain('Model/token labels from top-level columns, not SkuPriceDetails: ModelId, TokenDirection');
+    expect(out).not.toContain('title="ModelId');
   });
 
   it('says nothing when there are none, and a stored run without the field reads as none', () => {

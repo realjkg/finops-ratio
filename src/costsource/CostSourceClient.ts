@@ -68,8 +68,8 @@ export interface CostRowsResult {
   /**
    * FOCUS 1.5 model and token labels some row supplied as top-level columns
    * instead of inside SkuPriceDetails, where FOCUS 1.5 defines them. Expected for
-   * Ratio's own flattened format (FinIO); for a provider export it means the
-   * export is non-standard. Additive field (see the API compatibility golden).
+   * Ratio's own flattened formats (FinIO and its FOCUS 1.5 sample data); for a
+   * provider export it means the export is non-standard. Additive field (see the API compatibility golden).
    */
   aiPropertiesFromTopLevelColumns: string[];
   window: CostWindow;
