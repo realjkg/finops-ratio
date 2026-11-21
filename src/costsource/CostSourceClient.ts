@@ -65,6 +65,13 @@ export interface CostRowsResult {
   canonicalVersion: FocusVersion; // always the v1.4 canonical target
   backfilledColumns: string[]; // ratified columns the shim added to reach canonical
   draftColumnsBackfilled: string[]; // FOCUS 1.5 working-draft columns backfilled (unratified)
+  /**
+   * FOCUS 1.5 model and token labels some row supplied as top-level columns
+   * instead of inside SkuPriceDetails, where FOCUS 1.5 defines them. Expected for
+   * Ratio's own flattened formats (FinIO and its FOCUS 1.5 sample data); for a
+   * provider export it means the export is non-standard. Additive field (see the API compatibility golden).
+   */
+  aiPropertiesFromTopLevelColumns: string[];
   window: CostWindow;
   generatedAt: string; // ISO 8601
   rows: CanonicalFocusRow[];
