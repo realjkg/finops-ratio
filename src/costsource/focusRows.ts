@@ -125,9 +125,11 @@ export interface SkuPriceDetailsAi {
 
 /**
  * Resolve the six AI properties for one raw row. SkuPriceDetails, where FOCUS
- * 1.5 defines them, always wins. A same-named top-level column is accepted only
- * as a fallback for non-standard exports, and is recorded (normalizeRows
- * reports it as aiPropertiesFromTopLevelColumns). A value outside FOCUS's allowed set is omitted, never guessed ("omit
+ * 1.5 defines them, always wins: a property PRESENT there is authoritative even
+ * when its value is null or invalid (it then stays null). A same-named top-level
+ * column is consulted only when SkuPriceDetails lacks the property, as a
+ * fallback for non-standard exports, and is recorded (normalizeRows reports it
+ * as aiPropertiesFromTopLevelColumns). A value outside FOCUS's allowed set is omitted, never guessed ("omit
  * rather than misdescribe"); rows such as a context-cache standing charge carry
  * no token labels and stay null.
  */
@@ -136,10 +138,14 @@ export function skuPriceDetailsAi(raw: Record<string, unknown>): SkuPriceDetails
   const values = {} as Record<SkuPriceDetailsAiProperty, string | null>;
   const fromTopLevelColumns: SkuPriceDetailsAiProperty[] = [];
   for (const key of SKU_PRICE_DETAILS_AI_PROPERTIES) {
-    const inDetails = aiPropertyValue(key, details?.[key]);
-    const topLevel = inDetails === null ? aiPropertyValue(key, raw[key]) : null;
+    // Own properties only, so inherited keys never count as present.
+    if (details !== null && Object.prototype.hasOwnProperty.call(details, key)) {
+      values[key] = aiPropertyValue(key, details[key]);
+      continue;
+    }
+    const topLevel = aiPropertyValue(key, raw[key]);
     if (topLevel !== null) fromTopLevelColumns.push(key);
-    values[key] = inDetails ?? topLevel;
+    values[key] = topLevel;
   }
   return { values, fromTopLevelColumns };
 }

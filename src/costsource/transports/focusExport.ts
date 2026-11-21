@@ -401,13 +401,25 @@ function toCurrency(v: unknown, column: string): string {
   // Any three-letter value is read as a currency code and must be a real one in
   // capitals, so a miscased or mistyped code fails loudly instead of passing as
   // credits (a three-letter provider unit is refused too: the conservative
-  // reading). Any other non-empty value is a provider-issued unit.
+  // reading). Any other value is a provider-issued unit only if it is a plain
+  // name (a letter, then 3-63 letters, digits, spaces, '_' or '-') whose letters
+  // do not spell a currency code: symbols and disguised codes such as 'US$',
+  // '€', 'U.S.D' or 'usd1' are refused, never stored as credits.
   // BillingCurrency stays a national currency.
-  if (column === 'PricingCurrency' && s !== '' && !/^[A-Za-z]{3}$/.test(s)) return s;
+  if (column === 'PricingCurrency' && s !== '' && !/^[A-Za-z]{3}$/.test(s)) {
+    if (isProviderUnit(s)) return s;
+    throw new Error(`${column} is neither an ISO-4217 currency code nor a provider-issued unit name`);
+  }
   if (!/^[A-Z]{3}$/.test(s) || (KNOWN_CURRENCIES && !KNOWN_CURRENCIES.has(s))) {
     throw new Error(`${column} is not an ISO-4217 currency code`);
   }
   return s;
+}
+
+function isProviderUnit(s: string): boolean {
+  if (!/^[A-Za-z][A-Za-z0-9 _-]{3,63}$/.test(s)) return false;
+  const letters = s.replace(/[^A-Za-z]/g, '').toUpperCase();
+  return !(letters.length === 3 && (KNOWN_CURRENCIES ? KNOWN_CURRENCIES.has(letters) : true));
 }
 
 function isExtensionColumn(key: string): boolean {
@@ -445,6 +457,9 @@ export function coerceFocusRecord(rec: Record<string, unknown>, opts: FocusRecor
     if (NUMERIC_COLUMNS.has(key)) out[key] = toNumber(value, key);
     else if (DATE_COLUMNS.has(key)) out[key] = toIsoDate(value, key, opts);
     else if (CURRENCY_COLUMNS.has(key)) out[key] = isBlank(value) ? null : toCurrency(value, key);
+    // A JSON source can send SkuPriceDetails as an object: keep it as its JSON
+    // text, never String(object) ("[object Object]"), so normalization can read it.
+    else if (key === 'SkuPriceDetails' && value !== null && typeof value === 'object' && !Array.isArray(value)) out[key] = JSON.stringify(value);
     else if (NULLABLE_COLUMNS.has(key)) out[key] = value === '' || value == null ? null : toStringValue(value);
     else out[key] = toStringValue(value);
   }

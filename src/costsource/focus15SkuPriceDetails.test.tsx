@@ -73,6 +73,20 @@ describe('model identity and token labels come from SkuPriceDetails', () => {
     expect(row.TokenDirection).toBe('Input');
   });
 
+  it('a property present in SkuPriceDetails is authoritative even when invalid or null: no top-level fallback', () => {
+    const raw = core({ SkuPriceDetails: JSON.stringify({ TokenDirection: 'input', ModelId: null }), TokenDirection: 'Output', ModelId: 'stale' });
+    const row = upgradeToCanonicalCost(raw);
+    expect(row.TokenDirection).toBeNull();
+    expect(row.ModelId).toBeNull();
+    expect(skuPriceDetailsAi(raw as unknown as Record<string, unknown>).fromTopLevelColumns).toEqual([]);
+  });
+
+  it('inherited keys never count as present in SkuPriceDetails', () => {
+    const row = upgradeToCanonicalCost(core({ SkuPriceDetails: '{"__proto__": {"ModelId": "polluted"}}', ModelId: 'top' }));
+    expect(row.ModelId).toBe('top');
+    expect(({} as Record<string, unknown>).ModelId).toBeUndefined();
+  });
+
   it('falls back to a top-level column only when SkuPriceDetails lacks the property, and says so', () => {
     const raws = [core({ SkuPriceDetails: JSON.stringify({ ModelId: 'm-1' }), ModelDeveloper: 'Dev', TokenDirection: 'Output' })];
     const row = upgradeToCanonicalCost(raws[0]);
@@ -122,6 +136,13 @@ describe('the CSV transport keeps SkuPriceDetails', () => {
     expect(empty.SkuPriceDetails).toBeNull();
   });
 
+  it('keeps an object-valued SkuPriceDetails (JSON sources) readable, never "[object Object]"', () => {
+    const [kept] = validateFocusRecords([rec({ SkuPriceDetails: DETAILS })], 'feed');
+    expect(kept.SkuPriceDetails).toBe(JSON.stringify(DETAILS));
+    const row = upgradeToCanonicalCost(kept);
+    expect([row.ModelId, row.TokenCacheAction, row.TokenDirection]).toEqual(['claude-sonnet-4-20250514', 'Read', 'Input']);
+  });
+
   it('accepts a provider-issued unit in PricingCurrency, but never in BillingCurrency', () => {
     expect(validateFocusRecords([rec({ PricingCurrency: 'Credits' })], 'feed')[0].PricingCurrency).toBe('Credits');
     expect(validateFocusRecords([rec({ PricingCurrency: 'PLATFORM_UNITS' })], 'feed')[0].PricingCurrency).toBe('PLATFORM_UNITS');
@@ -132,6 +153,15 @@ describe('the CSV transport keeps SkuPriceDetails', () => {
     expect(() => validateFocusRecords([rec({ PricingCurrency: 'eur' })], 'feed')).toThrow(/PricingCurrency/);
     expect(() => validateFocusRecords([rec({ PricingCurrency: 'XQZ' })], 'feed')).toThrow(/PricingCurrency/);
     expect(validateFocusRecords([rec({ PricingCurrency: 'EUR' })], 'feed')[0].PricingCurrency).toBe('EUR');
+  });
+
+  it('refuses currency symbols and disguised codes as provider units', () => {
+    for (const bad of ['US$', '€', 'U.S.D', 'usd1', 'X', 'EUR-1', '$$$$']) {
+      expect(() => validateFocusRecords([rec({ PricingCurrency: bad })], 'feed'), bad).toThrow(/PricingCurrency/);
+    }
+    for (const ok of ['Credits', 'PLATFORM_UNITS', 'Compute Units', 'tokens-v2']) {
+      expect(validateFocusRecords([rec({ PricingCurrency: ok })], 'feed')[0].PricingCurrency).toBe(ok);
+    }
   });
 });
 

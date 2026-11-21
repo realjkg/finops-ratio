@@ -164,6 +164,16 @@ function missingColumns(raws: RawSourceRow[]): string[] {
   return RATIFIED_COLUMNS.filter((c) => raws.some((r) => (r as unknown as Record<string, unknown>)[c] === undefined));
 }
 
+/** AI properties any row took from a top-level column, in property order (one parse per row). */
+function aiPropertiesFromTopLevelColumns(raws: readonly RawSourceRow[]): string[] {
+  const seen = new Set<string>();
+  for (const r of raws) {
+    for (const p of skuPriceDetailsAi(r as unknown as Record<string, unknown>).fromTopLevelColumns) seen.add(p);
+    if (seen.size === SKU_PRICE_DETAILS_AI_PROPERTIES.length) break;
+  }
+  return SKU_PRICE_DETAILS_AI_PROPERTIES.filter((p) => seen.has(p));
+}
+
 /** Full normalization: raw source rows -> canonical FOCUS rows + upgrade audit. */
 export function normalizeRows(
   raws: RawSourceRow[],
@@ -176,9 +186,7 @@ export function normalizeRows(
     ),
     backfilledColumns: missingColumns(raws),
     draftColumnsBackfilled: draftColumnsAfter(sourceVersion),
-    aiPropertiesFromTopLevelColumns: SKU_PRICE_DETAILS_AI_PROPERTIES.filter((p) =>
-      raws.some((r) => skuPriceDetailsAi(r as unknown as Record<string, unknown>).fromTopLevelColumns.includes(p)),
-    ),
+    aiPropertiesFromTopLevelColumns: aiPropertiesFromTopLevelColumns(raws),
   };
 }
 
