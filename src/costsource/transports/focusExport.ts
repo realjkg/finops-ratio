@@ -189,7 +189,7 @@ export function parseCsv(text: string): Record<string, string>[] {
   if (!header) return [];
   return body.map((cells, i) => {
     if (cells.length !== header.length) {
-      throw new Error(`export is not valid CSV (row ${i + 1} has the wrong number of cells)`);
+      throw new Error(`export is not valid CSV (record ${i + 1} has the wrong number of cells)`);
     }
     const rec: Record<string, string> = {};
     header.forEach((h, idx) => {

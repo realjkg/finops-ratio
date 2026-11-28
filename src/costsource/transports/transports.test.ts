@@ -52,9 +52,9 @@ describe('FOCUS export parsing', () => {
 
   it('rejects a row whose cell count differs from the header, without echoing cells', () => {
     const extra = 'BilledCost,BillingCurrency\n1.5,USD,EXTRA-CELL-MARKER\n';
-    expect(() => parseCsv(extra)).toThrow('export is not valid CSV (row 1 has the wrong number of cells)');
+    expect(() => parseCsv(extra)).toThrow('export is not valid CSV (record 1 has the wrong number of cells)');
     const short = 'BilledCost,BillingCurrency\n1.5,USD\n2\n';
-    expect(() => parseCsv(short)).toThrow('export is not valid CSV (row 2 has the wrong number of cells)');
+    expect(() => parseCsv(short)).toThrow('export is not valid CSV (record 2 has the wrong number of cells)');
     let message = '';
     try {
       parseCsv(extra);
@@ -78,8 +78,8 @@ describe('FOCUS export parsing', () => {
   });
 
   it('a quoted empty field is a one-cell record, not a blank line, with or without a trailing newline', () => {
-    expect(() => parseCsv('a,b\n1,2\n""\n')).toThrow('export is not valid CSV (row 2 has the wrong number of cells)');
-    expect(() => parseCsv('a,b\n1,2\n""')).toThrow('export is not valid CSV (row 2 has the wrong number of cells)');
+    expect(() => parseCsv('a,b\n1,2\n""\n')).toThrow('export is not valid CSV (record 2 has the wrong number of cells)');
+    expect(() => parseCsv('a,b\n1,2\n""')).toThrow('export is not valid CSV (record 2 has the wrong number of cells)');
     expect(parseCsv('a\n""\n')).toEqual([{ a: '' }]);
     expect(parseCsv('a,b\n"",""\n')).toEqual([{ a: '', b: '' }]);
   });

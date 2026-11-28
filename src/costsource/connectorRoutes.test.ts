@@ -127,7 +127,7 @@ describe('/api/costsource/rows — live-data auth gate', () => {
     expect(res.body).toMatchObject({ error: 'Internal error' });
     expect(JSON.stringify(res.body)).not.toContain('RAGGED-CELL-MARKER');
     const logged = error.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(logged).toContain('export is not valid CSV (row 1 has the wrong number of cells)');
+    expect(logged).toContain('export is not valid CSV (record 1 has the wrong number of cells)');
     expect(logged).not.toContain('RAGGED-CELL-MARKER');
     error.mockRestore();
   });
