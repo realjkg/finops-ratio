@@ -324,6 +324,14 @@ describe('LOW limiter hygiene', () => {
     expect(key('::FFFF:192.0.2.10')).toBe('192.0.2.10');
     expect(key('::ffff:c000:20a')).not.toBe(key('::ffff:c000:20b'));
     expect(key('2001:db8:1:2::1')).toBe('2001:db8:1:2::/64');
+    // Partially compressed forms (Copilot, challenger): parsed as groups, not matched as text.
+    expect(key('0:0::ffff:c000:20a')).toBe('192.0.2.10');
+    expect(key('0::ffff:192.0.2.10')).toBe('192.0.2.10');
+    expect(key('::0:ffff:c000:20b')).toBe('192.0.2.11');
+    // Not mapped, or not valid: never rewritten into some other client's key.
+    expect(key('::ffff:999.1.1.1')).toBe('::ffff:999.1.1.1');
+    expect(v6Prefix('2001:db8::1:2::3')).toBe('2001:db8::1:2::3');
+    expect(v6Prefix('fe80::1%eth0')).toBe('fe80::1%eth0');
   });
 
   it('a missing socket address is counted under "unknown" but never blocks a valid token', async () => {
