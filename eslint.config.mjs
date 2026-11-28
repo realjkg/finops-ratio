@@ -1,5 +1,5 @@
 // ESLint flat config (ESLint v10+, react-hooks v7, typescript-eslint v8).
-// Equivalent to the old .eslintrc.cjs rules, using the flat config API.
+// Flat config only (ESLint reads no legacy .eslintrc).
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
