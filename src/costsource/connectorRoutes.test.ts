@@ -116,6 +116,22 @@ describe('/api/costsource/rows — live-data auth gate', () => {
     expect(body.rows[0]).toMatchObject({ BilledCost: 42, ServiceName: 'OpenCost namespace', x_RatioSourceId: 'kubernetes' });
   });
 
+  it('refuses a ragged live CSV export with the generic 500 and logs no cell values', async () => {
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://billing.internal/focus.csv';
+    process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';
+    const ragged = CSV.replace('arn:ratio:workload/wl-001', 'arn:ratio:workload/wl-001,RAGGED-CELL-MARKER');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(ragged)));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const res = await callRows({ authorization: 'Bearer right-token-0123456789abcdef-0123456789' });
+    expect(res.statusCode).toBe(500);
+    expect(res.body).toMatchObject({ error: 'Internal error' });
+    expect(JSON.stringify(res.body)).not.toContain('RAGGED-CELL-MARKER');
+    const logged = error.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(logged).toContain('export is not valid CSV (record 1 has the wrong number of cells)');
+    expect(logged).not.toContain('RAGGED-CELL-MARKER');
+    error.mockRestore();
+  });
+
   it('returns 409 (not configured) for an available connector, with no network', async () => {
     // Deny-by-default (H1): the 409 is only reachable after live-data auth.
     process.env.RATIO_API_TOKEN = 'right-token-0123456789abcdef-0123456789';

@@ -129,16 +129,36 @@ export async function decodeExportBytes(bytes: Uint8Array, name: string): Promis
 
 // --- parsing ----------------------------------------------------------------
 
-/** RFC 4180 CSV → records keyed by header. Handles quotes, escaped quotes, CRLF. */
+/**
+ * RFC 4180 CSV → records keyed by header. Handles quotes, escaped quotes, CRLF.
+ * Strict like the worker's csv-parse (`relax_column_count: false`): a row whose
+ * cell count differs from the header, or an unterminated quoted field, throws a
+ * FIXED message (never the cell contents, which are upstream data).
+ */
 export function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   let field = '';
   let row: string[] = [];
   let inQuotes = false;
+  // A record exists once its line has any character, quotes included: only a
+  // physically empty line is skipped, so `""` stays a (one-cell) record.
+  let hasContent = false;
   const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text; // strip BOM
 
   for (let i = 0; i < src.length; i += 1) {
     const c = src[i];
+    if (!inQuotes && (c === '\n' || c === '\r')) {
+      if (c === '\r' && src[i + 1] === '\n') i += 1;
+      if (hasContent) {
+        row.push(field);
+        rows.push(row);
+      }
+      row = [];
+      field = '';
+      hasContent = false;
+      continue;
+    }
+    hasContent = true;
     if (inQuotes) {
       if (c === '"') {
         if (src[i + 1] === '"') {
@@ -155,27 +175,25 @@ export function parseCsv(text: string): Record<string, string>[] {
     } else if (c === ',') {
       row.push(field);
       field = '';
-    } else if (c === '\n' || c === '\r') {
-      if (c === '\r' && src[i + 1] === '\n') i += 1;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = '';
     } else {
       field += c;
     }
   }
-  if (field !== '' || row.length > 0) {
+  if (inQuotes) throw new Error('export is not valid CSV (unterminated quoted field)');
+  if (hasContent) {
     row.push(field);
     rows.push(row);
   }
 
-  const [header, ...body] = rows.filter((r) => !(r.length === 1 && r[0] === ''));
+  const [header, ...body] = rows;
   if (!header) return [];
-  return body.map((cells) => {
+  return body.map((cells, i) => {
+    if (cells.length !== header.length) {
+      throw new Error(`export is not valid CSV (record ${i + 1} has the wrong number of cells)`);
+    }
     const rec: Record<string, string> = {};
     header.forEach((h, idx) => {
-      rec[h.trim()] = cells[idx] ?? '';
+      rec[h.trim()] = cells[idx];
     });
     return rec;
   });
