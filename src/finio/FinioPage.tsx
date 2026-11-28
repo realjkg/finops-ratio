@@ -47,7 +47,7 @@ export function FocusRowLine({ row }: { row: FocusRow }) {
       <td className="py-2 pr-4 text-xs text-sub">{row.ProviderName}</td>
       <td className="py-2 pr-4 text-xs font-mono text-txt text-right">{usd(row.BilledCost)}</td>
       {/* x_Ratio* columns — highlighted in value colour */}
-      <td className="py-2 pr-4 text-xs font-mono font-semibold text-value text-right">
+      <td className={`py-2 pr-4 text-xs font-mono font-semibold text-right ${row.x_RatioWorkloadId === '' ? 'text-dim' : 'text-value'}`}>
         {formatRatio(row.x_RatioWorkloadId === '' ? null : row.x_RatioValueRatio)}
       </td>
       <td className="py-2 pr-4 text-xs font-mono font-semibold text-value text-right">

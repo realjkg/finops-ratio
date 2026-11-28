@@ -45,10 +45,12 @@ describe('FinIO FocusRowLine value ratio', () => {
     const unattributed = render({ ...row, x_RatioWorkloadId: '', x_RatioValueRatio: 0 });
     expect(unattributed).toContain('>N/A<');
     expect(unattributed).not.toContain('0.0×');
+    expect(unattributed).toMatch(/text-right text-dim">N\/A</); // N/A is neutral, never the value color
 
     const attributed = render(row);
     expect(row.x_RatioWorkloadId).not.toBe('');
     expect(attributed).toContain(`${row.x_RatioValueRatio.toFixed(1)}×`);
     expect(attributed).not.toContain('>N/A<');
+    expect(attributed).toMatch(/text-right text-value">[^<]*×</);
   });
 });
