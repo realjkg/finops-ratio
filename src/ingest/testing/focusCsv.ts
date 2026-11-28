@@ -89,11 +89,3 @@ export function csvGz(rows: FocusRow[], header: readonly string[] = FOCUS_HEADER
 export function rowsOf(period: string, n: number, cost = '1.25', tag = 'r'): FocusRow[] {
   return Array.from({ length: n }, (_, i) => focusRow(period, { BilledCost: cost, ResourceId: `${tag}-${i}` }));
 }
-
-/** First day of the current UTC month and the previous one, as 'YYYY-MM-01'. */
-export function currentAndPreviousPeriod(now: Date = new Date()): { current: string; previous: string } {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth() + 1;
-  const fmt = (yy: number, mm: number) => `${String(yy).padStart(4, '0')}-${String(mm).padStart(2, '0')}-01`;
-  return { current: fmt(y, m), previous: m === 1 ? fmt(y - 1, 12) : fmt(y, m - 1) };
-}

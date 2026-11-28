@@ -14,10 +14,6 @@ export class IngestError extends Error {
   }
 }
 
-export function isIngestError(e: unknown, code?: string): e is IngestError {
-  return e instanceof IngestError && (code === undefined || e.code === code);
-}
-
 /** A stable error code for any thrown value (pg SQLSTATEs are mapped to DB_<state>). */
 export function errorCodeOf(e: unknown): string {
   if (e instanceof IngestError) return e.code;
