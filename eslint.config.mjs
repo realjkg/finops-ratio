@@ -15,7 +15,6 @@ export default tseslint.config(
       '.next-verified/**',
       '.simulation-test-results/**',
       'eslint.config.js',
-      '.eslintrc.cjs',   // legacy config file, not linted
       'next.config.js',
       'csp.config.js',
       'next-env.d.ts',   // Next.js generated, not linted
