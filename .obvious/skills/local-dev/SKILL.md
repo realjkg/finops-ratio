@@ -19,7 +19,7 @@ created: 2026-06-25
 - npm v10.8.2 was verified with `npm --version`.
 - Package manager: npm, selected from `package-lock.json`.
 - No Docker services, databases, queues, auth provider, or required backend are needed for Phase 1 local development.
-- Optional environment variable: `NEXT_PUBLIC_ANTHROPIC_API_KEY`. Leave it empty to use the default data-grounded mock agent.
+- No environment variable is required. The default (`AI_PROVIDER=mock`, `NEXT_PUBLIC_AI_MODE=mock`) uses the data-grounded `MockAIClient`.
 
 ## Install
 
@@ -39,10 +39,11 @@ Optional live-agent mode:
 
 ```bash
 cp .env.example .env.local
-# Then set NEXT_PUBLIC_ANTHROPIC_API_KEY if live Claude responses are needed.
+# Then, for live Claude responses, set NEXT_PUBLIC_AI_MODE=live, AI_PROVIDER=claude and
+# ANTHROPIC_API_KEY. The key is read server-side only (pages/api/v1/ai/chat.ts).
 ```
 
-If `NEXT_PUBLIC_ANTHROPIC_API_KEY` is unset, the app still works fully using `MockAgentClient`.
+With `NEXT_PUBLIC_AI_MODE` unset or `mock`, the app still works fully using `MockAIClient`.
 
 ## Start Commands
 

@@ -1,5 +1,5 @@
 // Live client — fetches from the Next.js /api/hello route. Mirrors
-// LiveAgentClient error handling: throws a typed Error so callers see a message,
+// LiveAIClient error handling: throws a typed Error so callers see a message,
 // never a raw fetch rejection or silent undefined.
 import type { HelloClient, HelloMessage } from './HelloClient';
 import { withBasePath } from '@/lib/basePath';

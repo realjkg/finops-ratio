@@ -24,7 +24,6 @@ that returns the mock by default. Call sites see only the interface.
 | Directory | Purpose |
 |---|---|
 | `src/hello` | `HelloClient` — the reference seam the others copy. |
-| `src/agent` | `AgentClient` — data-grounded mock responder plus an optional live Claude client. |
 | `src/ai` | `AIClient` — server-proxied chat seam and the context builder behind `/api/v1/ai/chat`. |
 | `src/cm` | `CMClient` — change-management seam (JIRA / ServiceNow) behind `/api/v1/cm/change`. |
 | `src/costsource` | Cost-ingest seam: FOCUS v1.0–v1.4 schema, version-negotiation shim, value attachment, and the cloud/PointFive source adapters. Canonical FOCUS model for the repo. |
