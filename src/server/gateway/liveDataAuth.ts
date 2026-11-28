@@ -63,9 +63,16 @@ export function authorizeSourceAccess(
 
 // --- client identity -------------------------------------------------------------
 
+// An IPv4-mapped IPv6 address names an IPv4 client: key it as that IPv4 address
+// in every spelling (::ffff:1.2.3.4, ::ffff:102:304, 0:0:0:0:0:ffff:…), so mapped
+// clients never share one IPv6 /64 bucket.
 function normalizeIp(ip: string): string {
-  const m = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
-  return m ? m[1] : ip;
+  const m = /^(?:::|(?:0{1,4}:){5})ffff:(?:(\d{1,3}(?:\.\d{1,3}){3})|([0-9a-f]{1,4}):([0-9a-f]{1,4}))$/i.exec(ip);
+  if (!m) return ip;
+  if (m[1]) return m[1];
+  const hi = parseInt(m[2], 16);
+  const lo = parseInt(m[3], 16);
+  return `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
 }
 
 function trustedHops(env: LiveDataEnv): number | null {

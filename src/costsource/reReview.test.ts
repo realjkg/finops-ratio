@@ -311,6 +311,21 @@ describe('LOW limiter hygiene', () => {
     expect(clientIp(req({}, {}, '2001:db8::1'), {})).toBe('2001:db8::1');
   });
 
+  it('every IPv4-mapped spelling keys as its own IPv4 client, never one shared /64 bucket', async () => {
+    const { clientIp, v6Prefix } = await import('@/server/gateway/liveDataAuth');
+    const key = (ip: string) => {
+      const c = clientIp(req({}, {}, ip), {});
+      return c.includes(':') ? v6Prefix(c) : c;
+    };
+    expect(key('::ffff:c000:20a')).toBe('192.0.2.10');
+    expect(key('::ffff:c000:20b')).toBe('192.0.2.11');
+    expect(key('0:0:0:0:0:ffff:c000:20a')).toBe('192.0.2.10');
+    expect(key('0000:0000:0000:0000:0000:FFFF:192.0.2.10')).toBe('192.0.2.10');
+    expect(key('::FFFF:192.0.2.10')).toBe('192.0.2.10');
+    expect(key('::ffff:c000:20a')).not.toBe(key('::ffff:c000:20b'));
+    expect(key('2001:db8:1:2::1')).toBe('2001:db8:1:2::/64');
+  });
+
   it('a missing socket address is counted under "unknown" but never blocks a valid token', async () => {
     process.env.RATIO_API_TOKEN = TOKEN;
     const health = await handlerOf(HEALTH);
