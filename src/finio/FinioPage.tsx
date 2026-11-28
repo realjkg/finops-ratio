@@ -13,6 +13,7 @@ import { createFinioClient, validateFocusRows, SUPPORTED_FOCUS_VERSIONS } from '
 import type { FinioExport, FocusRow, FocusVersion, HandshakeResult } from './index';
 import { FinioPeerAuthError } from './LiveFinioClient';
 import { CLIENT_MODES, SegmentedControl } from '@/components/SegmentedControl';
+import { formatRatio } from '@/lib/format';
 
 type LoadState =
   | { status: 'idle' }
@@ -38,7 +39,7 @@ function usd(n: number): string {
 }
 
 /** Render a single FOCUS row as a <tr>. */
-function FocusRowLine({ row }: { row: FocusRow }) {
+export function FocusRowLine({ row }: { row: FocusRow }) {
   return (
     <tr className="border-b border-edge hover:bg-raised/40 transition-colors">
       <td className="py-2 pr-4 text-xs text-txt whitespace-nowrap">{row.ChargeDescription}</td>
@@ -47,7 +48,7 @@ function FocusRowLine({ row }: { row: FocusRow }) {
       <td className="py-2 pr-4 text-xs font-mono text-txt text-right">{usd(row.BilledCost)}</td>
       {/* x_Ratio* columns — highlighted in value colour */}
       <td className="py-2 pr-4 text-xs font-mono font-semibold text-value text-right">
-        {row.x_RatioValueRatio.toFixed(1)}×
+        {formatRatio(row.x_RatioWorkloadId === '' ? null : row.x_RatioValueRatio)}
       </td>
       <td className="py-2 pr-4 text-xs font-mono font-semibold text-value text-right">
         {usd(row.x_RatioTotalValue)}

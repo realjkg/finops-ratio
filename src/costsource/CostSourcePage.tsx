@@ -606,9 +606,9 @@ export function FocusRowsCard({ rows }: { rows: CanonicalFocusRow[] }) {
                 </td>
                 <td
                   className="py-2 pr-4 text-right font-mono text-xs font-semibold"
-                  style={{ color: ratioColor(row.x_RatioValueRatio) }}
+                  style={{ color: ratioColor(row.x_RatioWorkloadId === '' ? null : row.x_RatioValueRatio) }}
                 >
-                  {formatRatio(row.x_RatioValueRatio)}
+                  {formatRatio(row.x_RatioWorkloadId === '' ? null : row.x_RatioValueRatio)}
                 </td>
                 <td className="py-2 pr-4 text-xs text-sub">{row.x_RatioDemandShape}</td>
                 <td className="py-2 text-right font-mono text-xs text-gate">
