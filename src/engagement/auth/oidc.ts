@@ -20,7 +20,7 @@ import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import * as oidc from 'openid-client';
 import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { sendError } from '@/server/gateway/withGateway';
-import { logInternalError } from '@/server/gateway/internalError';
+import { logClientErrorDetail, logInternalError } from '@/server/gateway/internalError';
 import { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import { signInClient } from './routes';
 import { runAuditHook } from './authz';
@@ -137,7 +137,10 @@ export function createOidcStartRoute(deps: OidcRouteDeps = {}): NextApiHandler {
     const secret = ctx.env[conn.clientSecretRef];
     if (!secret) { sendError(res, 503, 'not_configured', 'Sign-in is not configured on this server'); return ctx.audit(503); }
     let config: oidc.Configuration;
-    try { config = await configFor(conn, secret, deps, ctx.now); } catch { sendError(res, 503, 'idp_unavailable', 'The identity provider is unavailable'); return ctx.audit(503); }
+    try { config = await configFor(conn, secret, deps, ctx.now); } catch (e) {
+      logClientErrorDetail(503, e, { method: req.method, path: req.url });
+      sendError(res, 503, 'idp_unavailable', 'The identity provider is unavailable'); return ctx.audit(503);
+    }
     const t = ctx.txs.create(conn.id, ctx.now);
     const url = oidc.buildAuthorizationUrl(config, {
       redirect_uri: callbackUrl(ctx.origin), scope: 'openid', state: t.state, nonce: t.nonce,
@@ -165,7 +168,8 @@ export function createOidcCallbackRoute(deps: OidcRouteDeps = {}): NextApiHandle
       const current = new URL(callbackUrl(ctx.origin));
       current.search = new URL(req.url ?? '', ctx.origin).search;
       claims = (await oidc.authorizationCodeGrant(config, current, { pkceCodeVerifier: tx.verifier, expectedState: tx.state, expectedNonce: tx.nonce, idTokenExpected: true })).claims();
-    } catch {
+    } catch (e) {
+      logClientErrorDetail(401, e, { method: req.method, path: req.url }); // IdP misconfiguration, clock skew and attacks stay distinguishable in the log
       return fail(401, 'unauthorized', FAILED);
     }
     if (!claims || typeof claims.sub !== 'string' || claims.iss !== conn.issuer) return fail(401, 'unauthorized', FAILED);
