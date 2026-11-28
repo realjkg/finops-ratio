@@ -51,16 +51,6 @@ export function requireLiveDataAuth(
   return checkAuth(authHeader, { enforce: true, token });
 }
 
-/** Sandbox sources pass anonymously; every other source id needs live-data auth. */
-export function authorizeSourceAccess(
-  sourceId: string,
-  authHeader: string | string[] | undefined,
-  env: LiveDataEnv = process.env,
-): AuthOutcome {
-  if (isOfflineSandboxSource(sourceId)) return { ok: true, tenant: 'anonymous' };
-  return requireLiveDataAuth(authHeader, env);
-}
-
 // --- client identity -------------------------------------------------------------
 
 function normalizeIp(ip: string): string {
