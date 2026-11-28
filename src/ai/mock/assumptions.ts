@@ -17,7 +17,7 @@ export const SELF_HOST_ASSUMPTIONS = {
   minGpus: 2,
   /** Share of peak throughput sustained in practice, 0-1. */
   utilisation: 0.5,
-  /** Blended input+output tokens per second per GPU at 100% utilisation. */
+  /** Blended input+output tokens per second per GPU at 100% utilization. */
   tokensPerSecondPerGpu: 1000,
   /** Always-on hours in a month. */
   hoursPerMonth: 730,
