@@ -1,5 +1,5 @@
 // ESLint flat config (ESLint v10+, react-hooks v7, typescript-eslint v8).
-// Equivalent to the old .eslintrc.cjs rules, using the flat config API.
+// Flat config only (ESLint reads no legacy .eslintrc).
 import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
@@ -15,7 +15,6 @@ export default tseslint.config(
       '.next-verified/**',
       '.simulation-test-results/**',
       'eslint.config.js',
-      '.eslintrc.cjs',   // legacy config file, not linted
       'next.config.js',
       'csp.config.js',
       'next-env.d.ts',   // Next.js generated, not linted

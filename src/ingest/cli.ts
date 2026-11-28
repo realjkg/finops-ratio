@@ -17,7 +17,7 @@ import { Client } from 'pg';
 import { MigrationError } from './db/migrationFiles';
 import { assertDownAllowed, migrateDown, migrateUp, migrationStatus } from './db/migrate';
 import { isWorkerCommand, recordMigrateEvidence, workerMain } from './workerCli';
-import { jsonLineRedactorFor } from './redact';
+import { jsonLineRedactorFor, walkRedact } from './redact';
 
 export interface CliIO {
   out(line: string): void;
@@ -121,41 +121,6 @@ export function redactor(url: string | undefined): (s: string) => string {
 }
 
 /**
- * Deep copy of `value` with `redact` applied to every string (and object
- * key), walking plain objects, arrays and Errors (message, code, cause).
- * Runs BEFORE serialization so escaping can never hide a secret from it.
- */
-export function redactDeep(value: unknown, redact: (s: string) => string, seen: WeakSet<object> = new WeakSet()): unknown {
-  if (typeof value === 'string') return redact(value);
-  // Numbers, booleans and bigints serialize as bare JSON tokens: redact them by
-  // their text, as a JSON string, so the line stays valid JSON (round 7).
-  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
-    const text = String(value);
-    if (redact(text) !== text) return '[redacted]';
-    return typeof value === 'bigint' ? text : value;
-  }
-  if (value === null || typeof value !== 'object') return value;
-  if (seen.has(value)) return '[circular]';
-  seen.add(value);
-  if (Array.isArray(value)) return value.map((v) => redactDeep(v, redact, seen));
-  if (value instanceof Date) return value.toISOString();
-  // Raw bytes are never printed (Buffer.toJSON would expose them as numbers).
-  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return '[binary]';
-  const toJSON = (value as { toJSON?: unknown }).toJSON;
-  if (typeof toJSON === 'function') return redactDeep((toJSON as () => unknown).call(value), redact, seen);
-  if (value instanceof Error) {
-    const e = value as Error & { code?: unknown; cause?: unknown };
-    const out: Record<string, unknown> = { name: e.name, message: redact(e.message) };
-    if (e.code !== undefined) out.code = redactDeep(e.code, redact, seen);
-    if (e.cause !== undefined) out.cause = redactDeep(e.cause, redact, seen);
-    return out;
-  }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value)) out[redact(k)] = redactDeep(v, redact, seen);
-  return out;
-}
-
-/**
  * The ONE way the CLI turns a value into an output line: redact every string
  * before JSON.stringify, then a final pass over the serialized text as a
  * backstop (the forms list includes JSON-escaped secrets).
@@ -163,7 +128,7 @@ export function redactDeep(value: unknown, redact: (s: string) => string, seen: 
 export function jsonLineRedactor(url: string | undefined): (value: unknown) => string {
   const redact = redactor(url);
   return (value: unknown) => {
-    const json = JSON.stringify(redactDeep(value, redact));
+    const json = JSON.stringify(walkRedact(value, redact));
     const out = redact(json);
     if (out === json) return out;
     // The backstop changed the serialized text (a secret spanning JSON
