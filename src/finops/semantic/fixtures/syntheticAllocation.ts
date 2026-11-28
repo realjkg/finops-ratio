@@ -7,7 +7,6 @@ import type { Scope } from '../query';
 import { assembleReportFacts } from '../../../reports/reportFacts';
 import { sampleInput } from '../../../reports/fixtures/sampleFacts';
 
-export const SYNTHETIC_LABEL = 'SYNTHETIC';
 export const TENANT = '11111111-1111-4111-8111-111111111111';
 export const CONFIG_SHA = 'c'.repeat(64);
 export const TENANT_SCOPE: Scope = { tenantId: TENANT, wildcard: true, businessUnits: [], teams: [] };
