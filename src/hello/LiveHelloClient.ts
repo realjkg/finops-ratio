@@ -19,6 +19,7 @@ export class LiveHelloClient implements HelloClient {
         `Hello API unreachable: ${
           err instanceof Error ? err.message : String(err)
         }`,
+        { cause: err },
       );
     }
     if (!res.ok) {

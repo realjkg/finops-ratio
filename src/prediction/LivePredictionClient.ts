@@ -30,6 +30,7 @@ export class LivePredictionClient implements PredictionClient {
         `Prediction API unreachable: ${
           err instanceof Error ? err.message : String(err)
         }`,
+        { cause: err },
       );
     }
     if (!res.ok) {
@@ -47,6 +48,7 @@ export class LivePredictionClient implements PredictionClient {
         `Accuracy API unreachable: ${
           err instanceof Error ? err.message : String(err)
         }`,
+        { cause: err },
       );
     }
     if (!res.ok) {

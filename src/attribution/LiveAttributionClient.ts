@@ -23,6 +23,7 @@ export class LiveAttributionClient implements AttributionClient {
         `Attribution API unreachable: ${
           err instanceof Error ? err.message : String(err)
         }`,
+        { cause: err },
       );
     }
     if (!res.ok) {

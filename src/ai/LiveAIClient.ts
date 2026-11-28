@@ -33,6 +33,7 @@ export class LiveAIClient implements AIClient {
       if (signal.aborted || (err instanceof Error && err.name === 'TimeoutError')) throw timedOut();
       throw new Error(
         `AI chat unreachable: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
     try {
