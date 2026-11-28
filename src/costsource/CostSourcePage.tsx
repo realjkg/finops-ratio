@@ -428,7 +428,7 @@ function HealthCard({ health }: { health: SourceHealth }) {
   );
 }
 
-export function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
+function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
   const passthrough = isPassthrough(rows);
   return (
     <Card title="Version normalization">
@@ -462,33 +462,7 @@ export function UpgradeAuditCard({ rows }: { rows: CostRowsResult }) {
           </div>
         </div>
       )}
-      <AiPropertyFallback properties={rows.aiPropertiesFromTopLevelColumns} />
     </Card>
-  );
-}
-
-/** Wording for model and token labels read outside SkuPriceDetails (FOCUS 1.5). */
-export const AI_PROPERTY_FALLBACK_LABEL =
-  'Model and token labels read from top-level columns, not from SkuPriceDetails, where FOCUS 1.5 defines them:';
-export const AI_PROPERTY_FALLBACK_NOTE =
-  "In a provider's FOCUS 1.5 export, this means the export does not follow the standard. Ratio's own flattened formats (FinIO and its FOCUS 1.5 sample data) carry these labels as columns by design.";
-
-/**
- * Says which FOCUS 1.5 model and token labels came from top-level columns. An
- * older server or stored result may lack the field, so absent reads as none.
- */
-export function AiPropertyFallback({ properties }: { properties: readonly string[] | undefined }) {
-  if (!properties || properties.length === 0) return null;
-  return (
-    <div className="mt-2" data-testid="ai-property-fallback">
-      <p className="text-xs text-dim">{AI_PROPERTY_FALLBACK_LABEL}</p>
-      <div className="mt-1 flex flex-wrap gap-1">
-        {properties.map((c) => (
-          <Chip key={c}>{c}</Chip>
-        ))}
-      </div>
-      <p className="mt-1 text-xs text-dim">{AI_PROPERTY_FALLBACK_NOTE}</p>
-    </div>
   );
 }
 

@@ -288,7 +288,6 @@ describe('walk state resets', () => {
             canonicalVersion: '1.4',
             backfilledColumns: [],
             draftColumnsBackfilled: [],
-            aiPropertiesFromTopLevelColumns: [],
             window: currentMonthWindow(),
             generatedAt: '2026-06-01T00:00:00.000Z',
             rows: [],
