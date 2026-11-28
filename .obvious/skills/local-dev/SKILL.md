@@ -40,10 +40,11 @@ Optional live-agent mode:
 ```bash
 cp .env.example .env.local
 # Then, for live Claude responses, set AI_PROVIDER=claude, ANTHROPIC_API_KEY and
-# RATIO_API_TOKEN. All three are read server-side only (pages/api/v1/ai/chat.ts).
+# RATIO_API_TOKEN, all server-side only. The provider and key are read in
+# pages/api/v1/ai/chat.ts, and the token by the gateway (src/server/gateway/auth.ts).
 ```
 
-A live provider turns gateway auth on: `/api/v1/ai/chat` then requires `Authorization: Bearer <RATIO_API_TOKEN>`. The browser `LiveAIClient` (`NEXT_PUBLIC_AI_MODE=live`) sends no token, so the chat panel gets a 401 in this setup; call the route directly with the token instead. Never put the token in a `NEXT_PUBLIC_*` variable.
+With a live provider, gateway auth is always on (outside local simulation mode it is on anyway): `/api/v1/ai/chat` requires `Authorization: Bearer <RATIO_API_TOKEN>`. The browser `LiveAIClient` (`NEXT_PUBLIC_AI_MODE=live`) sends no token, so the chat panel gets a 401 in this setup; call the route directly with the token instead. Never put the token in a `NEXT_PUBLIC_*` variable.
 
 With `NEXT_PUBLIC_AI_MODE` unset or `mock`, the app still works fully using `MockAIClient`.
 
