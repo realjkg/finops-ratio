@@ -176,8 +176,8 @@ function assumptionLines(a: ResolvedAssumptions, o: Overrides, m: Migration | nu
   return [
     `GPU price: ${price(a.gpuHourlyUsd)} per GPU-hour ${tag(o.gpuHourlyUsd !== undefined && o.gpuHourlyUsd !== d.gpuHourlyUsd)}`,
     `GPUs: ${o.gpuCount !== undefined ? int(o.gpuCount) : gpus === null ? `sized to the volume, minimum ${a.minGpus}` : `${int(gpus)}, auto-sized to the volume (minimum ${a.minGpus})`} ${tag(o.gpuCount !== undefined)}`,
-    `Throughput: ${int(a.tokensPerSecondPerGpu)} tokens/s per GPU at 100% utilisation, blended input and output ${tag(o.tokensPerSecondPerGpu !== undefined)}`,
-    `Utilisation: ${Math.round(a.utilisation * 100)}% utilisation ${tag(o.utilisation !== undefined)}`,
+    `Throughput: ${int(a.tokensPerSecondPerGpu)} tokens/s per GPU at 100% utilization, blended input and output ${tag(o.tokensPerSecondPerGpu !== undefined)}`,
+    `Utilization: ${Math.round(a.utilisation * 100)}% utilization ${tag(o.utilisation !== undefined)}`,
     `Hours: ${int(a.hoursPerMonth)} hours/month, always on (default assumption)`,
     `Ops: ${Math.round(a.opsOverheadPct * 100)}% ops overhead on GPU cost ${tag(o.opsOverheadPct !== undefined)}`,
     `Migration: ${usd(a.migrationOneTimeUsd)} one-time ${tag(o.migrationOneTimeUsd !== undefined)}`,
