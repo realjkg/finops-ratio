@@ -89,7 +89,7 @@ Common labels on every series: `workload`, `model`, `team`, `provider`,
 | `ratio_budget_dollars` | gauge | `period="daily\|monthly"` | `costs.daily_budget` / `monthly_budget` |
 | `ratio_budget_consumed_ratio` | gauge | `period="daily\|monthly"` | `daily_spend / daily_budget` |
 | `ratio_burn_rate_dollars_per_hour` | gauge | — | derived run-rate (forecast-engine) |
-| `ratio_forecast_eom_dollars` | gauge | `method="weighted_avg_7d"` | `forecast.projected_eom` |
+| `ratio_forecast_eom_dollars` | gauge | `method="planned_allocation"` | `forecast.projected_eom` |
 | `ratio_forecast_days_until_breach` | gauge | — | `forecast.days_until_breach` |
 | `ratio_unit_cost_dollars` | gauge | `unit="call\|resolved\|user\|deflection"` | `unit_costs.*` (R1) |
 | `ratio_tokens_total` | counter | `direction="input\|output\|cached"` | `costs.tokens_*` |

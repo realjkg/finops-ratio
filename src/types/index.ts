@@ -165,7 +165,7 @@ export interface ModelEntry {
 
 // --- Budget Profile (§2.3) ---
 
-export type ForecastMethod = 'linear' | 'weighted_avg_7d' | 'exponential_smoothing';
+export type ForecastMethod = 'linear' | 'weighted_avg_7d' | 'exponential_smoothing' | 'planned_allocation';
 
 export interface DailyAllocation {
   weekday: number;

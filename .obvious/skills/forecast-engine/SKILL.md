@@ -47,18 +47,15 @@ else:
 If the daily forecast projects hitting the kill threshold (100% of daily budget)
 before end of business, raise an immediate forecast alert.
 
-## 2. Monthly forecast (weighted 7-day average — default method)
+## 2. Monthly forecast (planned allocation — what `projectMonthlySpend` computes)
+
+The month-end projection is month-to-date spend plus the PLANNED daily
+allocation for the days that remain. It is not a 7-day average of actual spend:
+a spike in recent daily spend does not change it until that spend accrues into
+`spend_mtd`. Its method label is `planned_allocation`.
 
 ```
-avg_daily_7d  = sum(daily_spend[last 7 days]) / 7
 remaining_days = days_in_month - current_day
-projected_eom  = spend_mtd + (avg_daily_7d * remaining_days)
-```
-
-When the daily allocation profile distinguishes weekday vs weekend spend, prefer
-the weekday/weekend mix over a flat average:
-
-```
 remaining_weekdays = count_weekdays(today, end_of_month)
 remaining_weekends = remaining_days - remaining_weekdays
 projected_eom = spend_mtd
@@ -66,7 +63,12 @@ projected_eom = spend_mtd
   + (daily_allocation.weekend * remaining_weekends)
 ```
 
-Forecast methods: `linear`, `weighted_avg_7d` (default), `exponential_smoothing`.
+The 7-day average of actual spend (`avg_daily_7d = sum(daily_spend[last 7 days]) / 7`)
+is still computed and shown, and it feeds days-until-breach (§4).
+
+Forecast method labels: `planned_allocation` (the only one implemented). `linear`,
+`weighted_avg_7d` and `exponential_smoothing` are declared but not implemented; the
+seed budgets' `forecast_method` setting is not read.
 
 ## 3. Confidence interval (80%, z = 1.28)
 
