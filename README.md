@@ -92,7 +92,8 @@ back-end routes.
 
 ```
 pages/
-  index.tsx     Front-end: renders the 3-panel Ratio app (src/App.tsx)
+  index.tsx     Front-end: Value review, the findings queue (src/findings/FindingsPage)
+  workloads.tsx Front-end: the workload dashboard (list + detail tabs + alert ticker)
   hello.tsx     Front-end: /hello reference slice (src/hello/HelloPage)
   api/
     hello.ts    Back-end: Node.js API route returning a HelloMessage (source: 'live')
@@ -102,12 +103,12 @@ src/
   lib/          Pure logic: forecast math (§6), derive, scales, budgetStatus,
                 modelCompare, demandShape, format helpers
   store/        Zustand store — selection, gate sequencing, shape + threshold edits, chat
-  agent/        AgentClient seam — MockAgentClient (default) + LiveAgentClient (Claude)
+  ai/           AIClient seam — MockAIClient (default) + LiveAIClient (calls /api/v1/ai/chat)
   components/
-    layout/     Header (portfolio health) + Footer (alert ticker)
+    layout/     AppShell (NavBar + the shared ChatPanel) + Footer (alert ticker)
     workload/   Left panel: list, card, value-ratio bar, gate dots, filters
     detail/     Center tabs: Budget, Multi-Model, Governance, Demand, Unit, Alerts + KPI cards
-    agent/      Right panel: chat + quick prompts
+    ai/         ChatPanel: chat + quick prompts
 ```
 
 ### The /hello reference flow
@@ -116,16 +117,19 @@ src/
 renders `src/hello/HelloPage`, which talks to a typed `HelloClient` seam. The live
 client fetches the Node.js back-end route `pages/api/hello.ts` (`source: 'live'`); the
 mock client returns an in-memory greeting with no network. Same contract, swappable
-implementation — mirroring the agent seam below.
+implementation — mirroring the AI seam below.
 
-### The agent seam
+### The AI seam
 
-The agent is behind a clean `AgentClient` interface (`src/agent/`). With no key
-set, a **data-grounded `MockAgentClient`** computes real answers from the seed
-data — every cost cited with its value ratio (spec §7.1). Setting
-`NEXT_PUBLIC_ANTHROPIC_API_KEY` swaps in `LiveAgentClient`, which calls Claude with a
-system prompt rebuilt from current workload state. **The app runs fully without a
-key.**
+The agent is behind a clean `AIClient` interface (`src/ai/`). By default the
+browser uses the **data-grounded `MockAIClient`**, which computes real answers
+from the seed data — every cost cited with its value ratio (spec §7.1).
+`NEXT_PUBLIC_AI_MODE=live` (a routing flag, not a credential) swaps in
+`LiveAIClient`, which posts the conversation to the server route
+`/api/v1/ai/chat`. That route picks the model server-side with `AI_PROVIDER`
+(default `mock`) and, for a live provider, builds the system prompt from its own records; API keys
+such as `ANTHROPIC_API_KEY` stay on the server (see *AI providers* below).
+**The app runs fully without a key.**
 
 ### FinIO — the agent-to-agent (A2A) interchange
 
