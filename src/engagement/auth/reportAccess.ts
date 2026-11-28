@@ -8,6 +8,7 @@
 // denial, 503 when sign-in is not configured or the store fails. One audit
 // event per request: ids, format, permission and outcome only. SERVER-ONLY.
 import { engagementConfigFromEnv } from '@/engagement/config';
+import { logClientErrorDetail } from '@/server/gateway/internalError';
 import { authorize, runAuditHook, type Permission } from './authz';
 import { directoryFromEnv } from './directory';
 import { authSettings, resolveSessionPrincipal, type RequestLike } from './http';
@@ -34,7 +35,10 @@ export function checkReportAccess(req: RequestLike, env: Env, permission: Permis
   try {
     principal = resolveSessionPrincipal(req, { store: (deps.store ?? sessionStore)(settings.stateFile), directory: dir.directory, instance, now: (deps.now ?? Date.now)() });
   } catch (e) {
-    if (e instanceof SessionStoreError) return { ok: false, status: 503, code: 'session_store_unavailable', message: 'Sign-in is temporarily unavailable' };
+    if (e instanceof SessionStoreError) {
+      logClientErrorDetail(503, e.cause ?? e, { method: req.method, path: req.url }); // redacted; the caller still gets only the fixed 503
+      return { ok: false, status: 503, code: 'session_store_unavailable', message: 'Sign-in is temporarily unavailable' };
+    }
     throw e;
   }
   const resource = { type: 'report', id: 'engagement-report', ...instance, version: cfg.sha256 } as const;

@@ -39,7 +39,7 @@ async function getJson<T>(url: string, label: string): Promise<T> {
   try {
     res = await fetch(url);
   } catch (err) {
-    throw new Error(`${label} unreachable: ${err instanceof Error ? err.message : String(err)}`);
+    throw new Error(`${label} unreachable: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
   }
   if (res.status === 401) {
     throw new LiveDataAuthError();

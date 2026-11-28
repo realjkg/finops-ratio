@@ -41,6 +41,7 @@ export class LiveCMClient implements CMClient {
     } catch (err) {
       throw new Error(
         `CM gateway unreachable: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
     if (!res.ok) {

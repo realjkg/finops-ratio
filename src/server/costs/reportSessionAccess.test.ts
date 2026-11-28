@@ -112,6 +112,17 @@ describe('session access to the report routes (engagement mode)', () => {
     expect([r.statusCode, code(r)]).toEqual([503, 'not_configured']);
     expect(poolFor).not.toHaveBeenCalled();
   });
+
+  it('a session store failure logs one redacted client_error_detail line; the 503 body stays fixed', async () => {
+    const t = session('a');
+    store.close();
+    const warns = vi.mocked(console.warn);
+    warns.mockClear();
+    const r = await call(report(), req({ token: t, query: Q('json') }));
+    expect([r.statusCode, r.body]).toEqual([503, { error: { code: 'session_store_unavailable', message: 'Sign-in is temporarily unavailable' } }]);
+    const lines = warns.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>).filter((l) => l.event === 'client_error_detail');
+    expect(lines).toEqual([expect.objectContaining({ status: 503, method: 'GET', path: '/api/v1/reports/x', error: expect.any(String) })]);
+  });
 });
 
 describe('per-user limits on the session path', () => {

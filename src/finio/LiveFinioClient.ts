@@ -72,6 +72,7 @@ export class LiveFinioClient implements FinioClient {
     } catch (err) {
       throw new Error(
         `FinIO handshake unreachable: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
     if (!res.ok) {
@@ -94,6 +95,7 @@ export class LiveFinioClient implements FinioClient {
     } catch (err) {
       throw new Error(
         `FinIO export unreachable: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err },
       );
     }
     if (!res.ok) {
