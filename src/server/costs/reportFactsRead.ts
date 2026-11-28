@@ -54,8 +54,6 @@ const ARTIFACTS_SQL = `
    GROUP BY v.source_id, v.batch_id, v.artifact_sha256
    ORDER BY 1, 2, 3`;
 
-export const REPORT_FACTS_SQL = Object.freeze({ groups: GROUPS_SQL, batches: BATCHES_SQL, artifacts: ARTIFACTS_SQL });
-
 export interface ReportFactsAggregates {
   groups: FactsAggregateGroup[];
   batches: FactsBatchRow[];
