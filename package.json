@@ -47,7 +47,6 @@
     "csv-parse": "^7.0.3",
     "exceljs": "^4.4.0",
     "framer-motion": "^11.18.2",
-    "lottie-react": "^2.4.1",
     "next": "16.4.6",
     "openai": "^6.45.0",
     "openid-client": "6.8.8",
