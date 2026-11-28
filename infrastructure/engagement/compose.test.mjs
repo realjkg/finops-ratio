@@ -1,5 +1,5 @@
 // Static tests of the engagement packaging (R12). They parse the files and need
-// no Docker daemon. js-yaml is a locked transitive dev dependency (no new dependency).
+// no Docker daemon. js-yaml is a declared dev dependency (package.json).
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
