@@ -20,7 +20,7 @@ import type { Directory, Instance } from './directory';
 import { SESSION_ABSOLUTE_MS, type EngagementSessionStore } from './session';
 
 type Env = Record<string, string | undefined>;
-export interface RequestLike { method?: string; headers: Record<string, string | string[] | undefined>; cookies?: Partial<Record<string, string>> }
+export interface RequestLike { method?: string; url?: string; headers: Record<string, string | string[] | undefined>; cookies?: Partial<Record<string, string>> }
 export interface AuthSettings { origin: string; stateFile: string }
 
 export const SESSION_COOKIE = '__Host-ratio_session';
