@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { EventEmitter } from 'events';
 import * as cli from './cli';
-import { jsonLineRedactor, main, redactDeep, redactor } from './cli';
+import { jsonLineRedactor, main, redactor } from './cli';
+import { walkRedact as redactDeep } from './redact';
 
 function capture() {
   const out: string[] = [];

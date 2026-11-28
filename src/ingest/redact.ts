@@ -2,8 +2,6 @@
 // quarantine reasons, validation messages) or logs. Runs BEFORE writing: the
 // amended schema rejects free text that still looks like it carries a secret.
 
-import { redactDeep as walkRedact } from './cli';
-
 export const MAX_REDACTED_LENGTH = 4000;
 const R = '[redacted]';
 
@@ -237,14 +235,46 @@ export function secretsFromEnv(env: Record<string, string | undefined>): string[
 }
 
 /**
+ * Deep copy of `value` with `redact` applied to every string (and object
+ * key), walking plain objects, arrays and Errors (message, code, cause).
+ * Runs BEFORE serialization so escaping can never hide a secret from it.
+ */
+export function walkRedact(value: unknown, redact: (s: string) => string, seen: WeakSet<object> = new WeakSet()): unknown {
+  if (typeof value === 'string') return redact(value);
+  // Numbers, booleans and bigints serialize as bare JSON tokens: redact them by
+  // their text, as a JSON string, so the line stays valid JSON (round 7).
+  if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint') {
+    const text = String(value);
+    if (redact(text) !== text) return '[redacted]';
+    return typeof value === 'bigint' ? text : value;
+  }
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return '[circular]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.map((v) => walkRedact(v, redact, seen));
+  if (value instanceof Date) return value.toISOString();
+  // Raw bytes are never printed (Buffer.toJSON would expose them as numbers).
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return '[binary]';
+  const toJSON = (value as { toJSON?: unknown }).toJSON;
+  if (typeof toJSON === 'function') return walkRedact((toJSON as () => unknown).call(value), redact, seen);
+  if (value instanceof Error) {
+    const e = value as Error & { code?: unknown; cause?: unknown };
+    const out: Record<string, unknown> = { name: e.name, message: redact(e.message) };
+    if (e.code !== undefined) out.code = walkRedact(e.code, redact, seen);
+    if (e.cause !== undefined) out.cause = walkRedact(e.cause, redact, seen);
+    return out;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) out[redact(k)] = walkRedact(v, redact, seen);
+  return out;
+}
+
+/**
  * Deep copy with every string (and object key) redacted, BEFORE serialization
  * so JSON escaping can never hide a secret from the redactor. There is ONE
- * walker: Slice 0's `redactDeep` in cli.ts (BigInt as exact decimal text,
- * Buffers/typed arrays as `[binary]`, `toJSON` honoured, Errors as
- * name/message/code/cause, cycles as `[circular]`); this only supplies the
- * worker's secret-aware string redactor. The result is plain JSON-safe data.
- * (cli.ts imports this module too; the cycle is only dereferenced at call
- * time, never while modules load.)
+ * walker, `walkRedact` above (shared with the migrate CLI in cli.ts); this
+ * only supplies the worker's secret-aware string redactor. The result is
+ * plain JSON-safe data.
  */
 export function redactDeep<T>(value: T, secrets: readonly string[] = []): T {
   return walkRedact(value, (s) => redact(s, secrets)) as T;
