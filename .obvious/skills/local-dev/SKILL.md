@@ -44,7 +44,7 @@ cp .env.example .env.local
 # pages/api/v1/ai/chat.ts, and the token by the gateway (src/server/gateway/auth.ts).
 ```
 
-With a live provider, gateway auth is always on (outside local simulation mode it is on anyway): `/api/v1/ai/chat` requires `Authorization: Bearer <RATIO_API_TOKEN>`. The browser `LiveAIClient` (`NEXT_PUBLIC_AI_MODE=live`) sends no token, so the chat panel gets a 401 in this setup; call the route directly with the token instead. Never put the token in a `NEXT_PUBLIC_*` variable.
+With a live provider, gateway auth is always on (outside local simulation mode it is on anyway): `/api/v1/ai/chat` requires `Authorization: Bearer <RATIO_API_TOKEN>`. The browser `LiveAIClient` (`NEXT_PUBLIC_AI_MODE=live`) sends no token, so the chat panel gets a 401 in this setup. In 1.0.0 the browser chat panel is mock-only; live mode is unavailable. Call the route directly with the token from a trusted server-side client instead. Never put the token in a `NEXT_PUBLIC_*` variable.
 
 With `NEXT_PUBLIC_AI_MODE` unset or `mock`, the app still works fully using `MockAIClient`.
 
