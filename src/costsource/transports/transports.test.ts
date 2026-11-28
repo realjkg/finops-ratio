@@ -77,6 +77,13 @@ describe('FOCUS export parsing', () => {
     ]);
   });
 
+  it('a quoted empty field is a one-cell record, not a blank line, with or without a trailing newline', () => {
+    expect(() => parseCsv('a,b\n1,2\n""\n')).toThrow('export is not valid CSV (row 2 has the wrong number of cells)');
+    expect(() => parseCsv('a,b\n1,2\n""')).toThrow('export is not valid CSV (row 2 has the wrong number of cells)');
+    expect(parseCsv('a\n""\n')).toEqual([{ a: '' }]);
+    expect(parseCsv('a,b\n"",""\n')).toEqual([{ a: '', b: '' }]);
+  });
+
   it('accepts JSON arrays, common envelopes, and NDJSON', () => {
     expect(parseExportText('[{"BilledCost":1}]')).toHaveLength(1);
     expect(parseExportText('{"rows":[{"BilledCost":1},{"BilledCost":2}]}')).toHaveLength(2);

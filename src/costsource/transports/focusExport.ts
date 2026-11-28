@@ -140,10 +140,25 @@ export function parseCsv(text: string): Record<string, string>[] {
   let field = '';
   let row: string[] = [];
   let inQuotes = false;
+  // A record exists once its line has any character, quotes included: only a
+  // physically empty line is skipped, so `""` stays a (one-cell) record.
+  let hasContent = false;
   const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text; // strip BOM
 
   for (let i = 0; i < src.length; i += 1) {
     const c = src[i];
+    if (!inQuotes && (c === '\n' || c === '\r')) {
+      if (c === '\r' && src[i + 1] === '\n') i += 1;
+      if (hasContent) {
+        row.push(field);
+        rows.push(row);
+      }
+      row = [];
+      field = '';
+      hasContent = false;
+      continue;
+    }
+    hasContent = true;
     if (inQuotes) {
       if (c === '"') {
         if (src[i + 1] === '"') {
@@ -160,23 +175,17 @@ export function parseCsv(text: string): Record<string, string>[] {
     } else if (c === ',') {
       row.push(field);
       field = '';
-    } else if (c === '\n' || c === '\r') {
-      if (c === '\r' && src[i + 1] === '\n') i += 1;
-      row.push(field);
-      rows.push(row);
-      row = [];
-      field = '';
     } else {
       field += c;
     }
   }
   if (inQuotes) throw new Error('export is not valid CSV (unterminated quoted field)');
-  if (field !== '' || row.length > 0) {
+  if (hasContent) {
     row.push(field);
     rows.push(row);
   }
 
-  const [header, ...body] = rows.filter((r) => !(r.length === 1 && r[0] === ''));
+  const [header, ...body] = rows;
   if (!header) return [];
   return body.map((cells, i) => {
     if (cells.length !== header.length) {
