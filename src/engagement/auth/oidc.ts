@@ -20,6 +20,7 @@ import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import * as oidc from 'openid-client';
 import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { sendError } from '@/server/gateway/withGateway';
+import { logInternalError } from '@/server/gateway/internalError';
 import { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import { signInClient } from './routes';
 import { runAuditHook } from './authz';
@@ -100,7 +101,7 @@ function route(action: 'oidc_start' | 'oidc_callback', deps: OidcRouteDeps, body
     } catch (e) {
       if (res.headersSent) return;
       if (e instanceof SessionStoreError) return sendError(res, 503, 'session_store_unavailable', 'Sign-in is temporarily unavailable');
-      console.error('{"event":"oidc_route_failed"}');
+      logInternalError(e, { method: req.method, path: req.url }); // redacted; the caller still gets only the fixed message
       sendError(res, 500, 'internal_error', 'Internal error');
     }
   };

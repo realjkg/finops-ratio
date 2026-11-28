@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { sendError } from '@/server/gateway/withGateway';
+import { logInternalError } from '@/server/gateway/internalError';
 import { clientIp } from '@/server/gateway/liveDataAuth';
 import { runAuditHook } from './authz';
 import { directoryFromEnv, type Directory, type Instance } from './directory';
@@ -144,7 +145,7 @@ function route(methods: string, action: AuthAuditEvent['action'], deps: AuthRout
     } catch (e) {
       if (res.headersSent) return;
       if (e instanceof SessionStoreError) return sendError(res, 503, 'session_store_unavailable', AUTH_MESSAGES.unavailable);
-      console.error('{"event":"auth_route_failed"}');
+      logInternalError(e, { method: req.method, path: req.url }); // redacted; the caller still gets only the fixed message
       sendError(res, 500, 'internal_error', 'Internal error');
     }
   };

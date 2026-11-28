@@ -304,6 +304,18 @@ describe('A3 hardening: client identity behind the proxy, throttle table, scrypt
     expect((await call(createLoginRoute({ ...deps(), gate }), req({ method: 'POST', body: { username: '  V ', password: pw.v } }))).statusCode).toBe(200);
   });
 
+  it('an unexpected failure is the same fixed 500 and is logged, redacted, with a requestId (E1)', async () => {
+    const boom = createLoginRoute({ ...deps(), authenticate: async () => { throw new Error('lookup failed: Bearer synthetic0123456789token'); } });
+    const errors = vi.mocked(console.error);
+    errors.mockClear();
+    const r = await call(boom, req({ method: 'POST', body: { username: 'v', password: pw.v } }));
+    expect([r.statusCode, r.body]).toEqual([500, { error: { code: 'internal_error', message: 'Internal error' } }]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(String(errors.mock.calls[0][0])) as Record<string, unknown>;
+    expect(line).toMatchObject({ event: 'unhandled_error', method: 'POST', path: '/api/auth/x', status: 500, error: 'lookup failed: Bearer [REDACTED]' });
+    expect(line.requestId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
   it(`at most ${MAX_CONCURRENT_LOGINS} sign-ins do scrypt work at once; the next is 503 with Retry-After and an audit event`, async () => {
     expect(MAX_CONCURRENT_LOGINS).toBe(4);
     const held: Array<() => void> = [];
