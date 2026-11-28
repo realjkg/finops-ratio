@@ -63,8 +63,14 @@ projected_eom = spend_mtd
   + (daily_allocation.weekend * remaining_weekends)
 ```
 
-The 7-day average of actual spend (`avg_daily_7d = sum(daily_spend[last 7 days]) / 7`)
-is still computed and shown, and it feeds days-until-breach (§4).
+The average of actual spend over the last 7 days (`avg_daily_7d`) is still computed
+and shown, and it feeds days-until-breach (§4). It divides by the number of days
+available, up to 7 (a history of `[70]` averages 70), and is 0 for an empty history:
+
+```
+last7        = daily_spend[last 7 days]          // fewer if the history is shorter
+avg_daily_7d = len(last7) > 0 ? sum(last7) / len(last7) : 0
+```
 
 Forecast method labels: `planned_allocation` (the only one implemented). `linear`,
 `weighted_avg_7d` and `exponential_smoothing` are declared but not implemented; the
