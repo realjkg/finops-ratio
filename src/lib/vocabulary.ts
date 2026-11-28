@@ -75,8 +75,6 @@ export const VOCAB = {
   },
 } as const satisfies Record<string, Term>;
 
-export type VocabKey = keyof typeof VOCAB;
-
 /** Display strings that are not cost measures but must read the same everywhere. */
 export const COPY = {
   /** Modeled cost basis, stated only inside the View calculation disclosure (never Billed or Effective). */
