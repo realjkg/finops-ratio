@@ -19,7 +19,7 @@ import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { sendError } from '@/server/gateway/withGateway';
 import { logClientErrorDetail, logInternalError } from '@/server/gateway/internalError';
-import { clientIp } from '@/server/gateway/liveDataAuth';
+import { clientIp, v6Prefix } from '@/server/gateway/liveDataAuth';
 import { runAuditHook } from './authz';
 import { directoryFromEnv, type Directory, type Instance } from './directory';
 import { authSettings, checkStateChange, clearedSessionCookie, csrfFor, resolveSessionPrincipal, sameOrigin, sessionCookie, sessionToken } from './http';
@@ -94,16 +94,6 @@ export class LoginGate {
 }
 const sharedGate = new LoginGate();
 
-/** IPv6 addresses are keyed by their /64 (one subscriber); anything unparsable stays as is. */
-function v6Prefix(ip: string): string {
-  const [h, t = ''] = ip.split('::');
-  const part = (s: string) => (s ? s.split(':').flatMap((x) => (x.includes('.') ? ['0', '0'] : [x])) : []);
-  const head = part(h);
-  const tail = ip.includes('::') ? part(t) : [];
-  const all = ip.includes('::') ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
-  if (all.length !== 8 || !all.every((x) => /^[0-9a-f]{1,4}$/i.test(x))) return ip;
-  return `${all.slice(0, 4).map((x) => parseInt(x, 16).toString(16)).join(':')}::/64`;
-}
 /** The client of a sign-in: the socket (hops 0) or the Nth X-Forwarded-For entry from the right; left entries are ignored. */
 export function signInClient(req: NextApiRequest, hops: number): string {
   const ip = clientIp(req, hops > 0 ? { RATIO_TRUSTED_PROXY_HOPS: String(hops) } : {});

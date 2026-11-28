@@ -14,10 +14,10 @@
 // than 32 characters or with fewer than 10 distinct characters refuses live
 // data outright (503).
 //
-// Failed attempts — and ONLY failed attempts — are counted per client IP with
-// the standard-tier sliding window, through ONE shared accounting used by every
-// route that checks live-data auth (rows / findings / health / sources /
-// v1 connectors). Over the limit, requests that would otherwise be 401 get 429;
+// Failed attempts — and ONLY failed attempts — are counted per client IP (IPv6
+// by /64, like the engagement sign-in throttle) with the standard-tier sliding
+// window, through ONE shared accounting used by every route that checks
+// live-data auth (rows / findings / health / sources / v1 connectors). Over the limit, requests that would otherwise be 401 get 429;
 // a request presenting a VALID token always passes (a lockout is never a
 // denial of service for the legitimate holder). The client IP is the SOCKET
 // address (IPv4-mapped IPv6 normalized); X-Forwarded-For is client-controlled
@@ -94,6 +94,17 @@ export function clientIp(req: NextApiRequest, env: LiveDataEnv = process.env): s
   return entries.length >= hops ? normalizeIp(entries[entries.length - hops]) : socketIp;
 }
 
+/** IPv6 addresses are keyed by their /64 (one subscriber); anything unparsable (IPv4, 'unknown') stays as is. */
+export function v6Prefix(ip: string): string {
+  const [h, t = ''] = ip.split('::');
+  const part = (s: string) => (s ? s.split(':').flatMap((x) => (x.includes('.') ? ['0', '0'] : [x])) : []);
+  const head = part(h);
+  const tail = ip.includes('::') ? part(t) : [];
+  const all = ip.includes('::') ? [...head, ...Array(Math.max(0, 8 - head.length - tail.length)).fill('0'), ...tail] : head;
+  if (all.length !== 8 || !all.every((x) => /^[0-9a-f]{1,4}$/i.test(x))) return ip;
+  return `${all.slice(0, 4).map((x) => parseInt(x, 16).toString(16)).join(':')}::/64`;
+}
+
 let warnedUntrustedXff = false;
 
 /**
@@ -119,7 +130,7 @@ function warnUntrustedXff(req: NextApiRequest, env: LiveDataEnv): void {
 
 // --- shared failed-auth accounting ----------------------------------------------
 
-// Counts FAILED authentications only, per client IP. Process-wide.
+// Counts FAILED authentications only, per client IP (IPv6 by /64). Process-wide.
 const failedAuth = new SlidingWindowRateLimiter(STANDARD_TIER_LIMIT, WINDOW_MS);
 
 export type LiveAuthResult =
@@ -154,7 +165,7 @@ export function evaluateLiveDataAuth(
   const auth = requireLiveDataAuth(header, env);
   if (auth.ok) return { kind: 'ok' };
 
-  const ip = clientIp(req, env);
+  const ip = v6Prefix(clientIp(req, env));
   const state = failedAuth.peek(ip);
   if (!state.allowed) return { kind: 'throttled', retryAfterSec: state.retryAfterSec };
   failedAuth.take(ip);
