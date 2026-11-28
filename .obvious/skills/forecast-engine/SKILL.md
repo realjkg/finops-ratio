@@ -1,6 +1,6 @@
 ---
 name: forecast-engine
-description: Ratio's spend-forecast routine — daily (peak-aware) and monthly (weighted-7d) projections, 80% confidence interval, and days-until-budget-breach. Keep formulas exact.
+description: Ratio's spend-forecast routine — daily (peak-aware) and monthly (planned-allocation) projections, 80% confidence interval, and days-until-budget-breach. Keep formulas exact.
 version: 1.0.0
 triggers:
   - forecast
@@ -47,18 +47,15 @@ else:
 If the daily forecast projects hitting the kill threshold (100% of daily budget)
 before end of business, raise an immediate forecast alert.
 
-## 2. Monthly forecast (weighted 7-day average — default method)
+## 2. Monthly forecast (planned allocation — what `projectMonthlySpend` computes)
+
+The month-end projection is month-to-date spend plus the PLANNED daily
+allocation for the days that remain. It is not a 7-day average of actual spend:
+a spike in recent daily spend does not change it until that spend accrues into
+`spend_mtd`. Its method label is `planned_allocation`.
 
 ```
-avg_daily_7d  = sum(daily_spend[last 7 days]) / 7
 remaining_days = days_in_month - current_day
-projected_eom  = spend_mtd + (avg_daily_7d * remaining_days)
-```
-
-When the daily allocation profile distinguishes weekday vs weekend spend, prefer
-the weekday/weekend mix over a flat average:
-
-```
 remaining_weekdays = count_weekdays(today, end_of_month)
 remaining_weekends = remaining_days - remaining_weekdays
 projected_eom = spend_mtd
@@ -66,7 +63,18 @@ projected_eom = spend_mtd
   + (daily_allocation.weekend * remaining_weekends)
 ```
 
-Forecast methods: `linear`, `weighted_avg_7d` (default), `exponential_smoothing`.
+The average of actual spend over the last 7 days (`avg_daily_7d`) is still computed
+(`avgDaily7d`) and feeds days-until-breach (§4); no screen shows it. It divides by the number of days
+available, up to 7 (a history of `[70]` averages 70), and is 0 for an empty history:
+
+```
+last7        = daily_spend[last 7 days]          // fewer if the history is shorter
+avg_daily_7d = len(last7) > 0 ? sum(last7) / len(last7) : 0
+```
+
+Forecast method labels: `planned_allocation` (the only one implemented). `linear`,
+`weighted_avg_7d` and `exponential_smoothing` are declared but not implemented; the
+seed budgets' `forecast_method` setting is not read.
 
 ## 3. Confidence interval (80%, z = 1.28)
 

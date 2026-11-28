@@ -54,8 +54,11 @@ export interface MonthlyForecast {
   projectedEom: number;
 }
 
-// §6.2 — weighted 7-day average, adjusted for the weekday/weekend mix of the
-// days that actually remain in the month.
+// Month-end projection from the PLANNED allocation: month-to-date spend plus the
+// allocation's weekday and weekend amounts for the days that remain. Actual
+// spend history does not move it (a spike moves spendMtd only once it accrues).
+// The 7-day average of actual spend is computed for days-until-breach; it is not
+// the projection method, so the result is labeled planned_allocation.
 export function projectMonthlySpend(input: MonthlyForecastInput): MonthlyForecast {
   const { spendMtd, dailySpendHistory, allocation, currentDay, daysInMonth, remainingWeekdays } =
     input;
@@ -71,7 +74,7 @@ export function projectMonthlySpend(input: MonthlyForecastInput): MonthlyForecas
     allocation.weekday * remainingWeekdays +
     allocation.weekend * remainingWeekends;
 
-  return { method: 'weighted_avg_7d', avgDaily7d, remainingDays, projectedEom };
+  return { method: 'planned_allocation', avgDaily7d, remainingDays, projectedEom };
 }
 
 // §6.3 — 80% confidence interval (z = 1.28) from 14-day spend volatility.

@@ -166,7 +166,7 @@ Target product direction promoted from the *UI Design Direction* snapshot (ephem
 | Skill | Purpose | Path |
 |---|---|---|
 | `local-dev` | Start and validate the local Ratio Next.js frontend. | `.obvious/skills/local-dev/SKILL.md` |
-| `forecast-engine` | Daily (peak-aware) & monthly (weighted-7d) spend forecast, 80% confidence interval, days-until-breach. | `.obvious/skills/forecast-engine/SKILL.md` |
+| `forecast-engine` | Daily (peak-aware) & monthly (planned-allocation) spend forecast, 80% confidence interval, days-until-breach. | `.obvious/skills/forecast-engine/SKILL.md` |
 | `agent-prompt` | Ratio Agent system-prompt structure, 5 non-negotiable principles, dynamic-injection blocks, capabilities. | `.obvious/skills/agent-prompt/SKILL.md` |
 | `cost-reporting` | Automated daily (08:00 UTC) & weekly (Mon 08:00 UTC) + on-demand cost report contents and cadence. | `.obvious/skills/cost-reporting/SKILL.md` |
 | `observability-deploy` | Prometheus/Grafana zero-trust observability topology, metric schema, rules, SSO/mTLS, K8s + Docker deployment. | `.obvious/skills/observability-deploy/SKILL.md` |
