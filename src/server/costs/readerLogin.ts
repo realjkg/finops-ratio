@@ -98,10 +98,6 @@ export async function readerLoginReport(client: Queryable): Promise<{ problems: 
   return { problems, reasons };
 }
 
-export async function readerLoginProblems(client: Queryable): Promise<string[]> {
-  return (await readerLoginReport(client)).problems;
-}
-
 /** Throws UnsafeReaderLoginError (before anything is read) unless the connection is a safe reader identity. */
 export async function assertSafeReaderLogin(client: Queryable): Promise<void> {
   const { problems, reasons } = await readerLoginReport(client);
