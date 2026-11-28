@@ -1,4 +1,4 @@
-// Hello slice public API — mirrors src/agent/index.ts.
+// Hello slice public API — mirrors src/ai/index.ts.
 import { LiveHelloClient } from './LiveHelloClient';
 import { MockHelloClient } from './MockHelloClient';
 import type { HelloClient } from './HelloClient';

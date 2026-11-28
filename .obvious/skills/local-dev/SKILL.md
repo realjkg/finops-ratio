@@ -19,7 +19,7 @@ created: 2026-06-25
 - npm v10.8.2 was verified with `npm --version`.
 - Package manager: npm, selected from `package-lock.json`.
 - No Docker services, databases, queues, auth provider, or required backend are needed for Phase 1 local development.
-- Optional environment variable: `NEXT_PUBLIC_ANTHROPIC_API_KEY`. Leave it empty to use the default data-grounded mock agent.
+- No environment variable is required. The default (`AI_PROVIDER=mock`, `NEXT_PUBLIC_AI_MODE=mock`) uses the data-grounded `MockAIClient`.
 
 ## Install
 
@@ -39,10 +39,14 @@ Optional live-agent mode:
 
 ```bash
 cp .env.example .env.local
-# Then set NEXT_PUBLIC_ANTHROPIC_API_KEY if live Claude responses are needed.
+# Then, for live Claude responses, set AI_PROVIDER=claude, ANTHROPIC_API_KEY and
+# RATIO_API_TOKEN, all server-side only. The provider and key are read in
+# pages/api/v1/ai/chat.ts, and the token by the gateway (src/server/gateway/auth.ts).
 ```
 
-If `NEXT_PUBLIC_ANTHROPIC_API_KEY` is unset, the app still works fully using `MockAgentClient`.
+With a live provider, gateway auth is always on (outside local simulation mode it is on anyway): `/api/v1/ai/chat` requires `Authorization: Bearer <RATIO_API_TOKEN>`. The browser `LiveAIClient` (`NEXT_PUBLIC_AI_MODE=live`) sends no token, so the chat panel gets a 401 in this setup. In 1.0.0 the browser chat panel is mock-only; live mode is unavailable. Call the route directly with the token from a trusted server-side client instead. Never put the token in a `NEXT_PUBLIC_*` variable.
+
+With `NEXT_PUBLIC_AI_MODE` unset or `mock`, the app still works fully using `MockAIClient`.
 
 ## Start Commands
 

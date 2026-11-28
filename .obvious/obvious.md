@@ -12,7 +12,7 @@ See `.obvious/codebase-map.md`.
 - Use npm, not pnpm/yarn/bun, because `package-lock.json` is present and `npm install` was verified.
 - Do not run the full `typecheck` script in this sandbox; it exists as `npm run typecheck` (`tsc --noEmit`) and CI can run it.
 - No backend, auth, database, Docker service, or required secret is needed for local development.
-- `NEXT_PUBLIC_ANTHROPIC_API_KEY` is optional. Without it, the app uses the data-grounded mock agent and remains fully runnable.
+- No AI key is needed. By default (`AI_PROVIDER=mock`, `NEXT_PUBLIC_AI_MODE=mock`) the app uses the data-grounded `MockAIClient` and remains fully runnable. For live answers, set `NEXT_PUBLIC_AI_MODE=live` and the server-side `AI_PROVIDER` plus that provider's key (for Claude, `AI_PROVIDER=claude` and `ANTHROPIC_API_KEY`), read only by `pages/api/v1/ai/chat.ts`. With a live provider, gateway auth is always on (outside local simulation mode it is on anyway), so the route requires `Authorization: Bearer <RATIO_API_TOKEN>`. `LiveAIClient` sends no token, so the in-browser panel in live mode gets a 401. **In 1.0.0 the browser chat panel is mock-only; live mode is unavailable**, and the gateway token is never sent to the browser. A trusted server-side client can call the route with the token. Never put an API key or `RATIO_API_TOKEN` in a `NEXT_PUBLIC_*` variable: those reach the browser.
 - Keep app code changes scoped under `src/` unless build tooling or docs need updates. Do not commit generated `dist/` or `.obvious-install/` evidence files.
 - the design specs are point-in-time, session-based documents and should be kept as ephemeral artifacts in obvious.
 
@@ -204,10 +204,10 @@ This is a client-side Next.js/React app. All core computation runs locally over 
 | Surface | Network required? | Chaos monkey behaviour |
 |---|---|---|
 | Workload list, all detail tabs, forecast, KPI cards | No | Fully offline — pure local computation over seed data. |
-| Agent panel — **mock mode** (no `NEXT_PUBLIC_ANTHROPIC_API_KEY`) | No | Fully offline — `MockAgentClient` uses only in-memory calculations. |
-| Agent panel — **live mode** (`NEXT_PUBLIC_ANTHROPIC_API_KEY` set) | Yes (Anthropic API) | `sendMessage` in `useStore` wraps the call in `try/catch`. A network failure causes `fetch()` to throw; the catch block appends an inline `system` chat message (`Agent error: Failed to fetch`). No stack trace is exposed; the rest of the UI remains interactive. There is no automatic fallback to mock mode on live-mode failure — that is a known Phase 1 gap. |
+| Agent panel — **mock mode** (`NEXT_PUBLIC_AI_MODE` unset or `mock`) | No | Fully offline — `MockAIClient` uses only in-memory calculations. |
+| Agent panel — **live mode** (`NEXT_PUBLIC_AI_MODE=live`) | Yes (`/api/v1/ai/chat`, which calls the provider named by the server-side `AI_PROVIDER`) | `sendAIMessage` in `useStore` wraps the call in `try/catch`. A network failure makes `LiveAIClient` throw; the catch block appends an inline `system` chat message (`AI error: AI chat unreachable: …`). No stack trace is exposed; the rest of the UI remains interactive. There is no automatic fallback to mock mode on live-mode failure — that is a known Phase 1 gap. |
 
-**Short answer:** mock mode (the default) is fully offline and safe under any network disruption. Live mode degrades gracefully to a chat error message, not a stack trace. The Phase 1 enhancement path is to auto-fallback to `MockAgentClient` when a `LiveAgentClient` call fails.
+**Short answer:** mock mode (the default) is fully offline and safe under any network disruption. Live mode degrades gracefully to a chat error message, not a stack trace. The Phase 1 enhancement path is to auto-fallback to `MockAIClient` when a `LiveAIClient` call fails.
 
 ## Sandbox Snapshot
 
