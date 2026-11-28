@@ -56,7 +56,6 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
-    "@eslint/eslintrc": "^3.3.5",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.1",
     "@testing-library/dom": "^10.4.2",
