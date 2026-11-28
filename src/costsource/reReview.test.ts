@@ -149,6 +149,21 @@ describe('M2 valid tokens are never throttled; weak tokens refuse live data', ()
     expect((await hit(rows, req(q, { authorization: 'Bearer wrong' }, '203.0.113.1'))).statusCode).toBe(429);
   }, 60_000);
 
+  it('IPv6 failures are counted per /64: 1000 spread over one /64 throttle its next address, not another /64 (S2)', async () => {
+    process.env.RATIO_API_TOKEN = TOKEN;
+    process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(CSV)));
+    const rows = await handlerOf(ROWS);
+    const q = { sourceId: 'kubernetes', ...JUNE };
+    const wrong = { authorization: 'Bearer wrong' };
+    for (let i = 0; i < 1000; i += 1) {
+      expect((await hit(rows, req(q, wrong, `2001:db8:1:2::${(i + 1).toString(16)}`))).statusCode).toBe(401);
+    }
+    expect((await hit(rows, req(q, wrong, '2001:db8:1:2:ffff:ffff:ffff:ffff'))).statusCode).toBe(429);
+    expect((await hit(rows, req(q, wrong, '2001:db8:1:3::1'))).statusCode).toBe(401);
+    expect((await hit(rows, req(q, { authorization: `Bearer ${TOKEN}` }, '2001:db8:1:2::1'))).statusCode).toBe(200);
+  }, 60_000);
+
   it('a configured RATIO_API_TOKEN shorter than 32 characters ⇒ 503 for live data; sandbox unaffected', async () => {
     process.env.RATIO_API_TOKEN = 'short-token';
     process.env.KUBERNETES_FOCUS_ENDPOINT = 'https://opencost.internal/focus';
@@ -294,6 +309,29 @@ describe('LOW limiter hygiene', () => {
     const { clientIp } = await import('@/server/gateway/liveDataAuth');
     expect(clientIp(req({}, {}, '::ffff:203.0.113.5'), {})).toBe('203.0.113.5');
     expect(clientIp(req({}, {}, '2001:db8::1'), {})).toBe('2001:db8::1');
+  });
+
+  it('every IPv4-mapped spelling keys as its own IPv4 client, never one shared /64 bucket', async () => {
+    const { clientIp, v6Prefix } = await import('@/server/gateway/liveDataAuth');
+    const key = (ip: string) => {
+      const c = clientIp(req({}, {}, ip), {});
+      return c.includes(':') ? v6Prefix(c) : c;
+    };
+    expect(key('::ffff:c000:20a')).toBe('192.0.2.10');
+    expect(key('::ffff:c000:20b')).toBe('192.0.2.11');
+    expect(key('0:0:0:0:0:ffff:c000:20a')).toBe('192.0.2.10');
+    expect(key('0000:0000:0000:0000:0000:FFFF:192.0.2.10')).toBe('192.0.2.10');
+    expect(key('::FFFF:192.0.2.10')).toBe('192.0.2.10');
+    expect(key('::ffff:c000:20a')).not.toBe(key('::ffff:c000:20b'));
+    expect(key('2001:db8:1:2::1')).toBe('2001:db8:1:2::/64');
+    // Partially compressed forms (Copilot, challenger): parsed as groups, not matched as text.
+    expect(key('0:0::ffff:c000:20a')).toBe('192.0.2.10');
+    expect(key('0::ffff:192.0.2.10')).toBe('192.0.2.10');
+    expect(key('::0:ffff:c000:20b')).toBe('192.0.2.11');
+    // Not mapped, or not valid: never rewritten into some other client's key.
+    expect(key('::ffff:999.1.1.1')).toBe('::ffff:999.1.1.1');
+    expect(v6Prefix('2001:db8::1:2::3')).toBe('2001:db8::1:2::3');
+    expect(v6Prefix('fe80::1%eth0')).toBe('fe80::1%eth0');
   });
 
   it('a missing socket address is counted under "unknown" but never blocks a valid token', async () => {

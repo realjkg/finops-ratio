@@ -215,6 +215,16 @@ describe('GET /api/auth/session and POST /api/auth/logout', () => {
     }
   });
 
+  it('a session store failure logs its redacted cause once per request; the response stays fixed (E3)', async () => {
+    store.close();
+    const warns = vi.mocked(console.warn);
+    warns.mockClear();
+    const r = await session('a'.repeat(64));
+    expect([r.statusCode, r.body]).toEqual([503, { error: { code: 'session_store_unavailable', message: AUTH_MESSAGES.unavailable } }]);
+    const lines = warns.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(lines).toEqual([expect.objectContaining({ event: 'client_error_detail', status: 503, path: '/api/auth/x', error: expect.stringMatching(/database is not open/) })]);
+  });
+
   it('a throwing or rejecting audit sink never changes the response', async () => {
     const r = await call(createLoginRoute({ ...deps(), audit: () => { throw new Error('SINK'); } }), req({ method: 'POST', body: { username: 'v', password: pw.v } }));
     expect(r.statusCode).toBe(200);
@@ -302,6 +312,18 @@ describe('A3 hardening: client identity behind the proxy, throttle table, scrypt
     const boom = createLoginRoute({ ...deps(), gate, authenticate: async () => { throw new Error('lookup failed'); } });
     for (let i = 0; i < 3; i += 1) expect((await call(boom, req({ method: 'POST', body: { username: 'v', password: pw.v } }))).statusCode).toBe(500);
     expect((await call(createLoginRoute({ ...deps(), gate }), req({ method: 'POST', body: { username: '  V ', password: pw.v } }))).statusCode).toBe(200);
+  });
+
+  it('an unexpected failure is the same fixed 500 and is logged, redacted, with a requestId (E1)', async () => {
+    const boom = createLoginRoute({ ...deps(), authenticate: async () => { throw new Error('lookup failed: Bearer synthetic0123456789token'); } });
+    const errors = vi.mocked(console.error);
+    errors.mockClear();
+    const r = await call(boom, req({ method: 'POST', body: { username: 'v', password: pw.v } }));
+    expect([r.statusCode, r.body]).toEqual([500, { error: { code: 'internal_error', message: 'Internal error' } }]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    const line = JSON.parse(String(errors.mock.calls[0][0])) as Record<string, unknown>;
+    expect(line).toMatchObject({ event: 'unhandled_error', method: 'POST', path: '/api/auth/x', status: 500, error: 'lookup failed: Bearer [REDACTED]' });
+    expect(line.requestId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it(`at most ${MAX_CONCURRENT_LOGINS} sign-ins do scrypt work at once; the next is 503 with Retry-After and an audit event`, async () => {

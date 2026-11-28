@@ -262,7 +262,7 @@ distinct characters: a weaker configured `RATIO_API_TOKEN` refuses live cost dat
 with 503 (sandbox sources are unaffected; the AI chat / change-management gateway
 still accepts it but logs a one-time warning). Failed authentications — on rows, findings,
 health, `/api/costsource/sources` and `/api/v1/connectors` alike — share one
-count per client IP; after 1,000 in a minute that client's further failed
+count per client IP (an IPv6 client by its /64); after 1,000 in a minute that client's further failed
 attempts get 429, while a request with the valid token always passes. The client
 IP is the socket address; `X-Forwarded-For` is ignored unless `RATIO_TRUSTED_PROXY_HOPS=N`
 (integer ≥ 1) declares N trusted proxies, in which case the Nth entry from the

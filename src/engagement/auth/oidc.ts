@@ -20,6 +20,7 @@ import type { NextApiHandler, NextApiRequest, NextApiResponse } from 'next';
 import * as oidc from 'openid-client';
 import { engagementConfigFromEnv, engagementMode } from '@/engagement/config';
 import { sendError } from '@/server/gateway/withGateway';
+import { logClientErrorDetail, logInternalError } from '@/server/gateway/internalError';
 import { SlidingWindowRateLimiter } from '@/server/gateway/rateLimit';
 import { signInClient } from './routes';
 import { runAuditHook } from './authz';
@@ -47,21 +48,21 @@ export class OidcTransactionStore {
       this.db = new DatabaseSync(filename);
       this.db.exec(`PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS oidc_transactions (hash TEXT PRIMARY KEY,
         connection_id TEXT NOT NULL, state TEXT NOT NULL, nonce TEXT NOT NULL, verifier TEXT NOT NULL, expires INTEGER NOT NULL);`);
-    } catch { throw new SessionStoreError(); }
+    } catch (cause) { throw new SessionStoreError({ cause }); }
   }
   create(connectionId: string, now: number) {
     const t = { token: randomBytes(32).toString('hex'), state: oidc.randomState(), nonce: oidc.randomNonce(), verifier: oidc.randomPKCECodeVerifier() };
     try {
       this.db.prepare('DELETE FROM oidc_transactions WHERE expires<=?').run(now);
       this.db.prepare('INSERT INTO oidc_transactions VALUES (?,?,?,?,?,?)').run(sha256(t.token), connectionId, t.state, t.nonce, t.verifier, now + TX_TTL_MS);
-    } catch { throw new SessionStoreError(); }
+    } catch (cause) { throw new SessionStoreError({ cause }); }
     return t;
   }
   /** The transaction of this token, deleted in the same statement (single use), or null. */
   consume(token: string, now: number): { connectionId: string; state: string; nonce: string; verifier: string } | null {
     if (!/^[a-f0-9]{64}$/.test(token)) return null;
     let row: Record<string, unknown> | undefined;
-    try { row = this.db.prepare('DELETE FROM oidc_transactions WHERE hash=? RETURNING *').get(sha256(token)) as Record<string, unknown> | undefined; } catch { throw new SessionStoreError(); }
+    try { row = this.db.prepare('DELETE FROM oidc_transactions WHERE hash=? RETURNING *').get(sha256(token)) as Record<string, unknown> | undefined; } catch (cause) { throw new SessionStoreError({ cause }); }
     return row && Number(row.expires) > now ? { connectionId: String(row.connection_id), state: String(row.state), nonce: String(row.nonce), verifier: String(row.verifier) } : null;
   }
 }
@@ -99,8 +100,11 @@ function route(action: 'oidc_start' | 'oidc_callback', deps: OidcRouteDeps, body
         audit: (status, id) => runAuditHook(sink, { event: 'auth', action, outcome: status < 400 ? 'success' : 'denied', status, principalKind: id ? 'user' : 'none', principalId: id ?? null, ...instance }) });
     } catch (e) {
       if (res.headersSent) return;
-      if (e instanceof SessionStoreError) return sendError(res, 503, 'session_store_unavailable', 'Sign-in is temporarily unavailable');
-      console.error('{"event":"oidc_route_failed"}');
+      if (e instanceof SessionStoreError) {
+        logClientErrorDetail(503, e.cause, { method: req.method, path: req.url });
+        return sendError(res, 503, 'session_store_unavailable', 'Sign-in is temporarily unavailable');
+      }
+      logInternalError(e, { method: req.method, path: req.url }); // redacted; the caller still gets only the fixed message
       sendError(res, 500, 'internal_error', 'Internal error');
     }
   };
@@ -136,7 +140,10 @@ export function createOidcStartRoute(deps: OidcRouteDeps = {}): NextApiHandler {
     const secret = ctx.env[conn.clientSecretRef];
     if (!secret) { sendError(res, 503, 'not_configured', 'Sign-in is not configured on this server'); return ctx.audit(503); }
     let config: oidc.Configuration;
-    try { config = await configFor(conn, secret, deps, ctx.now); } catch { sendError(res, 503, 'idp_unavailable', 'The identity provider is unavailable'); return ctx.audit(503); }
+    try { config = await configFor(conn, secret, deps, ctx.now); } catch (e) {
+      logClientErrorDetail(503, e, { method: req.method, path: req.url });
+      sendError(res, 503, 'idp_unavailable', 'The identity provider is unavailable'); return ctx.audit(503);
+    }
     const t = ctx.txs.create(conn.id, ctx.now);
     const url = oidc.buildAuthorizationUrl(config, {
       redirect_uri: callbackUrl(ctx.origin), scope: 'openid', state: t.state, nonce: t.nonce,
@@ -164,7 +171,8 @@ export function createOidcCallbackRoute(deps: OidcRouteDeps = {}): NextApiHandle
       const current = new URL(callbackUrl(ctx.origin));
       current.search = new URL(req.url ?? '', ctx.origin).search;
       claims = (await oidc.authorizationCodeGrant(config, current, { pkceCodeVerifier: tx.verifier, expectedState: tx.state, expectedNonce: tx.nonce, idTokenExpected: true })).claims();
-    } catch {
+    } catch (e) {
+      logClientErrorDetail(401, e, { method: req.method, path: req.url }); // IdP misconfiguration, clock skew and attacks stay distinguishable in the log
       return fail(401, 'unauthorized', FAILED);
     }
     if (!claims || typeof claims.sub !== 'string' || claims.iss !== conn.issuer) return fail(401, 'unauthorized', FAILED);

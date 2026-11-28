@@ -14,10 +14,10 @@
 // than 32 characters or with fewer than 10 distinct characters refuses live
 // data outright (503).
 //
-// Failed attempts — and ONLY failed attempts — are counted per client IP with
-// the standard-tier sliding window, through ONE shared accounting used by every
-// route that checks live-data auth (rows / findings / health / sources /
-// v1 connectors). Over the limit, requests that would otherwise be 401 get 429;
+// Failed attempts — and ONLY failed attempts — are counted per client IP (IPv6
+// by /64, like the engagement sign-in throttle) with the standard-tier sliding
+// window, through ONE shared accounting used by every route that checks
+// live-data auth (rows / findings / health / sources / v1 connectors). Over the limit, requests that would otherwise be 401 get 429;
 // a request presenting a VALID token always passes (a lockout is never a
 // denial of service for the legitimate holder). The client IP is the SOCKET
 // address (IPv4-mapped IPv6 normalized); X-Forwarded-For is client-controlled
@@ -26,7 +26,9 @@
 // is per process (each serverless instance counts on its own); a shared store
 // is a deployment item.
 
+import { isIP } from 'node:net';
 import type { NextApiRequest, NextApiResponse } from 'next';
+import { ipv6Groups } from '@/engagement/auth/safeFetch';
 import { isOfflineSandboxSource, OFFLINE_SANDBOX_SOURCE_IDS } from '@/costsource/sandboxSources';
 import { checkAuth, isStrongToken, type AuthOutcome } from './auth';
 import { SlidingWindowRateLimiter, STANDARD_TIER_LIMIT, WINDOW_MS } from './rateLimit';
@@ -63,9 +65,15 @@ export function authorizeSourceAccess(
 
 // --- client identity -------------------------------------------------------------
 
+// An IPv4-mapped IPv6 address (::ffff:0:0/96) names an IPv4 client: key it as that
+// IPv4 address in every valid spelling, so mapped clients never share one IPv6 /64
+// bucket. Parsed as groups (not matched as text), so every compression works.
 function normalizeIp(ip: string): string {
-  const m = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(ip);
-  return m ? m[1] : ip;
+  const bare = ip.split('%')[0];
+  if (isIP(bare) !== 6) return ip;
+  const g = ipv6Groups(bare.toLowerCase());
+  if (!(g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff)) return ip;
+  return `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`;
 }
 
 function trustedHops(env: LiveDataEnv): number | null {
@@ -94,6 +102,12 @@ export function clientIp(req: NextApiRequest, env: LiveDataEnv = process.env): s
   return entries.length >= hops ? normalizeIp(entries[entries.length - hops]) : socketIp;
 }
 
+/** IPv6 addresses are keyed by their /64 (one subscriber); anything unparsable (IPv4, 'unknown') stays as is. */
+export function v6Prefix(ip: string): string {
+  if (ip.includes('%') || isIP(ip) !== 6) return ip; // zone-scoped and invalid addresses stay as is
+  return `${ipv6Groups(ip.toLowerCase()).slice(0, 4).map((x) => x.toString(16)).join(':')}::/64`;
+}
+
 let warnedUntrustedXff = false;
 
 /**
@@ -119,7 +133,7 @@ function warnUntrustedXff(req: NextApiRequest, env: LiveDataEnv): void {
 
 // --- shared failed-auth accounting ----------------------------------------------
 
-// Counts FAILED authentications only, per client IP. Process-wide.
+// Counts FAILED authentications only, per client IP (IPv6 by /64). Process-wide.
 const failedAuth = new SlidingWindowRateLimiter(STANDARD_TIER_LIMIT, WINDOW_MS);
 
 export type LiveAuthResult =
@@ -154,7 +168,7 @@ export function evaluateLiveDataAuth(
   const auth = requireLiveDataAuth(header, env);
   if (auth.ok) return { kind: 'ok' };
 
-  const ip = clientIp(req, env);
+  const ip = v6Prefix(clientIp(req, env));
   const state = failedAuth.peek(ip);
   if (!state.allowed) return { kind: 'throttled', retryAfterSec: state.retryAfterSec };
   failedAuth.take(ip);

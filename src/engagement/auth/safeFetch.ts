@@ -23,8 +23,8 @@ function publicV4(ip: string): boolean {
   const n = v4(ip);
   return !V4_BLOCKED.some(([base, bits]) => Math.floor(n / 2 ** (32 - bits)) === Math.floor(v4(base) / 2 ** (32 - bits)));
 }
-/** The eight 16-bit groups of an IPv6 address (an embedded dotted IPv4 tail included). */
-function groups(ip: string): number[] {
+/** The eight 16-bit groups of a valid IPv6 address (an embedded dotted IPv4 tail included). Validate with isIP first. */
+export function ipv6Groups(ip: string): number[] {
   const tail = /(\d+\.\d+\.\d+\.\d+)$/.exec(ip)?.[1];
   const s = tail ? ip.slice(0, -tail.length) + ((v4(tail) >>> 16).toString(16) + ':' + (v4(tail) & 0xffff).toString(16)) : ip;
   const [h, t] = s.split('::');
@@ -39,7 +39,7 @@ export function isPublicAddress(ip: string): boolean {
   const kind = isIP(ip);
   if (kind === 4) return publicV4(ip);
   if (kind !== 6) return false;
-  const g = groups(ip.toLowerCase());
+  const g = ipv6Groups(ip.toLowerCase());
   const embedded = () => `${g[6] >> 8}.${g[6] & 255}.${g[7] >> 8}.${g[7] & 255}`;
   if (g.slice(0, 5).every((x) => x === 0) && g[5] === 0xffff) return publicV4(embedded()); // v4-mapped
   if (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every((x) => x === 0)) return publicV4(embedded()); // NAT64

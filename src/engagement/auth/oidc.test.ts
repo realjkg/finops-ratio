@@ -177,6 +177,51 @@ describe('GET /api/auth/oidc/start', () => {
 });
 
 describe('OidcTransactionStore', () => {
+  it('an unexpected failure is the same fixed 500 and is logged, redacted, with a requestId and no query (E1)', async () => {
+    const errors = vi.mocked(console.error);
+    errors.mockClear();
+    const boom = { ...deps(), transactions: () => { throw new Error('tx store broke at https://idp.example.test/x?code=LEAK'); } };
+    const r = await call(createOidcCallbackRoute(boom), req({ url: '/api/auth/oidc/callback?code=QUERY-LEAK&state=s' }));
+    expect([r.statusCode, r.body]).toEqual([500, { error: { code: 'internal_error', message: 'Internal error' } }]);
+    expect(errors).toHaveBeenCalledTimes(1);
+    const logged = String(errors.mock.calls[0][0]);
+    expect(JSON.parse(logged)).toMatchObject({ event: 'unhandled_error', method: 'GET', path: '/api/auth/oidc/callback', status: 500 });
+    expect(logged).toContain('tx store broke');
+    expect(logged).not.toContain('LEAK');
+  });
+
+  it('a failed code grant is the same 401 and logs its redacted cause (E2)', async () => {
+    const warns = vi.mocked(console.warn);
+    const b = await begin('sub-v');
+    tamper = { nonce: 'not-the-nonce' };
+    warns.mockClear();
+    const r = await finish(b);
+    expect([r.statusCode, (r.body as { error: { code: string } }).error.code]).toEqual([401, 'unauthorized']);
+    const lines = warns.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(lines).toEqual([expect.objectContaining({ event: 'client_error_detail', status: 401, path: '/api/auth/oidc/callback', error: 'unexpected JWT claim value encountered' })]);
+  });
+
+  it('an unreachable IdP is the same 503 and logs its redacted cause (E2)', async () => {
+    const warns = vi.mocked(console.warn);
+    warns.mockClear();
+    idpDown = true;
+    const r = await call(createOidcStartRoute(deps()), req());
+    expect([r.statusCode, (r.body as { error: { code: string } }).error.code]).toEqual([503, 'idp_unavailable']);
+    const lines = warns.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(lines).toEqual([expect.objectContaining({ event: 'client_error_detail', status: 503, path: '/api/auth/oidc/start', error: expect.any(String) })]);
+  });
+
+  it('a transaction store failure is the same 503 and logs its redacted cause (E3)', async () => {
+    const warns = vi.mocked(console.warn);
+    const closed = new OidcTransactionStore(':memory:');
+    (closed as unknown as { db: { close(): void } }).db.close();
+    warns.mockClear();
+    const r = await call(createOidcStartRoute({ ...deps(), transactions: () => closed }), req());
+    expect([r.statusCode, (r.body as { error: { code: string } }).error.code]).toEqual([503, 'session_store_unavailable']);
+    const lines = warns.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(lines).toEqual([expect.objectContaining({ event: 'client_error_detail', status: 503, path: '/api/auth/oidc/start', error: expect.stringMatching(/database is not open/) })]);
+  });
+
   it('a transaction is consumed once and expires after 10 minutes; only the token hash is stored', () => {
     const s = new OidcTransactionStore(':memory:');
     const now = Date.UTC(2026, 10, 1);
