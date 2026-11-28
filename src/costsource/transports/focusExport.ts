@@ -129,7 +129,12 @@ export async function decodeExportBytes(bytes: Uint8Array, name: string): Promis
 
 // --- parsing ----------------------------------------------------------------
 
-/** RFC 4180 CSV → records keyed by header. Handles quotes, escaped quotes, CRLF. */
+/**
+ * RFC 4180 CSV → records keyed by header. Handles quotes, escaped quotes, CRLF.
+ * Strict like the worker's csv-parse (`relax_column_count: false`): a row whose
+ * cell count differs from the header, or an unterminated quoted field, throws a
+ * FIXED message (never the cell contents, which are upstream data).
+ */
 export function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   let field = '';
@@ -165,6 +170,7 @@ export function parseCsv(text: string): Record<string, string>[] {
       field += c;
     }
   }
+  if (inQuotes) throw new Error('export is not valid CSV (unterminated quoted field)');
   if (field !== '' || row.length > 0) {
     row.push(field);
     rows.push(row);
@@ -172,10 +178,13 @@ export function parseCsv(text: string): Record<string, string>[] {
 
   const [header, ...body] = rows.filter((r) => !(r.length === 1 && r[0] === ''));
   if (!header) return [];
-  return body.map((cells) => {
+  return body.map((cells, i) => {
+    if (cells.length !== header.length) {
+      throw new Error(`export is not valid CSV (row ${i + 1} has the wrong number of cells)`);
+    }
     const rec: Record<string, string> = {};
     header.forEach((h, idx) => {
-      rec[h.trim()] = cells[idx] ?? '';
+      rec[h.trim()] = cells[idx];
     });
     return rec;
   });

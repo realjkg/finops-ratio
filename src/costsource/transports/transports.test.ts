@@ -50,6 +50,33 @@ describe('FOCUS export parsing', () => {
     expect(rows[1].ServiceName).toBe('Storage');
   });
 
+  it('rejects a row whose cell count differs from the header, without echoing cells', () => {
+    const extra = 'BilledCost,BillingCurrency\n1.5,USD,EXTRA-CELL-MARKER\n';
+    expect(() => parseCsv(extra)).toThrow('export is not valid CSV (row 1 has the wrong number of cells)');
+    const short = 'BilledCost,BillingCurrency\n1.5,USD\n2\n';
+    expect(() => parseCsv(short)).toThrow('export is not valid CSV (row 2 has the wrong number of cells)');
+    let message = '';
+    try {
+      parseCsv(extra);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).not.toContain('EXTRA-CELL-MARKER');
+  });
+
+  it('rejects an unterminated quoted field at end of input, without echoing it', () => {
+    const csv = 'BilledCost,ChargeDescription\n1.5,"open QUOTE-MARKER\n';
+    expect(() => parseCsv(csv)).toThrow('export is not valid CSV (unterminated quoted field)');
+    expect(() => parseCsv(csv)).not.toThrow(/QUOTE-MARKER/);
+  });
+
+  it('still skips blank lines and accepts a missing trailing newline', () => {
+    expect(parseCsv('a,b\n\n1,2\r\n\r\n3,4')).toEqual([
+      { a: '1', b: '2' },
+      { a: '3', b: '4' },
+    ]);
+  });
+
   it('accepts JSON arrays, common envelopes, and NDJSON', () => {
     expect(parseExportText('[{"BilledCost":1}]')).toHaveLength(1);
     expect(parseExportText('{"rows":[{"BilledCost":1},{"BilledCost":2}]}')).toHaveLength(2);
