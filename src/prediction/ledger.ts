@@ -30,7 +30,7 @@ export const ROLLING_WINDOW = 30;
 /**
  * Default validation window per change type (days). Model switches use 14 days
  * to match the forecast engine's 14-day volatility basis (§6.3) and absorb
- * day-of-week seasonality; the rest use 7 (§6.2 weighted_avg_7d).
+ * day-of-week seasonality; the rest use 7 (the forecast engine's 7-day average, §6.2).
  */
 export const VALIDATION_WINDOW_DAYS: Record<ChangeType, number> = {
   model_switch: 14,

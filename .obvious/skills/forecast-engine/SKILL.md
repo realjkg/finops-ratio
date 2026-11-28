@@ -1,6 +1,6 @@
 ---
 name: forecast-engine
-description: Ratio's spend-forecast routine — daily (peak-aware) and monthly (weighted-7d) projections, 80% confidence interval, and days-until-budget-breach. Keep formulas exact.
+description: Ratio's spend-forecast routine — daily (peak-aware) and monthly (planned-allocation) projections, 80% confidence interval, and days-until-budget-breach. Keep formulas exact.
 version: 1.0.0
 triggers:
   - forecast
@@ -64,7 +64,7 @@ projected_eom = spend_mtd
 ```
 
 The average of actual spend over the last 7 days (`avg_daily_7d`) is still computed
-and shown, and it feeds days-until-breach (§4). It divides by the number of days
+(`avgDaily7d`) and feeds days-until-breach (§4); no screen shows it. It divides by the number of days
 available, up to 7 (a history of `[70]` averages 70), and is 0 for an empty history:
 
 ```
