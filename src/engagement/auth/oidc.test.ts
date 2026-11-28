@@ -211,6 +211,17 @@ describe('OidcTransactionStore', () => {
     expect(lines).toEqual([expect.objectContaining({ event: 'client_error_detail', status: 503, path: '/api/auth/oidc/start', error: expect.any(String) })]);
   });
 
+  it('a transaction store failure is the same 503 and logs its redacted cause (E3)', async () => {
+    const warns = vi.mocked(console.warn);
+    const closed = new OidcTransactionStore(':memory:');
+    (closed as unknown as { db: { close(): void } }).db.close();
+    warns.mockClear();
+    const r = await call(createOidcStartRoute({ ...deps(), transactions: () => closed }), req());
+    expect([r.statusCode, (r.body as { error: { code: string } }).error.code]).toEqual([503, 'session_store_unavailable']);
+    const lines = warns.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(lines).toEqual([expect.objectContaining({ event: 'client_error_detail', status: 503, path: '/api/auth/oidc/start', error: expect.stringMatching(/database is not open/) })]);
+  });
+
   it('a transaction is consumed once and expires after 10 minutes; only the token hash is stored', () => {
     const s = new OidcTransactionStore(':memory:');
     const now = Date.UTC(2026, 10, 1);

@@ -110,7 +110,10 @@ describe('EngagementSessionStore', () => {
     fs.writeFileSync(blocker, 'x');
     const bad = path.join(blocker, 'sessions.sqlite');
     expect(() => new EngagementSessionStore(bad)).toThrow(SessionStoreError);
-    try { new EngagementSessionStore(bad); } catch (e) { expect((e as Error).message).toBe('session store unavailable'); }
+    try { new EngagementSessionStore(bad); } catch (e) {
+      expect((e as Error).message).toBe('session store unavailable');
+      expect((e as Error).cause).toBeInstanceOf(Error); // kept for the server log, never in the message
+    }
     const s = mem();
     s.close();
     expect(() => s.create(P, T0)).toThrow(new SessionStoreError());

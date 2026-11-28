@@ -21,17 +21,18 @@ export interface SessionBinding { userId: string; tenantId: string; engagementId
 export interface SessionRecord extends SessionBinding { createdAt: number; lastSeenAt: number; expiresAt: number }
 
 export class SessionStoreError extends Error {
-  constructor() {
-    super('session store unavailable');
+  /** `cause` keeps the driver error for the server log; the message stays fixed. */
+  constructor(options?: ErrorOptions) {
+    super('session store unavailable', options);
     this.name = 'SessionStoreError';
   }
 }
 
 const TOKEN_RE = /^[a-f0-9]{64}$/;
 const sha256 = (v: string) => createHash('sha256').update(v).digest('hex');
-/** Runs a storage operation; any failure becomes the fixed SessionStoreError (no path, SQL or driver text). */
+/** Runs a storage operation; any failure becomes the fixed SessionStoreError (no path, SQL or driver text), its cause the driver error. */
 function guarded<T>(fn: () => T): T {
-  try { return fn(); } catch { throw new SessionStoreError(); }
+  try { return fn(); } catch (cause) { throw cause instanceof SessionStoreError ? cause : new SessionStoreError({ cause }); }
 }
 
 export class EngagementSessionStore {

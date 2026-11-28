@@ -215,6 +215,16 @@ describe('GET /api/auth/session and POST /api/auth/logout', () => {
     }
   });
 
+  it('a session store failure logs its redacted cause once per request; the response stays fixed (E3)', async () => {
+    store.close();
+    const warns = vi.mocked(console.warn);
+    warns.mockClear();
+    const r = await session('a'.repeat(64));
+    expect([r.statusCode, r.body]).toEqual([503, { error: { code: 'session_store_unavailable', message: AUTH_MESSAGES.unavailable } }]);
+    const lines = warns.mock.calls.map((c) => JSON.parse(String(c[0])) as Record<string, unknown>);
+    expect(lines).toEqual([expect.objectContaining({ event: 'client_error_detail', status: 503, path: '/api/auth/x', error: expect.stringMatching(/database is not open/) })]);
+  });
+
   it('a throwing or rejecting audit sink never changes the response', async () => {
     const r = await call(createLoginRoute({ ...deps(), audit: () => { throw new Error('SINK'); } }), req({ method: 'POST', body: { username: 'v', password: pw.v } }));
     expect(r.statusCode).toBe(200);
