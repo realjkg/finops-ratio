@@ -106,8 +106,6 @@ export interface LandingSummary {
   /** BilledCost summed per currency — never mixed into one figure. */
   costByCurrency: Record<string, number>;
   backfilledColumns: string[];
-  /** FOCUS 1.5 model and token labels read from top-level columns (absent on older runs → none). */
-  aiPropertiesFromTopLevelColumns: string[];
   sourceVersion: string;
   canonicalVersion: string;
 }
@@ -131,7 +129,6 @@ export function landingSummary(run: IngestRun): LandingSummary {
     findings: run.findings.length,
     costByCurrency,
     backfilledColumns: run.result.backfilledColumns,
-    aiPropertiesFromTopLevelColumns: run.result.aiPropertiesFromTopLevelColumns ?? [],
     sourceVersion: run.result.sourceVersion,
     canonicalVersion: run.result.canonicalVersion,
   };

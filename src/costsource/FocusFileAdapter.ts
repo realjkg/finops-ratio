@@ -43,7 +43,7 @@ export class FocusFileAdapter {
     sourceId: string,
     window: CostWindow,
   ): CostRowsResult {
-    const { rows: canonicalRows, backfilledColumns, draftColumnsBackfilled, aiPropertiesFromTopLevelColumns } = normalizeRows(
+    const { rows: canonicalRows, backfilledColumns, draftColumnsBackfilled } = normalizeRows(
       rows,
       sourceId,
       version,
@@ -54,7 +54,6 @@ export class FocusFileAdapter {
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
       draftColumnsBackfilled,
-      aiPropertiesFromTopLevelColumns,
       window,
       generatedAt: new Date().toISOString(),
       rows: canonicalRows,

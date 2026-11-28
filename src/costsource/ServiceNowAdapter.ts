@@ -45,7 +45,6 @@ export class ServiceNowAdapter {
       rows: canonicalRows,
       backfilledColumns,
       draftColumnsBackfilled,
-      aiPropertiesFromTopLevelColumns,
     } = normalizeRows(rows, sourceId, version);
     return {
       sourceId,
@@ -53,7 +52,6 @@ export class ServiceNowAdapter {
       canonicalVersion: CANONICAL_FOCUS_VERSION,
       backfilledColumns,
       draftColumnsBackfilled,
-      aiPropertiesFromTopLevelColumns,
       window,
       generatedAt: new Date().toISOString(),
       rows: canonicalRows,
