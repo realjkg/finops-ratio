@@ -69,7 +69,7 @@ describe('migration economics (defaults)', () => {
     const t = await last([Q]);
     expect(t).toContain('Assumptions (illustrative, not data');
     expect(t).toContain(`$${DEFAULTS.gpuHourlyUsd.toFixed(2)} per GPU-hour`);
-    expect(t).toContain('50% utilisation');
+    expect(t).toContain('50% utilization');
     expect(t).toContain('1,000 tokens/s per GPU');
     expect(t).toContain('730 hours/month');
     expect(t).toContain('25% ops overhead');

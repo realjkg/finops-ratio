@@ -92,7 +92,7 @@ export function parseOverrides(text: string): ParsedOverrides {
   const util = new RegExp(`${NUM}\\s{0,2}%\\s{0,2}(?:gpu\\s{0,2})?utili[sz]ation|utili[sz]ation[^\\d-]{0,12}?${NUM}\\s{0,2}%`, 'i').exec(text);
   if (util) {
     const v = toNumber(util[1] ?? util[2]) / 100;
-    if (!(v > 0 && v <= 1)) ignored.push(`Utilisation ignored: "${tok(util[1] ?? util[2])}%" is not in (0, 100]; using the default.`);
+    if (!(v > 0 && v <= 1)) ignored.push(`Utilization ignored: "${tok(util[1] ?? util[2])}%" is not in (0, 100]; using the default.`);
     else overrides.utilisation = v;
   }
 
